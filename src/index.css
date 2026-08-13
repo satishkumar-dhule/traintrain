@@ -1,0 +1,23 @@
+@import "tailwindcss";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+.invert-colors {
+  filter: invert(1) hue-rotate(180deg);
+  background-color: #000;
+}
+
+.invert-colors img,
+.invert-colors video,
+.invert-colors .exclude-invert {
+  filter: invert(1) hue-rotate(180deg);
+}
+
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.hide-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}

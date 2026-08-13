@@ -1,0 +1,306 @@
+[
+  {
+    "number": "12951",
+    "name": "RAJDHANI EXP"
+  },
+  {
+    "number": "12952",
+    "name": "RAJDHANI EXP"
+  },
+  {
+    "number": "12953",
+    "name": "AK TEJAS RAJ EX"
+  },
+  {
+    "number": "12954",
+    "name": "AK TEJAS RAJ EX"
+  },
+  {
+    "number": "12004",
+    "name": "SHATABDI EXP"
+  },
+  {
+    "number": "12003",
+    "name": "SHATABDI EXP"
+  },
+  {
+    "number": "12229",
+    "name": "LUCKNOW MAIL"
+  },
+  {
+    "number": "12230",
+    "name": "LUCKNOW MAIL"
+  },
+  {
+    "number": "12909",
+    "name": "GARIB RATH"
+  },
+  {
+    "number": "12910",
+    "name": "GARIB RATH"
+  },
+  {
+    "number": "12625",
+    "name": "KERALA EXPRESS"
+  },
+  {
+    "number": "12626",
+    "name": "KERALA EXPRESS"
+  },
+  {
+    "number": "12810",
+    "name": "HOWRAH MAIL"
+  },
+  {
+    "number": "12809",
+    "name": "HOWRAH MAIL"
+  },
+  {
+    "number": "11005",
+    "name": "CHALUKYA EXP"
+  },
+  {
+    "number": "11006",
+    "name": "CHALUKYA EXP"
+  },
+  {
+    "number": "12137",
+    "name": "PUNJAB MAIL"
+  },
+  {
+    "number": "12138",
+    "name": "PUNJAB MAIL"
+  },
+  {
+    "number": "12615",
+    "name": "GRAND TRUNK EXP"
+  },
+  {
+    "number": "12616",
+    "name": "GRAND TRUNK EXP"
+  },
+  {
+    "number": "12301",
+    "name": "RAJDHANI EXPRES"
+  },
+  {
+    "number": "12302",
+    "name": "RAJDHANI EXPRES"
+  },
+  {
+    "number": "12423",
+    "name": "RAJDHANI EXP"
+  },
+  {
+    "number": "12424",
+    "name": "RAJDHANI EXP"
+  },
+  {
+    "number": "12273",
+    "name": "DURONTO EXPRESS"
+  },
+  {
+    "number": "12274",
+    "name": "DURONTO EXPRESS"
+  },
+  {
+    "number": "12839",
+    "name": "CHENNAI MAIL"
+  },
+  {
+    "number": "12840",
+    "name": "CHENNAI MAIL"
+  },
+  {
+    "number": "12627",
+    "name": "KARNATAKA EXP"
+  },
+  {
+    "number": "12628",
+    "name": "KARNATAKA EXP"
+  },
+  {
+    "number": "12723",
+    "name": "TELANGANA EXP"
+  },
+  {
+    "number": "12724",
+    "name": "TELANGANA EXP"
+  },
+  {
+    "number": "12433",
+    "name": "RAJDHANI EXP"
+  },
+  {
+    "number": "12434",
+    "name": "RAJDHANI EXP"
+  },
+  {
+    "number": "12213",
+    "name": "DURONTO EXPRESS"
+  },
+  {
+    "number": "12214",
+    "name": "DURONTO EXPRESS"
+  },
+  {
+    "number": "12259",
+    "name": "SEALDAN DURONTO"
+  },
+  {
+    "number": "12260",
+    "name": "SEALDAN DURONTO"
+  },
+  {
+    "number": "12925",
+    "name": "PASCHIM EXPRESS"
+  },
+  {
+    "number": "12926",
+    "name": "PASCHIM EXPRESS"
+  },
+  {
+    "number": "12471",
+    "name": "SWARAJ EXPRESS"
+  },
+  {
+    "number": "12472",
+    "name": "SWARAJ EXPRESS"
+  },
+  {
+    "number": "12129",
+    "name": "AZAD HIND EXP"
+  },
+  {
+    "number": "12130",
+    "name": "AZAD HIND EXP"
+  },
+  {
+    "number": "12409",
+    "name": "GONDWANA EXP"
+  },
+  {
+    "number": "12410",
+    "name": "GONDWANA EXP"
+  },
+  {
+    "number": "12859",
+    "name": "GITANJALI EXP"
+  },
+  {
+    "number": "12860",
+    "name": "GITANJALI EXP"
+  },
+  {
+    "number": "12245",
+    "name": "HOWRAH YPR EXP"
+  },
+  {
+    "number": "12246",
+    "name": "HOWRAH YPR EXP"
+  },
+  {
+    "number": "12637",
+    "name": "PANDIAN EXP"
+  },
+  {
+    "number": "12638",
+    "name": "PANDIAN EXP"
+  },
+  {
+    "number": "12833",
+    "name": "HOWRAH EXP"
+  },
+  {
+    "number": "12834",
+    "name": "HOWRAH EXP"
+  },
+  {
+    "number": "11077",
+    "name": "JHELUM EXP"
+  },
+  {
+    "number": "11078",
+    "name": "JHELUM EXP"
+  },
+  {
+    "number": "12139",
+    "name": "SEVAGRAM EXP"
+  },
+  {
+    "number": "12140",
+    "name": "SEVAGRAM EXP"
+  },
+  {
+    "number": "12779",
+    "name": "GOA EXPRESS"
+  },
+  {
+    "number": "12780",
+    "name": "GOA EXPRESS"
+  },
+  {
+    "number": "12295",
+    "name": "SANGHAMITRA EXP"
+  },
+  {
+    "number": "12296",
+    "name": "SANGHAMITRA EXP"
+  },
+  {
+    "number": "02111",
+    "name": "FESTIVAL SPECIAL"
+  },
+  {
+    "number": "09091",
+    "name": "SUMMER SPECIAL"
+  },
+  {
+    "number": "02185",
+    "name": "FESTIVAL SPECIAL"
+  },
+  {
+    "number": "09044",
+    "name": "SUMMER SPECIAL"
+  },
+  {
+    "number": "02108",
+    "name": "FESTIVAL SPECIAL"
+  },
+  {
+    "number": "09074",
+    "name": "SUMMER SPECIAL"
+  },
+  {
+    "number": "02193",
+    "name": "FESTIVAL SPECIAL"
+  },
+  {
+    "number": "09071",
+    "name": "SUMMER SPECIAL"
+  },
+  {
+    "number": "02149",
+    "name": "FESTIVAL SPECIAL"
+  },
+  {
+    "number": "09041",
+    "name": "SUMMER SPECIAL"
+  },
+  {
+    "number": "02133",
+    "name": "FESTIVAL SPECIAL"
+  },
+  {
+    "number": "09095",
+    "name": "SUMMER SPECIAL"
+  },
+  {
+    "number": "17602",
+    "name": "SGNR KCG EXP"
+  },
+  {
+    "number": "17601",
+    "name": "KCG SGNR EXP"
+  }
+]
