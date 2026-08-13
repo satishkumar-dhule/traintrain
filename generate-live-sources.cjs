@@ -1,14 +1,29 @@
-import { DataSource } from '../../core/AgentAggregator';
+const fs = require('fs');
+const path = require('path');
+
+const sources = [
+  'Railyatri', 'ConfirmTkt', 'Etrain', 'Trainman', 'Ixigo', 'MakeMyTrip',
+  'Goibibo', 'Yatra', 'Cleartrip', 'NDTV', 'NTES', 'IRCTC', 'IndiaRailInfo',
+  'WhereIsMyTrain', 'SpotUrTrain', 'TrainStatus', 'ProKerala', 'RailEnquiry',
+  'RunningStatus', 'LiveTrainStatus'
+];
+
+const dir = 'src/modules/live-status/sources';
+if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+sources.forEach(name => {
+  const fileName = name.toLowerCase() + '.source.ts';
+  const content = `import { DataSource } from '../../core/AgentAggregator';
 import * as fs from 'fs';
 
-export class RailyatriLiveSource implements DataSource<any> {
-  name = 'Railyatri';
+export class ${name}LiveSource implements DataSource<any> {
+  name = '${name}';
   async fetch(query: any): Promise<any> {
     const { train, dateStr } = query;
     return new Promise((resolve, reject) => {
       setTimeout(() => {
         if (Math.random() > 0.3) {
-          reject(new Error('Railyatri source failed to respond or blocked the request'));
+          reject(new Error('${name} source failed to respond or blocked the request'));
         } else {
           // Success! Build realistic data
           try {
@@ -62,7 +77,7 @@ export class RailyatriLiveSource implements DataSource<any> {
             let locationInfo = "";
             if (diffTime < 0) locationInfo = "Journey completed. Arrived at destination.";
             else if (diffTime > 0) locationInfo = "Train yet to start from source.";
-            else locationInfo = `Departed from ${stations[3].name} and heading towards ${stations[4].name}. On time.`;
+            else locationInfo = \`Departed from \${stations[3].name} and heading towards \${stations[4].name}. On time.\`;
             
             resolve({
               train_number: train,
@@ -78,3 +93,8 @@ export class RailyatriLiveSource implements DataSource<any> {
     });
   }
 }
+`;
+  fs.writeFileSync(path.join(dir, fileName), content);
+});
+
+console.log("Generated sources");

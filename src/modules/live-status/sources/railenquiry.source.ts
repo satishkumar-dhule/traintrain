@@ -1,14 +1,14 @@
 import { DataSource } from '../../core/AgentAggregator';
 import * as fs from 'fs';
 
-export class RailyatriLiveSource implements DataSource<any> {
-  name = 'Railyatri';
+export class RailEnquiryLiveSource implements DataSource<any> {
+  name = 'RailEnquiry';
   async fetch(query: any): Promise<any> {
     const { train, dateStr } = query;
     return new Promise((resolve, reject) => {
       setTimeout(() => {
         if (Math.random() > 0.3) {
-          reject(new Error('Railyatri source failed to respond or blocked the request'));
+          reject(new Error('RailEnquiry source failed to respond or blocked the request'));
         } else {
           // Success! Build realistic data
           try {
