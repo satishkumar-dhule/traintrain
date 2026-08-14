@@ -1,0 +1,13 @@
+target/
+.git/
+.github/
+node_modules/
+*.log
+.cache/
+dist/
+*.swp
+*.swo
+*~
+.DS_Store
+.idea/
+.vscode/

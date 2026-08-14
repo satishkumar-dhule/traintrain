@@ -1,0 +1,23 @@
+[Unit]
+Description=Railway enquiry backend (railway-rs)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=railway
+Group=railway
+EnvironmentFile=/etc/railway-rs/railway-rs.env
+WorkingDirectory=/opt/railway-rs
+ExecStart=/opt/railway-rs/railway-rs
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=10
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/railway-rs
+PrivateTmp=true
+ProtectHome=read-only
+
+[Install]
+WantedBy=multi-user.target

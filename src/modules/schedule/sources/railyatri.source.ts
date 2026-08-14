@@ -10,7 +10,8 @@ export class RailyatriScheduleSource implements DataSource<any> {
     const cheerio = await import('cheerio');
     
     const response = await axios.get(`https://www.railyatri.in/time-table/${train}`, {
-      headers: { 'User-Agent': 'Mozilla/5.0' }
+      headers: { 'User-Agent': 'Mozilla/5.0' },
+      timeout: 8000
     });
     
     const $ = cheerio.load(response.data);

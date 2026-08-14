@@ -1,5 +1,3 @@
-import { CaptchaRequiredError } from './errors';
-
 export interface CaptchaContext {
   text: string;
   sessionId: string;
@@ -41,12 +39,9 @@ export class AgentAggregator<T> {
     try {
       return await Promise.any(promises);
     } catch (err: any) {
-      // If all fail, check if at least one requested a CAPTCHA
-      if (err instanceof AggregateError) {
-        const captchaError = err.errors.find(e => e instanceof CaptchaRequiredError || e.name === "CaptchaRequiredError");
-        if (captchaError) {
-          throw captchaError; // Bubble up the captcha challenge to the user
-        }
+      if (err instanceof AggregateError && err.errors.length > 0) {
+        const firstError = err.errors[0];
+        throw new Error(`All ${this.sources.length} sub-agents failed to resolve the query: ${query}. Last error: ${firstError?.message || 'unknown'}`);
       }
       throw new Error(`All ${this.sources.length} sub-agents failed to resolve the query: ${query}`);
     }

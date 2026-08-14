@@ -8,7 +8,8 @@ export class RailyatriPnrSource implements DataSource<any> {
     const cheerio = await import('cheerio');
     
     const response = await axios.get(`https://www.railyatri.in/pnr-status/${pnr}`, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+      timeout: 8000
     });
     
     const $ = cheerio.load(response.data);
@@ -23,11 +24,11 @@ export class RailyatriPnrSource implements DataSource<any> {
     }
 
     // Extract basic train info
-    const trainNameRaw = trainInfoContainer.find('.train-info a span').first().text().replace(/\\s+/g, ' ').trim();
+    const trainNameRaw = trainInfoContainer.find('.train-info a span').first().text().replace(/\s+/g, ' ').trim();
     let trainNumber = "Unknown";
     let trainName = "Unknown";
     if (trainNameRaw) {
-      const match = trainNameRaw.match(/^(\\d+)\\s*(?:‒|-)?\\s*(.+)$/);
+      const match = trainNameRaw.match(/^(\d+)\s*(?:‒|-)?\s*(.+)$/);
       if (match) {
         trainNumber = match[1].trim();
         trainName = match[2].trim();
@@ -53,9 +54,9 @@ export class RailyatriPnrSource implements DataSource<any> {
     $('.PNRPasList').each((_, el) => {
       const cols = $(el).find('.col-xs-4 .statusType');
       if (cols.length >= 3) {
-        let bookingStatus = $(cols[0]).text().replace(/\\s+/g, ' ').trim();
-        let currentStatus = $(cols[1]).text().replace(/\\s+/g, ' ').trim();
-        let coachBerth = $(cols[2]).text().replace(/\\s+/g, ' ').trim();
+        let bookingStatus = $(cols[0]).text().replace(/\s+/g, ' ').trim();
+        let currentStatus = $(cols[1]).text().replace(/\s+/g, ' ').trim();
+        let coachBerth = $(cols[2]).text().replace(/\s+/g, ' ').trim();
         
         let coach = "", berth = "";
         if (coachBerth.includes('/')) {

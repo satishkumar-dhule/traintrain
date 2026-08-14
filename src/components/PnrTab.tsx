@@ -1,44 +1,23 @@
 import React, { useState } from 'react';
-import { Search, AlertCircle, Info, RefreshCw, CheckCircle2, Ticket } from 'lucide-react';
-import { CaptchaContext } from '../core/AgentAggregator';
+import { AlertCircle, CheckCircle2 } from 'lucide-react';
 
 export default function PnrTab() {
   const [pnr, setPnr] = useState('');
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
-  const [captchaRequest, setCaptchaRequest] = useState<any>(null);
-  const [captchaInput, setCaptchaInput] = useState('');
 
-  const handleSearch = async (e: React.FormEvent, submitCaptcha = false) => {
+  const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!submitCaptcha) setCaptchaInput('');
     setLoading(true);
     setError(null);
     setData(null);
 
     try {
-      let url = `/rail-api/pnr?pnr=${pnr}`;
-      if (submitCaptcha && captchaRequest) {
-        url += `&captcha_text=${encodeURIComponent(captchaInput)}&captcha_session=${encodeURIComponent(captchaRequest.sessionId)}&captcha_source=${encodeURIComponent(captchaRequest.source)}`;
-      } else if (!submitCaptcha && captchaRequest) {
-        url += `&captcha_text=REFRESH&captcha_session=${encodeURIComponent(captchaRequest.sessionId)}&captcha_source=${encodeURIComponent(captchaRequest.source)}`;
-      }
-      const res = await fetch(url);
-      
-      if (res.status === 428) {
-        const json = await res.json();
-        setCaptchaRequest({ image: json.image, sessionId: json.sessionId, source: json.source });
-        setLoading(false);
-        return;
-      }
-      
+      const res = await fetch(`/rail-api/pnr?pnr=${pnr}`);
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Failed to fetch PNR status.');
-      
       setData(json);
-      setCaptchaRequest(null);
-      setCaptchaInput('');
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -71,36 +50,6 @@ export default function PnrTab() {
       </div>
 
       <div className="mt-4 md:mt-6 space-y-4">
-        {captchaRequest && (
-          <div className="bg-white p-4 sm:p-6 md:rounded-2xl border-y md:border border-slate-200 shadow-sm">
-            <div className="flex justify-between items-center mb-4">
-               <h3 className="font-bold text-slate-900">Security Check ({captchaRequest.source})</h3>
-               <button type="button" onClick={(e) => handleSearch(e, false)} className="text-blue-600 bg-blue-50 p-2 rounded-full"><RefreshCw className="w-4 h-4" /></button>
-            </div>
-            <div className="bg-slate-100 rounded-xl p-4 flex justify-center mb-4">
-              {captchaRequest.image.startsWith('data:image') || captchaRequest.image.startsWith('http') ? (
-                <img src={captchaRequest.image} alt="CAPTCHA" className="h-16 mix-blend-multiply" />
-              ) : (
-                <div className="font-mono text-2xl font-bold tracking-[0.5em]">{captchaRequest.image}</div>
-              )}
-            </div>
-            <form onSubmit={(e) => handleSearch(e, true)} className="flex gap-2">
-              <input
-                type="text"
-                value={captchaInput}
-                onChange={(e) => setCaptchaInput(e.target.value)}
-                placeholder="Enter characters"
-                className="flex-1 bg-slate-100 text-slate-900 px-4 py-3 rounded-xl font-mono text-lg uppercase focus:outline-none focus:ring-2 focus:ring-blue-500"
-                required
-                autoFocus
-              />
-              <button type="submit" disabled={loading || !captchaInput} className="bg-slate-900 text-white px-6 py-3 rounded-xl font-bold">
-                {loading ? '...' : 'Submit'}
-              </button>
-            </form>
-          </div>
-        )}
-
         {error && (
           <div className="mx-4 md:mx-0 p-4 bg-red-50 border border-red-100 rounded-xl flex items-start gap-3 text-red-700">
             <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />

@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RailCompanion</title>
+  <link rel="stylesheet" href="/styles.css?v=4" />
+</head>
+<body>
+  <div id="app" class="shell">
+    <header class="mobile-header">
+      <div class="brand"><span class="logo">RC</span> RailCompanion</div>
+      <div class="shell-search" id="shell-search">
+        <input id="shell-search-input" class="input" type="text" placeholder="Search station or train…" autocomplete="off" spellcheck="false" aria-label="Search station or train" />
+        <div id="shell-search-menu" class="ac-menu hidden"></div>
+      </div>
+      <span id="mode-badge" class="badge badge-blue hidden">live</span>
+    </header>
+
+    <div class="layout">
+      <aside class="sidebar">
+        <div class="brand brand-lg"><span class="logo">RC</span> <span>RailCompanion</span></div>
+        <nav id="side-nav" class="side-nav"></nav>
+        <div class="sidebar-footer">
+          <div class="source-box">
+            <p class="source-label">Data Mode</p>
+            <p class="source-value"><span class="dot"></span> Live Integrated</p>
+          </div>
+        </div>
+      </aside>
+
+      <main id="main" class="main">
+        <div id="tab-root"></div>
+      </main>
+    </div>
+
+    <nav id="mobile-nav" class="mobile-nav"></nav>
+  </div>
+
+  <script src="/boot.js?v=4"></script>
+  <script src="/ui.js?v=4"></script>
+  <script src="/api.js?v=4"></script>
+  <script src="/tabs/pnr.js?v=4"></script>
+  <script src="/tabs/schedule.js?v=4"></script>
+  <script src="/tabs/stations.js?v=4"></script>
+  <script src="/tabs/live_status.js?v=4"></script>
+  <script src="/tabs/live_station.js?v=4"></script>
+  <script src="/tabs/trains_between.js?v=4"></script>
+  <script src="/tabs/exceptional.js?v=4"></script>
+  <script src="/tabs/settings.js?v=4"></script>
+  <script src="/tabs/observability.js?v=4"></script>
+  <script src="/app.js?v=4"></script>
+</body>
+</html>
