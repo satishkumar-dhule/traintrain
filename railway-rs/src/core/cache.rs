@@ -4,6 +4,8 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
+use crate::core::metrics::SharedMetrics;
+
 /// A minimal TTL cache for upstream responses (KISS: a `HashMap` guarded by a
 /// `Mutex`, entries expire lazily on read and are swept on write).
 ///
@@ -13,6 +15,7 @@ use serde_json::Value;
 pub struct Cache {
     ttl: Duration,
     inner: Mutex<HashMap<String, Entry>>,
+    metrics: Option<SharedMetrics>,
 }
 
 #[derive(Debug)]
@@ -23,21 +26,41 @@ struct Entry {
 
 impl Cache {
     pub fn new(ttl: Duration) -> Self {
+        Self::with_metrics(ttl, None)
+    }
+
+    /// Build a cache that records hit/miss counters into shared metrics
+    /// (used by the observability dashboards and Prometheus `/metrics`).
+    pub fn with_metrics(ttl: Duration, metrics: Option<SharedMetrics>) -> Self {
         Self {
             ttl,
             inner: Mutex::new(HashMap::new()),
+            metrics,
         }
     }
 
     pub fn get(&self, key: &str) -> Option<Value> {
         let mut map = self.inner.lock().ok()?;
         match map.get(key) {
-            Some(e) if e.expires_at > Instant::now() => Some(e.value.clone()),
+            Some(e) if e.expires_at > Instant::now() => {
+                if let Some(m) = &self.metrics {
+                    m.record_cache_hit();
+                }
+                Some(e.value.clone())
+            }
             Some(_) => {
+                if let Some(m) = &self.metrics {
+                    m.record_cache_miss();
+                }
                 map.remove(key);
                 None
             }
-            None => None,
+            None => {
+                if let Some(m) = &self.metrics {
+                    m.record_cache_miss();
+                }
+                None
+            }
         }
     }
 

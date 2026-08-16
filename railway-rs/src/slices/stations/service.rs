@@ -4,9 +4,11 @@ use crate::state::AppState;
 pub struct Service;
 
 impl Service {
-    /// Case-insensitive substring search over real station code/name.
+    /// Case-insensitive IntelliSense search over the pre-warmed station dataset.
     pub fn search(state: &AppState, query: &str, limit: usize) -> Vec<Station> {
-        crate::data::filter_stations(&state.datasets.stations, query, limit)
+        state
+            .datasets
+            .search_stations(query, limit)
             .into_iter()
             .map(|s| Station {
                 code: s.code,

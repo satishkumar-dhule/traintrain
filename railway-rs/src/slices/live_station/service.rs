@@ -23,7 +23,12 @@ impl Service {
         }
 
         let start = Instant::now();
-        let data = state.ntes.station_live(station, hours).await;
+        let name = state
+            .datasets
+            .station_name(station)
+            .unwrap_or(station)
+            .to_string();
+        let data = state.ntes_web.live_station(station, &name, hours).await;
         state.metrics.record_source_latency("ntes", start.elapsed());
         let data = data?;
 

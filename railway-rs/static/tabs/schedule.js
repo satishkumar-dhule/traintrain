@@ -10,11 +10,15 @@ window.Tabs.schedule = {
 
   mount(root, ctx) {
     const ui = ctx.ui;
-    const header = ui.card('Train Schedule', ui.el('p', { class: 'text-sm muted', text: 'Live timetable from Railyatri.' }));
+    const header = ui.card('Train Schedule', ui.el('p', { class: 'text-sm muted', text: 'Live timetable from NTES (enquiry.indianrail.gov.in), with Railyatri as fallback.' }));
 
-    const input = ui.el('input', { class: 'input', autocomplete: 'off', placeholder: 'e.g. 12002' });
+    const input = ui.el('input', { class: 'input', autocomplete: 'off', placeholder: 'e.g. 12002 or SHATABDI' });
     const submit = ui.el('button', { class: 'btn', text: 'Get Schedule' });
     const form = ui.card('', ui.label('Train Number'), input, ui.el('div', { class: 'mt-8' }, submit));
+
+    /* IntelliSense: pick a train by number or name over the pre-warmed local
+       list; the input is filled with the real number before submitting. */
+    ctx.autocomplete.attach(input, { type: 'train' });
 
     const results = ui.el('div');
 

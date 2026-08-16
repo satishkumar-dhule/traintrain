@@ -2,10 +2,11 @@
 //!
 //! Endpoint: `GET /rail-api/ntes/trains-between?src=<CODE>&dst=<CODE>`
 //!
-//! Live source: NTES mobile API `TrainBtwStnJson` (see
-//! `crate::core::ntes::NtesClient::trains_between`) with payload
-//! `stnFrom=<SRC>&stnTo=<DST>&trainType=XXX`. The endpoint returns an empty
-//! body from the sandbox - propagate `AppError::SourceUnavailable` honestly.
+//! Live source: NTES public web form `TrainsBetweenStation` (see
+//! `crate::core::ntes::NtesWebClient::trains_between`): a session + CSRF are
+//! bootstrapped from `/mntes/` and the form is submitted to `/mntes/q` with
+//! `jFromStationInput=<CODE - NAME>&jToStationInput=<CODE - NAME>`. The HTML
+//! table is parsed into the mobile-shape `trainBtwStationList` JSON.
 //!
 //! Response list key is `trainBtwStationList` (community shape may also use
 //! `trainList`); each entry maps to a `BetweenTrain` (`runs_on` is a 7-bool
@@ -25,6 +26,7 @@ use serde::Deserialize;
 
 use crate::core::error::AppError;
 use crate::models::TrainsBetweenResponse;
+use crate::slices::station_codes::{normalize_code, require_station};
 use crate::state::AppState;
 
 pub mod service;
@@ -43,8 +45,8 @@ async fn trains_between_handler(
     State(state): State<AppState>,
     Query(q): Query<TbQuery>,
 ) -> Result<Json<TrainsBetweenResponse>, AppError> {
-    let src = normalize(q.src.as_deref());
-    let dst = normalize(q.dst.as_deref());
+    let src = normalize_code(q.src.as_deref());
+    let dst = normalize_code(q.dst.as_deref());
 
     if src.is_empty() {
         return Err(AppError::bad_request(
@@ -56,48 +58,13 @@ async fn trains_between_handler(
             "Missing required query parameter: dst",
         ));
     }
-    if !is_valid_code(&src) {
-        return Err(AppError::bad_request(format!(
-            "Invalid station code: {src}"
-        )));
-    }
-    if !is_valid_code(&dst) {
-        return Err(AppError::bad_request(format!(
-            "Invalid station code: {dst}"
-        )));
-    }
     if src == dst {
         return Err(AppError::bad_request("Source and destination must differ."));
     }
-    if !code_known(&state, &src) {
-        return Err(AppError::bad_request(format!("Station {src} not found.")));
-    }
-    if !code_known(&state, &dst) {
-        return Err(AppError::bad_request(format!("Station {dst} not found.")));
-    }
+    require_station(&state, Some(&src), "src")?;
+    require_station(&state, Some(&dst), "dst")?;
 
     Ok(Json(
         service::Service::get_trains_between(&state, &src, &dst).await?,
     ))
-}
-
-fn normalize(code: Option<&str>) -> String {
-    code.unwrap_or_default().trim().to_uppercase()
-}
-
-fn is_valid_code(code: &str) -> bool {
-    code.len() == 4 && code.chars().all(|c| c.is_ascii_alphanumeric())
-}
-
-fn code_known(state: &AppState, code: &str) -> bool {
-    state
-        .datasets
-        .stations
-        .iter()
-        .any(|s| s.code.eq_ignore_ascii_case(code))
-        || state.datasets.trains.iter().any(|t| {
-            t.name
-                .split_whitespace()
-                .any(|tok| tok.trim_matches('-').eq_ignore_ascii_case(code))
-        })
 }

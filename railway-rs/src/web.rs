@@ -36,7 +36,15 @@ pub fn router(state: AppState, static_dir: PathBuf) -> Router {
         .merge(slices::live_status::router())
         .merge(slices::live_station::router())
         .merge(slices::trains_between::router())
+        .merge(slices::availability::router())
+        .merge(slices::chart::router())
         .merge(slices::exceptional::router())
+        .merge(slices::station_timetable::router())
+        .merge(slices::average_delay::router())
+        .merge(slices::heritage::router())
+        .merge(slices::parcel::router())
+        .merge(slices::journey_basis::router())
+        .merge(slices::train_on_map::router())
         .merge(slices::stations::router())
         .merge(slices::search::router())
         .merge(slices::observability::router())
@@ -63,15 +71,23 @@ async fn api_404() -> impl IntoResponse {
     )
 }
 
-/// Record per-request path counters, in-flight count and latency. Applied once
-/// at the top level so every route (including static) is counted.
+/// Record per-request path counters, in-flight count, status code, latency and
+/// Prometheus telemetry. Applied once at the top level so every route
+/// (including static) is counted.
 async fn metrics_mw(State(state): State<AppState>, req: Request, next: Next) -> Response {
     let _guard: RequestGuard<'_> = state.metrics.begin_request();
+    let method = req.method().clone();
     let path = req.uri().path().to_string();
     state.metrics.record_path(&path);
     let start = Instant::now();
     let res = next.run(req).await;
-    state.metrics.record_request_latency(start.elapsed());
+    let status = res.status().as_u16();
+    let elapsed = start.elapsed();
+    state.metrics.record_status(status);
+    state.metrics.record_request_latency(elapsed);
+    state
+        .telemetry
+        .record_http(method.as_str(), &path, status, elapsed);
     res
 }
 

@@ -2,10 +2,12 @@
 //!
 //! Endpoint: `GET /rail-api/ntes/live-station?station=<CODE>&hours=<1..4>`
 //!
-//! Live source: NTES mobile API `TrainsAtStationJson` (see
-//! `crate::core::ntes::NtesClient::station_live`) with payload
-//! `jStation=<CODE>&nHr=<hours>&jToStation=`. The endpoint returns an empty
-//! body from the sandbox - propagate `AppError::SourceUnavailable` honestly,
+//! Live source: NTES public web form `LiveStation` (see
+//! `crate::core::ntes::NtesWebClient::live_station`): a session is bootstrapped
+//! from `/mntes/`, a CSRF token is fetched, and the form is submitted to
+//! `/mntes/q` with `jStation=<CODE>&jStnName=<NAME>&nHr=<hours>`. The HTML
+//! table is parsed into the mobile-shape `trainList` JSON. When the form is
+//! unreachable the endpoint propagates `AppError::SourceUnavailable` honestly -
 //! never fabricate trains.
 //!
 //! Success model: `crate::models::LiveStationResponse`.

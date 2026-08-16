@@ -2,6 +2,11 @@ mod common;
 
 use common::TestApp;
 
+const EXCP_HTML: &str = r#"<table>
+<tr><th colspan="4">Exceptional Trains</th></tr>
+<tr><td>02951</td><td>MUMBAI RAJDHANI SPL</td><td>2026-08-13</td><td>Track maintenance</td></tr>
+</table>"#;
+
 #[tokio::test]
 async fn bad_type_is_rejected() {
     let app = TestApp::spawn().await;
@@ -25,12 +30,9 @@ async fn missing_type_is_rejected() {
 }
 
 #[tokio::test]
-async fn json_list_maps_to_trains() {
+async fn html_table_maps_to_trains() {
     let app = TestApp::spawn().await;
-    app.mocks["ntes"].route_json(
-        "/q",
-        serde_json::json!({"list": [{"trainNo":"02951","trainName":"MUMBAI RAJDHANI SPL","date":"2026-08-13","reason":"Track maintenance"}]}),
-    );
+    app.mocks["ntes"].ntes_web(EXCP_HTML);
     let (status, body) = app.get("/rail-api/ntes/exceptional?type=cancelled").await;
     assert_eq!(status, 200);
     assert_eq!(body["type"], "cancelled");
@@ -43,15 +45,12 @@ async fn json_list_maps_to_trains() {
 }
 
 #[tokio::test]
-async fn non_json_html_is_honest_source_unavailable() {
-    // The `/q` contract is JSON-only: `NtesWebClient::post_form` refuses a
-    // non-JSON body with `AppError::SourceUnavailable`, so an HTML fragment is
-    // not guessed at - the client surfaces 502.
+async fn shell_page_without_exception_table_is_honest_source_unavailable() {
+    // The web client only trusts a page that carries a parseable exception
+    // table; a nav shell (or any HTML fragment without train rows) is not
+    // guessed at - the client surfaces 502.
     let app = TestApp::spawn().await;
-    app.mocks["ntes"].route_html(
-        "/q",
-        "<table><tr><td>02952</td><td>SPL EXP</td><td>2026-08-13</td><td>line block</td></tr></table>",
-    );
+    app.mocks["ntes"].ntes_web("<table><tr><th>No data</th></tr></table>");
     let (status, body) = app.get("/rail-api/ntes/exceptional?type=cancelled").await;
     assert_eq!(status, 502);
     assert!(body["error"]

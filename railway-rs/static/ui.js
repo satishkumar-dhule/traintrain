@@ -60,7 +60,15 @@ window.UI = (() => {
     const tbody = el('tbody');
     rows.forEach((cells) => {
       const row = el('tr');
-      cells.forEach((c) => row.append(el('td', { html: c })));
+      cells.forEach((c) => {
+        const td = el('td');
+        if (c && c.nodeType) {
+          td.append(c);            // DOM node -> append, never stringify
+        } else {
+          td.innerHTML = c === null || c === undefined ? '' : c; // HTML string
+        }
+        row.append(td);
+      });
       tbody.append(row);
     });
     tbl.append(tbody);
@@ -98,50 +106,94 @@ window.UI = (() => {
   return { el, card, badge, errorBox, successBox, notice, spinner, emptyState, table, label, render, withLoading, debounce, fmtTime };
 })();
 
-/* Autocomplete for train / station inputs. Usage:
-   AutoComplete.attach(input, { type: 'train'|'station', onSelect(value), minChars })
-   onSelect receives { code, name, number?, name? } or null on clear. */
+/* Autocomplete / IntelliSense for train and station inputs. Usage:
+   AutoComplete.attach(input, {
+     type: 'train' | 'station' | 'both',  // 'both' uses the combined suggest endpoint
+     onSelect(item),                       // { code, number, name } or null on clear
+     minChars,
+   })
+   Trains match by number and name; stations by code and name. The server keeps
+   both lists pre-warmed, so every keystroke hits the local dataset only. */
 window.AutoComplete = (() => {
-  let active = null;
+  /* One state object per input, keyed through a WeakMap so attach/events and
+     the search closure always share the same menu/highlight/request token. */
+  const states = new WeakMap();
+  function stateOf(input) {
+    let s = states.get(input);
+    if (!s) { s = { token: 0, menu: null, items: [], hl: -1 }; states.set(input, s); }
+    return s;
+  }
 
-  function close() {
-    if (active && active.menu.parentNode) active.menu.remove();
-    active = null;
+  function close(state) {
+    if (state.menu && state.menu.parentNode) state.menu.remove();
+    state.menu = null;
+    state.items = [];
+    state.hl = -1;
   }
 
   function attach(input, { type, onSelect, minChars = 1 }) {
+    const state = stateOf(input);
+    const runSearch = debounceInput(input, () => search(input, type, onSelect), minChars);
+
     input.addEventListener('focus', () => {
-      if (input.value.trim().length >= minChars) search(input, type, onSelect);
+      if (input.value.trim().length >= minChars) runSearch();
     });
-    input.addEventListener('input', debounceInput(input, () => search(input, type, onSelect), minChars));
-    input.addEventListener('blur', () => setTimeout(close, 150));
+    input.addEventListener('input', runSearch);
+    input.addEventListener('blur', () => setTimeout(() => close(state), 150));
+
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { close(state); input.blur(); }
+      else if (e.key === 'ArrowDown' && state.items.length) {
+        e.preventDefault();
+        state.hl = (state.hl + 1) % state.items.length;
+        updateHighlight(state);
+      } else if (e.key === 'ArrowUp' && state.items.length) {
+        e.preventDefault();
+        state.hl = (state.hl - 1 + state.items.length) % state.items.length;
+        updateHighlight(state);
+      } else if (e.key === 'Enter' && state.hl >= 0 && state.items[state.hl]) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        pick(input, state, state.items[state.hl], onSelect);
+      } else if (e.key === 'Tab' && state.hl >= 0 && state.items[state.hl]) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        state.hl = 0;
+        pick(input, state, state.items[state.hl], onSelect);
+      }
+    });
   }
 
   function debounceInput(input, fn, minChars) {
     let t;
     return () => {
       clearTimeout(t);
-      if (input.value.trim().length < minChars) { close(); return; }
-      t = setTimeout(fn, 250);
+      if (input.value.trim().length < minChars) { close(stateOf(input)); return; }
+      t = setTimeout(fn, 220);
     };
   }
 
   async function search(input, type, onSelect) {
+    const state = stateOf(input);
     const q = input.value.trim();
-    if (q.length < 1) { close(); return; }
-    const apiFn = type === 'train' ? window.Api.searchTrains : window.Api.searchStations;
-    const res = await apiFn(q);
-    if (!res || res.ok === false || !Array.isArray(res)) { close(); return; }
-    const items = res.slice(0, 8);
-    close();
-    if (!items.length) return;
+    if (!q) { close(state); return; }
+    const my = ++state.token;
+    const res = type === 'both'
+      ? await window.Api.suggest(q)
+      : type === 'station' ? await window.Api.searchStations(q) : await window.Api.searchTrains(q);
+    if (my !== state.token) return;
+    if (!res || res.ok === false || !Array.isArray(res)) { close(state); return; }
+    close(state);
+    state.items = res.slice(0, 8);
+    state.hl = -1;
+    if (!state.items.length) return;
 
     const wrap = input.closest('.autocomplete') || input.parentElement;
     const menu = window.UI.el('div', { class: 'ac-menu' });
-    items.forEach((item) => {
+    state.items.forEach((item) => {
       const row = window.UI.el('div', {
         class: 'ac-item',
-        onmousedown: (e) => { e.preventDefault(); input.value = item.code || item.number; close(); onSelect(item); },
+        onmousedown: (e) => { e.preventDefault(); pick(input, state, item, onSelect); },
       });
       row.append(
         window.UI.el('span', { class: 'ac-code', text: item.code || item.number }),
@@ -150,7 +202,18 @@ window.AutoComplete = (() => {
       menu.append(row);
     });
     wrap.appendChild(menu);
-    active = { menu };
+    state.menu = menu;
+  }
+
+  function pick(input, state, item, onSelect) {
+    input.value = item.code || item.number;
+    close(state);
+    if (onSelect) onSelect(item);
+  }
+
+  function updateHighlight(state) {
+    if (!state.menu) return;
+    [...state.menu.querySelectorAll('.ac-item')].forEach((r, i) => r.classList.toggle('hl', i === state.hl));
   }
 
   return { attach };

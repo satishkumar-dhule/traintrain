@@ -3,7 +3,6 @@ use std::time::Instant;
 use serde_json::Value;
 
 use crate::core::error::AppError;
-use crate::core::ntes::NtesWebClient;
 use crate::models::{ExceptionalResponse, ExceptionalTrain};
 use crate::state::AppState;
 
@@ -23,9 +22,8 @@ impl Service {
             }
         }
 
-        let web = NtesWebClient::new(&state.http, &state.config.ntes_base);
         let start = Instant::now();
-        let data = web.exceptional(kind).await;
+        let data = state.ntes_web.exceptional(kind).await;
         state.metrics.record_source_latency("ntes", start.elapsed());
         let data = data?;
 

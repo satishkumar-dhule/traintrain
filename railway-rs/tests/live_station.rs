@@ -1,8 +1,46 @@
 mod common;
 
 use common::TestApp;
-use railway_rs::core::ntes::NtesCrypto;
-use serde_json::json;
+
+/// Two trains as the NTES live-station web form renders them: an on-time
+/// through train and a delayed one, plus a platform column.
+const LS_HTML: &str = r#"<table>
+<tr><th colspan="10">28 Trains departing from/arriving at <b>NDLS- NEW DELHI</b> in next 2 Hrs.</th></tr>
+<tr><td nowrap style="width:20px;">1</td>
+  <td align=left nowrap><b>12951</b>&nbsp;|<b> MUMBAI RAJDHANI</b><br>
+    <span class="w3-round w3-blue w3-tiny" onclick="onTrainStatus('12951',document.getElementsByName('frmSTN')[0],'13-Aug-2026')">See Train Status >></span>
+    &nbsp;
+    <span class="w3-round w3-orange w3-tiny" onclick="showTrainServiceSchedule('12951','13-Aug-2026',document.getElementsByName('frmSTN')[0])">Train Schedule >></span>
+  </td>
+  <td nowrap width="130px">
+    <font color="green">09:15</font><br>
+    <span class="w3-round w3-green w3-tiny">On Time</span><br>
+    <font size="1">&nbsp;09:15</font>
+  </td>
+  <td nowrap width="130px">
+    <font color="green">09:15</font><br>
+    <span class="w3-round w3-green w3-tiny">On Time</span><br>
+    <font size="1">&nbsp;09:15</font>
+  </td>
+  <td width="80px"><b>1</b></td>
+</tr>
+<tr><td nowrap style="width:20px;">2</td>
+  <td align=left nowrap><b>12301</b>&nbsp;|<b> RAJDHANI EXP</b><br>
+    <span class="w3-round w3-blue w3-tiny" onclick="onTrainStatus('12301',document.getElementsByName('frmSTN')[0],'13-Aug-2026')">See Train Status >></span>
+  </td>
+  <td nowrap width="130px">
+    <font color="red">10:30</font><br>
+    <span class="w3-round w3-red w3-tiny">30 Mins.</span><br>
+    <font size="1">&nbsp;10:00</font>
+  </td>
+  <td nowrap width="130px">
+    <font color="red">10:30</font><br>
+    <span class="w3-round w3-red w3-tiny">30 Mins.</span><br>
+    <font size="1">&nbsp;10:00</font>
+  </td>
+  <td width="80px"><b>2</b></td>
+</tr>
+</table>"#;
 
 #[tokio::test]
 async fn bad_station_code_is_400() {
@@ -27,11 +65,7 @@ async fn unknown_station_is_400() {
 #[tokio::test]
 async fn live_station_returns_mapped_trains() {
     let app = TestApp::spawn().await;
-    let payload = r#"{"trainList":[{"trainNo":"12951","trainName":"MUMBAI RAJDHANI","scheduledTime":"09:15","expectedTime":"09:15","platformNo":"1","delayArr":false},{"trainNo":"12301","trainName":"RAJDHANI EXP","scheduledTime":"10:00","expectedTime":"10:30","platformNo":"2","delayArr":true}]}"#;
-    app.mocks["ntes"].route_json(
-        "/crisns/AppServAnd",
-        json!({"jsonIn": NtesCrypto::build(payload)}),
-    );
+    app.mocks["ntes"].ntes_web(LS_HTML);
 
     let (status, body) = app
         .get("/rail-api/ntes/live-station?station=NDLS&hours=2")
@@ -54,11 +88,7 @@ async fn live_station_returns_mapped_trains() {
 #[tokio::test]
 async fn hours_are_clamped_into_range() {
     let app = TestApp::spawn().await;
-    let payload = r#"{"trainList":[{"trainNo":"12951","trainName":"MUMBAI RAJDHANI","scheduledTime":"09:15","expectedTime":"09:15","platformNo":"1","delayArr":false}]}"#;
-    app.mocks["ntes"].route_json(
-        "/crisns/AppServAnd",
-        json!({"jsonIn": NtesCrypto::build(payload)}),
-    );
+    app.mocks["ntes"].ntes_web(LS_HTML);
 
     let (status, body) = app
         .get("/rail-api/ntes/live-station?station=NDLS&hours=99")

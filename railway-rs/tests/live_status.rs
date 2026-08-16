@@ -1,18 +1,36 @@
 mod common;
 
 use axum::http::StatusCode;
-use serde_json::json;
 
 use common::TestApp;
-use railway_rs::core::ntes::NtesCrypto;
 
 fn live_fixture() -> String {
     std::fs::read_to_string("testdata/ry_live_12951.html").unwrap()
 }
 
+/// Real NTES "Spot Your Train" popup captured for 12055 (active run 14-Aug).
+fn ntes_spot_train_fixture() -> String {
+    std::fs::read_to_string("testdata/ntes_spot_train_12055.html").unwrap()
+}
+
+/// The nav-shell NTES serves for an unknown train number (no run instances).
+fn ntes_spot_train_unknown_fixture() -> String {
+    std::fs::read_to_string("testdata/ntes_spot_train_unknown.html").unwrap()
+}
+
 fn mock_12951(app: &TestApp) {
     app.mock("railyatri")
         .route_html("/live-train-status/12951", live_fixture());
+}
+
+fn mock_12055_spot_train(app: &TestApp) {
+    let m = &app.mocks["ntes"];
+    m.route_html("/mntes/", "<html><head><title>NTES</title></head></html>");
+    m.route_html(
+        "/mntes/GetCSRFToken",
+        "<input type='hidden' name='csrfToken' value='tok123'>",
+    );
+    m.route_html("/mntes/tr", ntes_spot_train_fixture());
 }
 
 fn fixture_next_station_code() -> String {
@@ -71,6 +89,7 @@ async fn live_status_from_real_fixture() {
 #[tokio::test]
 async fn unknown_train_is_404() {
     let app = TestApp::spawn().await;
+    app.mocks["ntes"].route_html("/mntes/tr", ntes_spot_train_unknown_fixture());
     app.mock("railyatri")
         .route_error("/live-train-status/99999", StatusCode::NOT_FOUND);
 
@@ -93,7 +112,7 @@ async fn upstream_error_is_502() {
 }
 
 #[tokio::test]
-async fn past_date_is_rejected() {
+async fn past_date_is_rejected_on_fallback_path() {
     let app = TestApp::spawn().await;
     mock_12951(&app);
 
@@ -105,37 +124,125 @@ async fn past_date_is_rejected() {
 }
 
 #[tokio::test]
+async fn past_date_is_rejected_on_ntes_path() {
+    let app = TestApp::spawn().await;
+    mock_12055_spot_train(&app);
+
+    let (status, body) = app
+        .get("/rail-api/live-status?train=12055&date=2020-01-01")
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert!(body["error"].as_str().unwrap().contains("today"));
+}
+
+#[tokio::test]
 async fn ntes_is_primary_source_when_reachable() {
     let app = TestApp::spawn().await;
-    let payload = r#"{"trainNo":"12951","trainName":"MUMBAI RAJDHANI","startStationCode":"MMCT","startStationName":"MUMBAI CENTRAL","endStationCode":"NDLS","endStationName":"NEW DELHI","atStationCode":"BVI","atStationName":"BORIVALI","nextStationCode":"BVI","nextStationName":"BORIVALI","platformNumber":"5","trainStartDate":"2026-01-01","stationList":[{"stationCode":"MMCT","stationName":"MUMBAI CENTRAL","arrivalTime":"17:40","actualArrival":"17:40","day":1},{"stationCode":"BVI","stationName":"BORIVALI","arrivalTime":"18:05","actualArrival":"18:15","day":1},{"stationCode":"NDLS","stationName":"NEW DELHI","arrivalTime":"08:32","actualArrival":"","day":2}]}"#;
-    app.mocks["ntes"].route_json(
-        "/crisns/AppServAnd",
-        json!({ "jsonIn": NtesCrypto::build(payload) }),
-    );
+    mock_12055_spot_train(&app);
 
     // Railyatri has no mock route, so a 200 with data_source NTES proves the
     // gov source was used first and no fallback happened.
-    let (status, body) = app.get("/rail-api/live-status?train=12951").await;
+    let (status, body) = app.get("/rail-api/live-status?train=12055").await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["train_number"], "12951");
+    assert_eq!(body["train_number"], "12055");
+    assert_eq!(body["train_name"], "DDN JANSHTBDI");
     assert_eq!(body["data_source"], "NTES");
+    assert_eq!(body["train_start_date"], "14-Aug-2026");
 
-    let stations = body["stations"].as_array().unwrap();
-    assert_eq!(stations.len(), 3);
-    assert_eq!(stations[0]["status"], "departed");
-    assert_eq!(stations[1]["status"], "expected");
-    assert_eq!(stations[2]["status"], "scheduled");
-
-    // NTES real per-stop actuals are surfaced verbatim; missing ones stay empty.
-    assert_eq!(stations[1]["actual_arrival"], "18:15");
-    assert_eq!(stations[2]["actual_arrival"], "");
-    assert_eq!(
-        stations[0]["delay_minutes"], 0,
-        "delay must never be invented"
-    );
-
-    assert!(body["current_location_info"]
+    // All run dates NTES reports for the train are surfaced, like the NTES
+    // "Spot Train (Live Status)" page shows its "Train Instances".
+    let instances = body["instances"].as_array().unwrap();
+    assert_eq!(instances.len(), 5);
+    assert_eq!(instances[1]["start_date"], "14-Aug-2026");
+    assert!(instances[1]["position"]
         .as_str()
         .unwrap()
-        .contains("BORIVALI"));
+        .contains("Departed from GHAZIABAD(GZB)"));
+
+    let location = body["current_location_info"].as_str().unwrap();
+    assert!(
+        location.contains("MEERUT CITY"),
+        "next station drives the location text: {location}"
+    );
+
+    let stations = body["stations"].as_array().unwrap();
+    assert_eq!(stations.len(), 9);
+    assert_eq!(stations[0]["status"], "departed");
+    assert_eq!(stations[1]["status"], "departed");
+    assert_eq!(stations[2]["status"], "expected", "MEERUT CITY is next");
+    assert_eq!(stations[2]["code"], "MTC");
+    assert_eq!(stations[8]["status"], "scheduled");
+
+    // NTES real per-stop actuals are surfaced verbatim and drive honest delay.
+    assert_eq!(stations[1]["code"], "GZB");
+    assert_eq!(stations[1]["actual_arrival"], "15:56");
+    assert_eq!(stations[1]["delay_minutes"], 3, "badge delay from NTES");
+    assert_eq!(
+        stations[2]["actual_arrival"], "",
+        "not reached -> no actual"
+    );
+}
+
+#[tokio::test]
+async fn ntes_web_form_is_posted_with_query_and_csrf() {
+    let app = TestApp::spawn().await;
+    mock_12055_spot_train(&app);
+    app.mocks["ntes"].clear_calls();
+
+    let (status, _body) = app.get("/rail-api/live-status?train=12055").await;
+    assert_eq!(status, StatusCode::OK);
+
+    let calls = app.mocks["ntes"].calls();
+    let paths: Vec<&str> = calls.iter().map(|(p, _)| p.as_str()).collect();
+    // The old mobile API must not be consulted for live status any more.
+    assert!(
+        !paths.iter().any(|p| p.contains("AppServAnd")),
+        "mobile API must not be used: {paths:?}"
+    );
+    let tr_call = calls
+        .iter()
+        .find(|(p, _)| p == "/mntes/tr")
+        .expect("spot-train web form must be posted");
+    assert!(tr_call.0.starts_with("/mntes/tr"));
+    assert!(
+        tr_call.1.contains("lan=en"),
+        "form body must carry the language: {}",
+        tr_call.1
+    );
+    assert!(
+        tr_call.1.contains("csrfToken=tok123"),
+        "form body must carry the CSRF token: {}",
+        tr_call.1
+    );
+}
+
+#[tokio::test]
+async fn ntes_failure_falls_back_to_railyatri() {
+    let app = TestApp::spawn().await;
+    app.mocks["ntes"].route_error("/mntes/tr", StatusCode::INTERNAL_SERVER_ERROR);
+    mock_12951(&app);
+
+    let (status, body) = app.get("/rail-api/live-status?train=12951").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["data_source"], "Railyatri");
+    assert_eq!(body["train_number"], "12951");
+}
+
+#[tokio::test]
+async fn both_sources_down_is_502_naming_each() {
+    let app = TestApp::spawn().await;
+    app.mocks["ntes"].route_error("/mntes/tr", StatusCode::INTERNAL_SERVER_ERROR);
+    app.mock("railyatri").route_error(
+        "/live-train-status/77777",
+        StatusCode::INTERNAL_SERVER_ERROR,
+    );
+
+    let (status, body) = app.get("/rail-api/live-status?train=77777").await;
+    assert_eq!(status, StatusCode::BAD_GATEWAY);
+    let error = body["error"].as_str().unwrap();
+    assert!(error.contains("NTES"), "error names NTES: {error}");
+    assert!(
+        error.contains("Railyatri"),
+        "error names Railyatri: {error}"
+    );
 }

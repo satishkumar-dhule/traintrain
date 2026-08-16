@@ -3,7 +3,31 @@ mod common;
 use serde_json::json;
 
 use common::TestApp;
-use railway_rs::core::ntes::NtesCrypto;
+
+/// Two trains as the NTES trains-between web form renders them (run-days text,
+/// dep/arr times with station names, plus a "See Train Status" marker per row).
+const TBS_HTML: &str = r#"<table>
+<tr><th colspan="9">30 Trains found from NDLS - NEW DELHI to MMCT - MUMBAI CENTRAL</th></tr>
+<tr class="w3-round">
+  <td colspan=3>
+    <span><b>12951</b>&nbsp;&nbsp;MUMBAI RAJDHANI</span><br>
+    <span>Daily | Superfast</span>
+    <span class="w3-round w3-blue" onclick="onTrainStatus('12951',document.getElementsByName('frmTBS')[0],'')">See Train Status >></span>
+    <span style="text-align: left;width: 25%;"><b>17:40</b><br>Mumbai Central<br>MMCT</span>
+    <div style="text-align: center; width: 50%;">--14:52 Hrs.--</div>
+    <span style="text-align: right; width: 25%;"><b>08:32</b><br>New Delhi<br><b>NDLS</b></span>
+  </td>
+</tr>
+<tr class="w3-round">
+  <td colspan=3>
+    <span><b>12954</b>&nbsp;&nbsp;AK GOLD EXP</span><br>
+    <span>Mon Wed Fri | Superfast</span>
+    <span class="w3-round w3-blue" onclick="onTrainStatus('12954',document.getElementsByName('frmTBS')[0],'')">See Train Status >></span>
+    <span style="text-align: left;width: 25%;"><b>20:05</b><br>Mumbai Central<br>MMCT</span>
+    <span style="text-align: right; width: 25%;"><b>10:10</b><br>New Delhi<br><b>NDLS</b></span>
+  </td>
+</tr>
+</table>"#;
 
 #[tokio::test]
 async fn missing_or_empty_params_are_bad_request() {
@@ -62,11 +86,7 @@ async fn unknown_station_is_bad_request() {
 #[tokio::test]
 async fn trains_between_returns_normalized_trains() {
     let app = TestApp::spawn().await;
-    let payload = r#"{"trainBtwStationList":[{"trainNo":"12951","trainName":"MUMBAI RAJDHANI","depTime":"17:40","arrTime":"08:32","runOnMon":true,"runOnTue":true,"runOnWed":true,"runOnThu":true,"runOnFri":true,"runOnSat":true,"runOnSun":true},{"trainNo":"12954","trainName":"AK GOLD EXP","depTime":"20:05","arrTime":"10:10","runOnMon":true,"runOnTue":false,"runOnWed":true,"runOnThu":false,"runOnFri":true,"runOnSat":false,"runOnSun":false}]}"#;
-    app.mocks["ntes"].route_json(
-        "/crisns/AppServAnd",
-        json!({ "jsonIn": NtesCrypto::build(payload) }),
-    );
+    app.mocks["ntes"].ntes_web(TBS_HTML);
 
     let (status, body) = app
         .get("/rail-api/ntes/trains-between?src=MMCT&dst=NDLS")

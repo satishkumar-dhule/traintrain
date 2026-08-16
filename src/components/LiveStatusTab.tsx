@@ -1,25 +1,10 @@
 import AutocompleteInput from './AutocompleteInput';
 import React, { useState } from 'react';
-import { Search, AlertCircle, MapPin, Navigation, Calendar, Server } from 'lucide-react';
+import { Search, AlertCircle, Navigation, Calendar, Server } from 'lucide-react';
 
 export default function LiveStatusTab() {
   const [train, setTrain] = useState('');
-  
-  const getDates = () => {
-    const dates = [];
-    for (let i = -2; i <= 1; i++) {
-      const d = new Date();
-      d.setDate(d.getDate() + i);
-      const val = d.toISOString().split('T')[0];
-      const label = i === 0 ? 'Today' : i === 1 ? 'Tomorrow' : i === -1 ? 'Yesterday' : '2 Days Ago';
-      dates.push({ value: val, label: `${label} (${val})` });
-    }
-    return dates;
-  };
-  const dateOptions = getDates();
-  
-  const [date, setDate] = useState(dateOptions[2].value); // default today
-  
+
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
@@ -31,7 +16,7 @@ export default function LiveStatusTab() {
     setData(null);
     try {
       const trainNo = train.split(' - ')[0].trim();
-      const res = await fetch(`/rail-api/live-status?train=${trainNo}&date=${date}`);
+      const res = await fetch(`/rail-api/live-status?train=${trainNo}`);
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Failed to fetch.');
       setData(json);
@@ -47,22 +32,9 @@ export default function LiveStatusTab() {
       <div className="bg-white border-b border-slate-200 md:border md:rounded-2xl shadow-sm p-4 sticky top-0 md:relative z-40">
         <form onSubmit={handleSearch} className="flex flex-col md:flex-row gap-3">
           <AutocompleteInput type="train" value={train} onChange={setTrain} placeholder="Search Train Name or No." className="flex-1" />
-          
-          <div className="relative md:w-64 flex-shrink-0">
-            <select
-              value={date}
-              onChange={e => setDate(e.target.value)}
-              className="w-full bg-slate-100 text-slate-900 px-4 py-3 rounded-xl font-bold text-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none pl-12"
-            >
-              {dateOptions.map(d => (
-                <option key={d.value} value={d.value}>{d.label}</option>
-              ))}
-            </select>
-            <Calendar className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
-          </div>
 
           <button type="submit" disabled={loading || train.length === 0} className="bg-blue-600 text-white px-6 py-3 rounded-xl font-bold disabled:opacity-50 flex-shrink-0">
-            {loading ? '...' : 'Spot'}
+            {loading ? '...' : 'Spot Train'}
           </button>
         </form>
       </div>
@@ -84,29 +56,63 @@ export default function LiveStatusTab() {
                    <p className="text-slate-300 font-medium">{data.train_name}</p>
                  </div>
                  <div className="text-right">
-                   <p className="text-sm font-bold text-slate-400">Journey Date</p>
-                   <p className="text-lg font-bold text-emerald-400">{date}</p>
+                   <p className="text-sm font-bold text-slate-400">Run Date</p>
+                   <p className="text-lg font-bold text-emerald-400">{data.train_start_date || 'Today'}</p>
                  </div>
                </div>
-               
+
                <div className="mt-4 bg-blue-600/20 border border-blue-500/30 p-4 rounded-xl flex items-start gap-3">
                   <Navigation className="w-5 h-5 text-blue-400 flex-shrink-0 mt-0.5" />
                   <p className="font-bold text-blue-100 text-sm">{data.current_location_info}</p>
                </div>
-               
+
                <div className="mt-3 bg-slate-800 border border-slate-700 p-2.5 rounded-lg flex justify-between items-center">
-                  <p className="text-xs font-bold text-slate-400">Data provided by Google Underground Engine</p>
+                  <p className="text-xs font-bold text-slate-400">Live from NTES (enquiry.indianrail.gov.in), Railyatri fallback</p>
                   <div className="flex items-center gap-1.5">
                      <Server className="w-3.5 h-3.5 text-emerald-400" />
-                     <span className="text-xs font-bold text-slate-300">Origin: <span className="text-emerald-400">{data.data_source || 'Cache'}</span></span>
+                     <span className="text-xs font-bold text-slate-300">Source: <span className="text-emerald-400">{data.data_source || 'Cache'}</span></span>
                   </div>
                </div>
             </div>
+
+            {Array.isArray(data.instances) && data.instances.length > 0 && (
+              <div className="border-b border-slate-100">
+                <div className="p-4 sm:p-5">
+                  <h3 className="text-sm font-black text-slate-500 uppercase tracking-wide mb-3 flex items-center gap-2">
+                    <Calendar className="w-4 h-4" /> Train Instances (dates from NTES)
+                  </h3>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="text-left text-slate-400 text-xs uppercase tracking-wide">
+                          <th className="py-2 pr-4 font-bold">Start Date</th>
+                          <th className="py-2 font-bold">Position</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {data.instances.map((i: any, idx: number) => (
+                          <tr key={idx} className="border-t border-slate-100">
+                            <td className="py-2 pr-4 font-bold text-slate-900">
+                              {i.start_date}
+                              {i.start_date === data.train_start_date && (
+                                <span className="ml-2 text-[10px] font-black uppercase bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded">Current</span>
+                              )}
+                            </td>
+                            <td className="py-2 text-slate-600">{i.position || '-'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
+
             <div className="p-0">
                {data.stations?.map((st: any, i: number) => {
-                 const isPassed = st.status === 'Departed';
-                 const isNext = !isPassed && (i === 0 || data.stations[i-1]?.status === 'Departed');
-                 
+                 const isPassed = st.status === 'departed';
+                 const isNext = !isPassed && (i === 0 || data.stations[i-1]?.status === 'departed');
+
                  return (
                    <div key={i} className={`flex gap-4 p-4 border-b border-slate-100 ${isNext ? 'bg-blue-50/50' : ''}`}>
                       <div className="w-16 flex flex-col items-center relative">

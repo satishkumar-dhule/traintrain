@@ -14,6 +14,7 @@ use std::time::Duration;
 /// - `RAILWAY_SOURCE_ETRAIN_BASE`    (default `https://etrain.info`)
 /// - `RAILWAY_SOURCE_NTES_BASE`      (default `https://enquiry.indianrail.gov.in`)
 /// - `RAILWAY_SOURCE_IR_BASE`        (default `https://www.indianrail.gov.in`)
+/// - `RAILWAY_SOURCE_IRCTC_BASE`     (default `https://www.irctc.co.in`)
 ///
 /// Every source URL is prefixed by these base URLs so tests can point them at
 /// a local mock upstream. Real deployments keep the defaults.
@@ -29,6 +30,7 @@ pub struct Config {
     pub etrain_base: String,
     pub ntes_base: String,
     pub ir_base: String,
+    pub irctc_base: String,
 }
 
 impl Default for Config {
@@ -44,6 +46,7 @@ impl Default for Config {
             etrain_base: "https://etrain.info".to_string(),
             ntes_base: "https://enquiry.indianrail.gov.in".to_string(),
             ir_base: "https://www.indianrail.gov.in".to_string(),
+            irctc_base: "https://www.irctc.co.in".to_string(),
         }
     }
 }
@@ -70,6 +73,7 @@ impl Config {
             etrain_base: std::env::var("RAILWAY_SOURCE_ETRAIN_BASE").unwrap_or(d.etrain_base),
             ntes_base: std::env::var("RAILWAY_SOURCE_NTES_BASE").unwrap_or(d.ntes_base),
             ir_base: std::env::var("RAILWAY_SOURCE_IR_BASE").unwrap_or(d.ir_base),
+            irctc_base: std::env::var("RAILWAY_SOURCE_IRCTC_BASE").unwrap_or(d.irctc_base),
         }
     }
 

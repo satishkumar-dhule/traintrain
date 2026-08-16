@@ -14,7 +14,7 @@ window.Tabs.live_station = {
 
     const header = ui.card('Live Station',
       ui.el('p', { class: 'text-sm muted', text: 'Arrival board for a station (NTES)' }),
-      ui.notice('This source may be unavailable; NTES is not always reachable from this deployment.'),
+      ui.notice('Live data from NTES; the board may be unavailable if NTES blocks this deployment.'),
     );
 
     const codeInput = ui.el('input', { class: 'input', placeholder: 'e.g. NDLS', autocomplete: 'off' });
@@ -69,7 +69,7 @@ window.Tabs.live_station = {
           if (!res || res.ok === false) {
             const msg = res && res.error ? res.error : 'Failed to load live station.';
             const errBox = ui.errorBox(msg);
-            errBox.append(ui.el('p', { class: 'notice', text: 'The NTES mobile endpoint is not reachable from this deployment, so the arrival board is unavailable right now.' }));
+            errBox.append(ui.el('p', { class: 'notice', text: 'NTES did not answer the arrival-board query, so no data is shown right now. Try again in a moment.' }));
             ui.render(results, errBox);
             return;
           }

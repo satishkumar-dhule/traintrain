@@ -71,6 +71,11 @@ impl NtesClient {
     }
 
     /// `ShowFullRunJson` - live position of a running train for a start date.
+    ///
+    /// `start_date` is the run instance's start date in `DD-MMM-YYYY` (e.g.
+    /// `02-May-2026`). Resolve it from `GetTrainInstance`
+    /// (`vInstanceList[].startDate`); an empty value is tolerated but the
+    /// real service usually returns an empty body for it.
     pub async fn live_status(&self, train_no: &str, start_date: &str) -> Result<Value, AppError> {
         self.request(
             "ShowFullRunJson",

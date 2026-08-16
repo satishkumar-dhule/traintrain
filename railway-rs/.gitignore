@@ -1,5 +1,6 @@
 /target/
 /*.log
+/logs/
 .DS_Store
 *.swp
 *.swo

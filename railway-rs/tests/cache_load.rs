@@ -23,7 +23,6 @@ use axum::http::StatusCode;
 use serde_json::{json, Value};
 
 use common::TestApp;
-use railway_rs::core::ntes::NtesCrypto;
 use railway_rs::core::Cache;
 
 // ---------------------------------------------------------------------------
@@ -223,10 +222,14 @@ async fn load_test_train_search_100_concurrent_requests() {
 #[tokio::test]
 async fn cached_slice_serves_second_request_from_cache() {
     let app = TestApp::spawn().await;
-    let payload = r#"{"trainBtwStationList":[{"trainNo":"12951","trainName":"MUMBAI RAJDHANI","depTime":"17:40","arrTime":"08:32","runOnMon":true,"runOnTue":true,"runOnWed":true,"runOnThu":true,"runOnFri":true,"runOnSat":true,"runOnSun":true}]}"#;
-    app.mocks["ntes"].route_json(
-        "/crisns/AppServAnd",
-        json!({ "jsonIn": NtesCrypto::build(payload) }),
+    app.mocks["ntes"].ntes_web(
+        r#"<table><tr class="w3-round"><td colspan=3>
+        <span><b>12951</b>&nbsp;&nbsp;MUMBAI RAJDHANI</span><br>
+        <span>Daily | Superfast</span>
+        <span class="w3-round w3-blue" onclick="onTrainStatus('12951',document.getElementsByName('frmTBS')[0],'')">See Train Status >></span>
+        <span style="text-align: left;width: 25%;"><b>17:40</b><br>Mumbai Central<br>MMCT</span>
+        <span style="text-align: right; width: 25%;"><b>08:32</b><br>New Delhi<br><b>NDLS</b></span>
+        </td></tr></table>"#,
     );
 
     let (s1, body1) = app
@@ -241,7 +244,7 @@ async fn cached_slice_serves_second_request_from_cache() {
     );
 
     // Break the upstream: a cache hit must still serve the second request.
-    app.mocks["ntes"].route_error("/crisns/AppServAnd", StatusCode::INTERNAL_SERVER_ERROR);
+    app.mocks["ntes"].route_error("/mntes/q", StatusCode::INTERNAL_SERVER_ERROR);
 
     let (s2, body2) = app
         .get("/rail-api/ntes/trains-between?src=MMCT&dst=NDLS")

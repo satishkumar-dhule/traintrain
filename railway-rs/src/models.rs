@@ -1,6 +1,6 @@
 //! Wire models for every `/rail-api/*` response. Field names must match the
 //! frontend contract exactly (see `static/app.js`).
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// `GET /healthz`, `GET /api/healthz`
 #[derive(Debug, Serialize)]
@@ -113,12 +113,28 @@ pub struct LiveStatusResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub current_location_info: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub train_start_date: Option<String>,
+    /// All run dates NTES reports for this train (`vInstanceList[].startDate`),
+    /// newest/relevant run first - the same "Train Instances" list the NTES
+    /// Spot Train (Live Status) page shows.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub instances: Option<Vec<TrainInstance>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub data_source: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stations: Option<Vec<LiveStop>>,
 }
 
-#[derive(Debug, Serialize)]
+/// One run instance of a train, as reported by NTES `GetTrainInstance`.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TrainInstance {
+    /// Run start date in NTES `DD-MMM-YYYY` spelling (e.g. `02-May-2026`).
+    pub start_date: String,
+    /// NTES position text for the run (e.g. `Yet to start from its source`).
+    pub position: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct LiveStop {
     pub name: String,
     pub code: String,
@@ -152,7 +168,7 @@ pub struct StationTrain {
 }
 
 /// `GET /rail-api/ntes/trains-between`
-#[derive(Debug, Serialize, Default)]
+#[derive(Debug, Serialize, Deserialize, Default)]
 pub struct TrainsBetweenResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub src: Option<String>,
@@ -164,7 +180,7 @@ pub struct TrainsBetweenResponse {
     pub data_source: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct BetweenTrain {
     pub number: String,
     pub name: String,
@@ -172,6 +188,289 @@ pub struct BetweenTrain {
     pub arrival_time: String,
     /// 7 booleans: [Mon, Tue, Wed, Thu, Fri, Sat, Sun]
     pub runs_on: Vec<bool>,
+}
+
+/// `GET /rail-api/ntes/station-timetable`
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct StationTimetableResponse {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub station: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub station_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub date: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trains: Option<Vec<StationTimetableTrain>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data_source: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct StationTimetableTrain {
+    pub number: String,
+    pub name: String,
+    pub route: String,
+    pub train_type: String,
+    pub classes: String,
+    pub arrival: String,
+    pub departure: String,
+    pub days: String,
+}
+
+/// `GET /rail-api/ntes/average-delay`
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct AverageDelayResponse {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub train_no: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub train_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub days_of_run: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub train_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stations: Option<Vec<AverageDelayStation>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data_source: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct AverageDelayStation {
+    pub sr: String,
+    pub name: String,
+    pub code: String,
+    pub arrival_delay: String,
+    pub departure_delay: String,
+}
+
+/// `GET /rail-api/ntes/heritage`
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct HeritageResponse {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selection: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trains: Option<Vec<HeritageTrain>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data_source: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct HeritageTrain {
+    pub number: String,
+    pub name: String,
+    pub runs: String,
+    pub train_type: String,
+    pub source_time: String,
+    pub source_station: String,
+    pub source_code: String,
+    pub duration: String,
+    pub dest_time: String,
+    pub dest_station: String,
+    pub dest_code: String,
+}
+
+/// `GET /rail-api/ntes/parcel`
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct ParcelResponse {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trains: Option<Vec<ParcelTrain>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data_source: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct ParcelTrain {
+    pub number: String,
+    pub name: String,
+    pub route: String,
+    pub validity_from: String,
+    pub validity_to: String,
+    pub days_of_run: String,
+    pub source_code: String,
+    pub source_time: String,
+    pub dest_code: String,
+    pub dest_time: String,
+    pub travel_time: String,
+}
+
+/// `GET /rail-api/ntes/journey-stations`
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct JourneyStationsResponse {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub train_no: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stations: Option<Vec<JourneyStationInfo>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data_source: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct JourneyStationInfo {
+    pub code: String,
+    pub name: String,
+    pub seq: usize,
+    pub day_change: bool,
+    pub arrival_days: String,
+    pub departure_days: String,
+}
+
+/// `GET /rail-api/ntes/journey-basis`
+///
+/// The same shape as `LiveStatusResponse` (reused verbatim via
+/// `#[serde(flatten)]`) plus the `journey_station` the run was queried from.
+#[derive(Debug, Serialize, Default)]
+pub struct JourneyBasisResponse {
+    #[serde(flatten)]
+    pub status: LiveStatusResponse,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub journey_station: Option<JourneyStationInfo>,
+}
+
+/// `GET /rail-api/ntes/train-on-map`
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct TrainOnMapResponse {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub train_no: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub train_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub destination: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dest_code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_date: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub route: Option<Vec<RouteStation>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub track: Option<Vec<TrackStation>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_station: Option<MapCurrentStation>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub journey_station: Option<MapJourneyStation>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data_source: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Default, Clone)]
+pub struct RouteStation {
+    pub code: String,
+    pub name: String,
+    pub lat: Option<f64>,
+    pub lng: Option<f64>,
+    pub arrival: String,
+    pub departure: String,
+    pub day: String,
+    pub distance: String,
+    pub days_of_run: String,
+    pub expected_arrival: String,
+    pub actual_arrival: String,
+    pub expected_departure: String,
+    pub actual_departure: String,
+    pub arrival_delay: String,
+    pub departure_delay: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct TrackStation {
+    pub code: String,
+    pub lat: Option<f64>,
+    pub lng: Option<f64>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct MapCurrentStation {
+    pub code: String,
+    pub lat: Option<f64>,
+    pub lng: Option<f64>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct MapJourneyStation {
+    pub code: String,
+    pub name: String,
+    pub lat: Option<f64>,
+    pub lng: Option<f64>,
+    pub label: String,
+    pub expected_arrival: String,
+    pub actual_arrival: String,
+    pub delay_status: String,
+    pub platform: String,
+}
+
+/// `GET /rail-api/irctc/availability`
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct AvailabilityResponse {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub src: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dst: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub date: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trains: Option<Vec<AvailabilityTrain>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data_source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notice: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AvailabilityTrain {
+    pub number: String,
+    pub name: String,
+    pub from_code: String,
+    pub from_name: String,
+    pub to_code: String,
+    pub to_name: String,
+    pub departure_time: String,
+    pub arrival_time: String,
+    pub duration: String,
+    pub distance: String,
+    pub classes: Vec<String>,
+    pub train_type: String,
+    /// 7 booleans: [Mon, Tue, Wed, Thu, Fri, Sat, Sun]
+    pub runs_on: Vec<bool>,
+}
+
+/// `GET /rail-api/irctc/chart`
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct ChartResponse {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub train_number: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub train_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub journey_date: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub boarding_station: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub coaches: Option<Vec<ChartCoach>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data_source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notice: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ChartCoach {
+    pub code: String,
+    pub class_code: String,
+    pub berths: Vec<ChartBerth>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ChartBerth {
+    pub number: i64,
+    /// `vacant`, `occupied` or `unknown` (from the upstream status verbatim).
+    pub status: String,
 }
 
 /// `GET /rail-api/ntes/exceptional?type=cancelled|rescheduled|diverted`
@@ -216,6 +515,18 @@ pub struct StationLite {
     pub name: String,
 }
 
+/// `GET /rail-api/search/suggest` (array body) - one combined IntelliSense
+/// autocomplete hit; either a station (`code`) or a train (`number`).
+#[derive(Debug, Serialize)]
+pub struct Suggestion {
+    pub r#type: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub number: Option<String>,
+    pub name: String,
+}
+
 /// `GET /rail-api/observability`
 #[derive(Debug, Serialize)]
 pub struct ObservabilityResponse {
@@ -228,6 +539,10 @@ pub struct ObservabilityResponse {
     pub uptime_secs: u64,
     pub requests_total: u64,
     pub top_paths: Vec<(String, u64)>,
+    pub status_codes: Vec<StatusCode>,
+    pub cache: CacheStats,
+    pub series: SeriesData,
+    pub logs: Vec<crate::core::obs::LogEntryDto>,
 }
 
 #[derive(Debug, Serialize)]
@@ -235,4 +550,52 @@ pub struct OriginStatus {
     pub name: String,
     pub latency: u64,
     pub status: String,
+}
+
+/// HTTP status-code distribution (`2xx/3xx/4xx/5xx` counts).
+#[derive(Debug, Serialize)]
+pub struct StatusCode {
+    pub code: u16,
+    pub count: u64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CacheStats {
+    pub hits: u64,
+    pub misses: u64,
+    pub hit_rate: f64,
+    pub entries: usize,
+}
+
+/// Column-oriented time-series for the dashboard charts. All arrays are
+/// aligned by index with `times` (oldest first).
+#[derive(Debug, Serialize)]
+pub struct SeriesData {
+    pub times: Vec<u64>,
+    pub rps: Vec<f64>,
+    pub latency_ms: Vec<f64>,
+    pub mem_mb: Vec<f64>,
+    pub cpu_frac: Vec<f64>,
+    pub in_flight: Vec<u64>,
+    pub sources: Vec<SourceSeries>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SourceSeries {
+    pub name: String,
+    pub latency_ms: Vec<f64>,
+}
+
+/// `GET /rail-api/logs` query params.
+#[derive(Debug, Deserialize)]
+pub struct LogsQuery {
+    pub limit: Option<usize>,
+    pub level: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct LogsResponse {
+    pub total: usize,
+    pub limit: usize,
+    pub logs: Vec<crate::core::obs::LogEntryDto>,
 }

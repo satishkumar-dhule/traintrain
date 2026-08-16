@@ -51,10 +51,20 @@ window.Api = (() => {
       get(`/rail-api/ntes/live-station?station=${encodeURIComponent(station)}&hours=${hours || 2}`),
     trainsBetween: (src, dst) =>
       get(`/rail-api/ntes/trains-between?src=${encodeURIComponent(src)}&dst=${encodeURIComponent(dst)}`),
+    stationTimetable: (station) => get(`/rail-api/ntes/station-timetable?station=${encodeURIComponent(station)}`),
+    averageDelay: (train) => get(`/rail-api/ntes/average-delay?train=${encodeURIComponent(train)}`),
+    heritage: (selection) => get(`/rail-api/ntes/heritage?selection=${encodeURIComponent(selection ?? 0)}`),
+    parcel: () => get('/rail-api/ntes/parcel'),
+    journeyStations: (train) => get(`/rail-api/ntes/journey-stations?train=${encodeURIComponent(train)}`),
+    journeyBasis: (train, station) => get(`/rail-api/ntes/journey-basis?train=${encodeURIComponent(train)}&station=${encodeURIComponent(station)}`),
+    trainOnMap: (train, station) => get(`/rail-api/ntes/train-on-map?train=${encodeURIComponent(train)}` + (station ? `&station=${encodeURIComponent(station)}` : '')),
     exceptional: (type) => get(`/rail-api/ntes/exceptional?type=${encodeURIComponent(type)}`),
     stations: (q) => get(`/rail-api/stations?q=${encodeURIComponent(q)}`),
     searchTrains: (q) => get(`/rail-api/search/trains?q=${encodeURIComponent(q)}`),
     searchStations: (q) => get(`/rail-api/search/stations?q=${encodeURIComponent(q)}`),
+    suggest: (q) => get(`/rail-api/search/suggest?q=${encodeURIComponent(q)}`),
     observability: () => get('/rail-api/observability'),
+    logs: (limit = 100, level) =>
+      get(`/rail-api/logs?limit=${limit}` + (level ? `&level=${encodeURIComponent(level)}` : '')),
   };
 })();

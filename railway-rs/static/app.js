@@ -9,6 +9,12 @@ window.Tabs = window.Tabs || {};
     { id: 'live_status', label: 'Spot Train', icon: '🚄' },
     { id: 'live_station', label: 'Live Station', icon: '⏱️' },
     { id: 'trains_between', label: 'Trains B/W', icon: '📍' },
+    { id: 'station_timetable', label: 'Station TT', icon: '🗓️' },
+    { id: 'average_delay', label: 'Avg Delay', icon: '⏰' },
+    { id: 'heritage', label: 'Heritage', icon: '🚞' },
+    { id: 'parcel', label: 'Parcel SPL', icon: '📦' },
+    { id: 'journey_basis', label: 'Journey Basis', icon: '🚉' },
+    { id: 'train_on_map', label: 'Train Map', icon: '🗺️' },
     { id: 'schedule', label: 'Schedule', icon: '🚉' },
     { id: 'exceptional', label: 'Exceptional', icon: '⚠️' },
     { id: 'stations', label: 'Stations', icon: '🗺️' },
@@ -100,8 +106,9 @@ window.Tabs = window.Tabs || {};
     },
   };
 
-  /* Header autocomplete: debounced search over both endpoints via Promise.all,
-     guarded against out-of-order responses with a request token. */
+  /* Header autocomplete: debounced IntelliSense over the pre-warmed local
+     datasets via the combined suggest endpoint (stations + trains in one
+     round trip), guarded against out-of-order responses with a request token. */
   function initShellSearch() {
     const wrap = document.getElementById('shell-search');
     const input = document.getElementById('shell-search-input');
@@ -157,17 +164,16 @@ window.Tabs = window.Tabs || {};
       const q = input.value.trim();
       if (!q) { closeMenu(); return; }
       const my = ++token;
-      const [stations, trains] = await Promise.all([
-        window.Api.stations(q),
-        window.Api.searchTrains(q),
-      ]);
+      const suggestions = await window.Api.suggest(q);
       if (my !== token) return;
       items = [];
-      if (Array.isArray(stations)) {
-        stations.slice(0, 5).forEach((s) => items.push({ type: 'station', code: s.code, name: s.name }));
-      }
-      if (Array.isArray(trains)) {
-        trains.slice(0, 5).forEach((t) => items.push({ type: 'train', number: t.number, name: t.name }));
+      if (Array.isArray(suggestions)) {
+        suggestions.forEach((it) => items.push({
+          type: it.type === 'train' ? 'train' : 'station',
+          code: it.code,
+          number: it.number,
+          name: it.name,
+        }));
       }
       hl = -1;
       renderMenu();

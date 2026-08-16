@@ -1,7 +1,11 @@
-//! System endpoints: liveness (`/healthz`, `/api/healthz`) and live source
-//! status (`/rail-api/source-status`). These report real runtime facts only.
+//! System endpoints: liveness (`/healthz`, `/api/healthz`), Prometheus metrics
+//! (`/metrics`) and live source status (`/rail-api/source-status`). These
+//! report real runtime facts only.
 
 use axum::extract::State;
+use axum::http::header;
+use axum::http::HeaderValue;
+use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
 
@@ -13,6 +17,7 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/healthz", get(healthz))
         .route("/api/healthz", get(healthz))
+        .route("/metrics", get(metrics))
         .route("/rail-api/source-status", get(source_status))
 }
 
@@ -22,6 +27,25 @@ async fn healthz() -> Json<Healthz> {
         service: "railway-rs",
         runtime: "rust/axum",
     })
+}
+
+/// Prometheus text-format metrics (v0.0.4). Drop-in for any Prometheus/Grafana
+/// scrape target - the registry lives in `AppState.telemetry`.
+async fn metrics(State(state): State<AppState>) -> Response {
+    let (cpu, mem) = crate::core::obs::proc_stats();
+    let snap = state.metrics.snapshot();
+    state
+        .telemetry
+        .sample(&snap, cpu, mem, state.uptime_secs(), state.cache.len());
+    let body = state.telemetry.encode();
+    (
+        [(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("text/plain; version=0.0.4; charset=utf-8"),
+        )],
+        body,
+    )
+        .into_response()
 }
 
 /// Report which live sources are actually reachable right now. Used by the
@@ -34,6 +58,7 @@ async fn source_status(State(state): State<AppState>) -> Result<Json<SourceStatu
             probe(&state, &state.config.railyatri_base).await,
         ),
         ("etrain", probe(&state, &state.config.etrain_base).await),
+        ("IRCTC", probe(&state, &state.config.irctc_base).await),
     ];
 
     let primary = "NTES (enquiry.indianrail.gov.in)";
@@ -43,6 +68,7 @@ async fn source_status(State(state): State<AppState>) -> Result<Json<SourceStatu
         "https://www.railyatri.in/time-table",
         "https://www.railyatri.in/live-train-status",
         "https://etrain.info",
+        "https://www.irctc.co.in/online-charts",
     ];
 
     Ok(Json(SourceStatus {
@@ -51,7 +77,7 @@ async fn source_status(State(state): State<AppState>) -> Result<Json<SourceStatu
         cache_ttl_seconds: state.config.cache_ttl.as_secs(),
         primary_source: primary.to_string(),
         verification_links,
-        notice: "Live data is fetched first from the official Indian Railways enquiry system (enquiry.indianrail.gov.in), with Railyatri as fallback. PNR status is served from Railyatri because the government PNR portal requires a CAPTCHA. Nothing is simulated."
+        notice: "Live data is fetched first from the official Indian Railways enquiry system (enquiry.indianrail.gov.in), with Railyatri as fallback. PNR status is served from Railyatri because the government PNR portal requires a CAPTCHA. Availability and prepared-chart data come from IRCTC (www.irctc.co.in), which is Akamai-protected and IP-geofenced to India. Nothing is simulated."
             .to_string(),
         sources: sources
             .into_iter()
