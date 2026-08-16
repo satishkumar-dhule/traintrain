@@ -14,11 +14,12 @@
 //! mobile API used to produce (`trainList`, `trainBtwStationList`, `list`), so
 //! the services, cache keys and frontend contract stay unchanged.
 //!
-//! Every query is retried once on a failed session: an empty body or a result
-//! page without the expected table means the session was challenged, so the
-//! cookies + CSRF are re-harvested before the second attempt. Callers must
-//! still propagate `AppError::SourceUnavailable` honestly - never fabricate
-//! train data.
+//! Rejected or challenged responses are recovered in two stages before giving
+//! up: first only the CSRF token is re-fetched against the same session (a
+//! stale/rejected token is answered with an empty `200 OK` while the session
+//! cookies are still valid - verified live on 2026-08-16), then the whole
+//! session (cookies + CSRF) is re-harvested. Callers must still propagate
+//! `AppError::SourceUnavailable` honestly - never fabricate train data.
 
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -304,7 +305,8 @@ pub struct NtesWebClient {
     /// Akamai + session cookies, harvested once from `GET /mntes/` and shared
     /// across clones via `Arc<Mutex<..>>` (same pattern as `IrctcClient`).
     cookies: Arc<Mutex<Vec<(String, String)>>>,
-    /// Latest `(name, value)` CSRF token; re-fetched after a session reset.
+    /// Latest `(name, value)` CSRF token; re-fetched after a session reset or
+    /// a CSRF-only refresh.
     csrf: Arc<Mutex<Option<(String, String)>>>,
 }
 
@@ -688,10 +690,17 @@ impl NtesWebClient {
 
     // -- session / transport -------------------------------------------------
 
-    /// One query round-trip with a single session retry. A transport failure,
-    /// an empty body, or (when `rows_marker` is set) a result page without the
-    /// expected content means the session was challenged, so the cookies +
-    /// CSRF are re-harvested once before giving up.
+    /// One query round-trip with staged recovery. A transport failure, an
+    /// empty body, or (when `rows_marker` is set) a result page without the
+    /// expected content means the request was rejected or challenged. Recovery
+    /// replaces the cheapest thing first (NTES answers a rejected/stale CSRF
+    /// token with an empty `200 OK` while the session cookies are still valid):
+    ///
+    /// 1. drop only the cached CSRF token so the retry re-fetches it against
+    ///    the same session;
+    /// 2. re-harvest cookies + CSRF as a whole fresh session.
+    ///
+    /// Only after both stages does it give up honestly.
     async fn post_form(
         &self,
         endpoint: &str,
@@ -701,7 +710,7 @@ impl NtesWebClient {
         query: &[(&str, &str)],
         fields: &[(&str, String)],
     ) -> Result<String, AppError> {
-        for attempt in 0..2 {
+        for attempt in 0..3 {
             match self
                 .post_form_once(endpoint, opt, sub_opt, query, fields)
                 .await
@@ -712,11 +721,11 @@ impl NtesWebClient {
                     if !challenged {
                         return Ok(body);
                     }
-                    self.reset_session();
+                    self.recover(attempt);
                 }
                 Err(e) => {
-                    if attempt == 0 {
-                        self.reset_session();
+                    if attempt < 2 {
+                        self.recover(attempt);
                     } else {
                         return Err(e);
                     }
@@ -725,8 +734,19 @@ impl NtesWebClient {
         }
         Err(AppError::source_unavailable(
             "ntes",
-            "NTES web form returned no usable data after a session refresh",
+            "NTES web form returned no usable data after a CSRF + session refresh",
         ))
+    }
+
+    /// Stage the recovery for the next attempt: a stale token is dropped first
+    /// (the session cookies stay, so the retry only re-fetches the CSRF token);
+    /// only a second failure resets the whole session.
+    fn recover(&self, attempt: usize) {
+        if attempt == 0 {
+            *self.csrf.lock().unwrap() = None;
+        } else {
+            self.reset_session();
+        }
     }
 
     async fn post_form_once(

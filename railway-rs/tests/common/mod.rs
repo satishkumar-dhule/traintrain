@@ -24,6 +24,10 @@ pub struct RouteSpec {
     pub status: StatusCode,
     pub body: Value,
     pub content_type: String,
+    /// Optional `Set-Cookie` header (e.g. so NTES session tests can observe
+    /// that a CSRF-only refresh keeps the cookies while a full reset re-harvests
+    /// them).
+    pub set_cookie: Option<String>,
 }
 
 struct MockInner {
@@ -108,6 +112,7 @@ impl MockServer {
                 status: StatusCode::OK,
                 body,
                 content_type: "application/json".to_string(),
+                set_cookie: None,
             },
         );
     }
@@ -119,6 +124,26 @@ impl MockServer {
                 status: StatusCode::OK,
                 body: Value::String(html.into()),
                 content_type: "text/html".to_string(),
+                set_cookie: None,
+            },
+        );
+    }
+
+    /// `route_html` plus a `Set-Cookie` header, so tests can observe whether
+    /// the client kept the session cookies across its retries.
+    pub fn route_html_with_cookie(
+        &self,
+        path_prefix: &str,
+        html: impl Into<String>,
+        set_cookie: &str,
+    ) {
+        self.route(
+            path_prefix,
+            RouteSpec {
+                status: StatusCode::OK,
+                body: Value::String(html.into()),
+                content_type: "text/html".to_string(),
+                set_cookie: Some(set_cookie.to_string()),
             },
         );
     }
@@ -142,6 +167,7 @@ impl MockServer {
                 status,
                 body: json!({"error": "mock failure"}),
                 content_type: "application/json".to_string(),
+                set_cookie: None,
             },
         );
     }
@@ -192,8 +218,13 @@ async fn mock_handler(State(m): State<MockServer>, req: Request<Body>) -> Respon
     m.inner.calls.lock().unwrap().push((path.clone(), body_str));
     // A scripted queue wins over the route table (a broad prefix like
     // `/mntes/` would otherwise shadow a queued `/mntes/TrnMap` flow).
-    let (status, content_type, body) = match pop_queue(&m.inner, &path) {
-        Some(next) => (StatusCode::OK, "text/html".to_string(), Body::from(next)),
+    let (status, content_type, set_cookie, body) = match pop_queue(&m.inner, &path) {
+        Some(next) => (
+            StatusCode::OK,
+            "text/html".to_string(),
+            None,
+            Body::from(next),
+        ),
         None => match m.lookup(&path) {
             Some(spec) => {
                 let body = if spec.content_type.starts_with("application/json") {
@@ -201,7 +232,7 @@ async fn mock_handler(State(m): State<MockServer>, req: Request<Body>) -> Respon
                 } else {
                     Body::from(spec.body.as_str().unwrap_or_default().to_string())
                 };
-                (spec.status, spec.content_type, body)
+                (spec.status, spec.content_type, spec.set_cookie, body)
             }
             None => {
                 return Response::builder()
@@ -211,11 +242,13 @@ async fn mock_handler(State(m): State<MockServer>, req: Request<Body>) -> Respon
             }
         },
     };
-    Response::builder()
+    let mut builder = Response::builder()
         .status(status)
-        .header("content-type", content_type)
-        .body(body)
-        .unwrap()
+        .header("content-type", content_type);
+    if let Some(cookie) = set_cookie {
+        builder = builder.header("set-cookie", cookie);
+    }
+    builder.body(body).unwrap()
 }
 
 /// Pop the next scripted HTML body for the longest matching queue prefix.

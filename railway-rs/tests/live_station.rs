@@ -116,3 +116,104 @@ async fn no_mock_route_is_honest_source_unavailable() {
         .unwrap_or_default()
         .contains("Live source"));
 }
+
+/// A rejected/stale CSRF token (empty 200 body) must be healed by re-fetching
+/// only the token - the session cookies stay, so no new `/mntes/` bootstrap.
+#[tokio::test]
+async fn stale_csrf_token_is_refreshed_without_new_session() {
+    let app = TestApp::spawn().await;
+    let m = &app.mocks["ntes"];
+    m.route_html_with_cookie(
+        "/mntes/",
+        "<html><head><title>NTES</title></head></html>",
+        "JSESSIONID=abc123; Path=/",
+    );
+    m.route_html_seq(
+        "/mntes/GetCSRFToken",
+        vec![
+            "<input type='hidden' name='csrfToken' value='tok1'>".to_string(),
+            "<input type='hidden' name='csrfToken' value='tok2'>".to_string(),
+        ],
+    );
+    m.route_html_seq("/mntes/q", vec![String::new(), LS_HTML.to_string()]);
+
+    let (status, body) = app
+        .get("/rail-api/ntes/live-station?station=NDLS&hours=2")
+        .await;
+    assert_eq!(status, 200);
+    assert_eq!(body["data_source"], "NTES");
+
+    let calls = m.calls();
+    let bootstrap = calls.iter().filter(|(p, _)| p == "/mntes/").count();
+    assert_eq!(
+        bootstrap, 1,
+        "a CSRF-only refresh must not re-bootstrap the session: {calls:?}"
+    );
+    let csrf_fetches = calls
+        .iter()
+        .filter(|(p, _)| p == "/mntes/GetCSRFToken")
+        .count();
+    assert_eq!(csrf_fetches, 2, "token fetched twice: {calls:?}");
+    let q_posts: Vec<&(String, String)> = calls.iter().filter(|(p, _)| p == "/mntes/q").collect();
+    assert_eq!(q_posts.len(), 2, "two form POSTs: {calls:?}");
+    assert!(
+        q_posts[0].1.contains("csrfToken=tok1"),
+        "first POST uses the stale token: {}",
+        q_posts[0].1
+    );
+    assert!(
+        q_posts[1].1.contains("csrfToken=tok2"),
+        "second POST uses the refreshed token: {}",
+        q_posts[1].1
+    );
+}
+
+/// When even the re-fetched token is rejected (dead session), the retry must
+/// fall through to a full session reset (fresh cookies + token) and succeed.
+#[tokio::test]
+async fn csrf_refresh_failure_falls_back_to_full_session_reset() {
+    let app = TestApp::spawn().await;
+    let m = &app.mocks["ntes"];
+    m.route_html_with_cookie(
+        "/mntes/",
+        "<html><head><title>NTES</title></head></html>",
+        "JSESSIONID=abc123; Path=/",
+    );
+    m.route_html_seq(
+        "/mntes/GetCSRFToken",
+        vec![
+            "<input type='hidden' name='csrfToken' value='tokA'>".to_string(),
+            "<input type='hidden' name='csrfToken' value='tokB'>".to_string(),
+            "<input type='hidden' name='csrfToken' value='tokC'>".to_string(),
+        ],
+    );
+    m.route_html_seq(
+        "/mntes/q",
+        vec![String::new(), String::new(), LS_HTML.to_string()],
+    );
+
+    let (status, body) = app
+        .get("/rail-api/ntes/live-station?station=NDLS&hours=2")
+        .await;
+    assert_eq!(status, 200);
+    assert_eq!(body["data_source"], "NTES");
+
+    let calls = m.calls();
+    let bootstrap = calls.iter().filter(|(p, _)| p == "/mntes/").count();
+    assert_eq!(
+        bootstrap, 2,
+        "one bootstrap plus one after the full reset: {calls:?}"
+    );
+    let csrf_fetches = calls
+        .iter()
+        .filter(|(p, _)| p == "/mntes/GetCSRFToken")
+        .count();
+    assert_eq!(csrf_fetches, 3, "token fetched on each attempt: {calls:?}");
+    let q_posts: Vec<&(String, String)> = calls.iter().filter(|(p, _)| p == "/mntes/q").collect();
+    assert_eq!(q_posts.len(), 3, "three form POSTs: {calls:?}");
+    assert!(
+        q_posts[2].1.contains("csrfToken=tokC"),
+        "the fresh session POST uses the new token: {}",
+        q_posts[2].1
+    );
+}
