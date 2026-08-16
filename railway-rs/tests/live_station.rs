@@ -46,10 +46,10 @@ const LS_HTML: &str = r#"<table>
 async fn bad_station_code_is_400() {
     let app = TestApp::spawn().await;
     let (status, body) = app
-        .get("/rail-api/ntes/live-station?station=XYZ&hours=2")
+        .get("/rail-api/ntes/live-station?station=ABCDE&hours=2")
         .await;
     assert_eq!(status, 400);
-    assert_eq!(body["error"], "Invalid station code: XYZ");
+    assert_eq!(body["error"], "Invalid station code: ABCDE");
 }
 
 #[tokio::test]

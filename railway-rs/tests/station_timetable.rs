@@ -55,9 +55,11 @@ async fn missing_or_empty_params_are_bad_request() {
 #[tokio::test]
 async fn invalid_station_is_bad_request() {
     let app = TestApp::spawn().await;
-    let (status, body) = app.get("/rail-api/ntes/station-timetable?station=ND").await;
+    let (status, body) = app
+        .get("/rail-api/ntes/station-timetable?station=ABCDE")
+        .await;
     assert_eq!(status, 400);
-    assert_eq!(body["error"], "Invalid station code: ND");
+    assert_eq!(body["error"], "Invalid station code: ABCDE");
 
     let (status, body) = app
         .get("/rail-api/ntes/station-timetable?station=ZZZZ")

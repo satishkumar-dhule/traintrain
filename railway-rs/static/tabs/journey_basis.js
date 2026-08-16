@@ -49,7 +49,9 @@ window.Tabs.journey_basis = {
 
     const loadStations = () => {
       train = trainInput.value.trim();
+      RailLog.action('journey_basis', 'load_stations', { train_raw: train });
       if (!/^\d{5}$/.test(train)) {
+        RailLog.action('journey_basis', 'validation', { error: 'train must be 5 digits', train_raw: train });
         ui.render(results, ui.errorBox('Enter a valid 5-digit train number.'));
         return;
       }

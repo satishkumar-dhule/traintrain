@@ -37,22 +37,29 @@ window.Tabs.trains_between = {
     const results = ui.el('div', { class: 'mt-12' });
 
     const submitForm = () => {
+      RailLog.action('trains_between', 'submit', {
+        src_raw: fromInput.value, dst_raw: toInput.value,
+      });
       const srcCheck = ui.stationCode(fromInput.value);
       if (srcCheck.error) {
+        RailLog.action('trains_between', 'validation', { field: 'src', error: srcCheck.error, raw: fromInput.value });
         ui.render(results, ui.errorBox(`From station: ${srcCheck.error}`));
         return;
       }
       const dstCheck = ui.stationCode(toInput.value);
       if (dstCheck.error) {
+        RailLog.action('trains_between', 'validation', { field: 'dst', error: dstCheck.error, raw: toInput.value });
         ui.render(results, ui.errorBox(`To station: ${dstCheck.error}`));
         return;
       }
       const src = srcCheck.code;
       const dst = dstCheck.code;
       if (src === dst) {
+        RailLog.action('trains_between', 'validation', { error: 'src==dst', src, dst });
         ui.render(results, ui.errorBox('Source and destination must differ.'));
         return;
       }
+      RailLog.action('trains_between', 'validated', { src, dst });
       ui.render(results, ui.spinner());
       submit.disabled = true;
 

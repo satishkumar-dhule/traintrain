@@ -104,12 +104,12 @@ window.UI = (() => {
   function fmtTime(hhmm) { return hhmm || '--:--'; }
 
   /* Normalize + validate a station-code input, mirroring the backend's
-     require_station rules. Returns { code } (uppercased 4-char) or { error }. */
+     require_station rules. Returns { code } (uppercased 2-4 char) or { error }. */
   function stationCode(value) {
     const code = String(value || '').trim().toUpperCase();
     if (!code) return { error: 'Enter a station code.' };
-    if (code.length !== 4 || !/^[A-Z0-9]{4}$/.test(code)) {
-      return { error: `Invalid station code: ${code}. Must be a 4-character code.` };
+    if (code.length < 2 || code.length > 4 || !/^[A-Z0-9]+$/.test(code)) {
+      return { error: `Invalid station code: ${code}. Must be a 2-4 character code.` };
     }
     return { code };
   }

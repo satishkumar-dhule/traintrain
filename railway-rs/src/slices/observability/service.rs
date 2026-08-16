@@ -107,6 +107,7 @@ impl Service {
             origins,
             uptime_secs: state.uptime_secs(),
             requests_total: metrics.requests_total,
+            bytes_out: metrics.bytes_out,
             top_paths,
             status_codes,
             cache: CacheStats {

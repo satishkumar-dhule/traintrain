@@ -1,6 +1,8 @@
 //! Shared station-code validation, used by every slice that takes station
 //! codes (`trains_between`, `availability`). Kept here so the rules live in
-//! exactly one place (DRY).
+//! exactly one place (DRY). Indian Railway station codes are 2-4 characters
+//! (e.g. `AK` for AKOLA JN, `NDLS` for NEW DELHI), so the format check must
+//! not assume exactly 4.
 
 use crate::core::error::AppError;
 use crate::state::AppState;
@@ -11,7 +13,7 @@ pub fn normalize_code(code: Option<&str>) -> String {
 }
 
 pub fn is_valid_code(code: &str) -> bool {
-    code.len() == 4 && code.chars().all(|c| c.is_ascii_alphanumeric())
+    (2..=4).contains(&code.len()) && code.chars().all(|c| c.is_ascii_alphanumeric())
 }
 
 /// A code is known when it matches a station in the local dataset, or appears

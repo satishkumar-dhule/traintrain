@@ -5,7 +5,7 @@ RailCompanion - an Indian Railways companion backend (Rust rewrite). Axum JSON A
 ## Features
 
 - Live PNR status from Railyatri, plus live train status ("Spot Train") and full train schedules from NTES (`enquiry.indianrail.gov.in`), with Railyatri as fallback
-- Live trains-at-station, trains-between-stations, and exceptional-train lists (cancelled / rescheduled / diverted) from NTES
+- Live trains-at-station and trains-between-stations from NTES, plus per-train exceptional dates (cancelled / rescheduled / diverted calendar, cached 2 hours) from NTES
 - Train availability and prepared-chart (per-coach berth) data from IRCTC without login (`www.irctc.co.in`)
 - Offline autocomplete over a real 8,958-station and 10,609-train dataset (no network needed for search)
 - State-of-the-art observability: a Prometheus `/metrics` endpoint (counters, gauges, histograms) for Grafana/Loki ingestion, structured JSON logs (stdout + rolling daily files) mirrored into a live in-memory log ring, and a real-time dashboard with graphs, gauges, tables, stats and a log stream
@@ -103,7 +103,7 @@ Unmatched `/rail-api/*` paths return JSON 404; everything else falls through to 
 | GET    | `/rail-api/ntes/trains-between` | `src`, `dst` (4-char codes)        | Direct trains between two stations, with running days |
 | GET    | `/rail-api/irctc/availability`  | `src`, `dst` (4-char codes), `date` (optional) | Direct trains with class availability, running days and times (IRCTC, no login) |
 | GET    | `/rail-api/irctc/chart`         | `train` (1-8 digits), `date` (optional), `station` (4-char code, optional) | Prepared-chart per-coach berth status for a journey date (IRCTC online-charts) |
-| GET    | `/rail-api/ntes/exceptional` | `type` = `cancelled` \| `rescheduled` \| `diverted` | Exceptional trains of the given kind          |
+| GET    | `/rail-api/ntes/exceptional` | `train` (4-5 digit number), `type` = `cancelled` \| `rescheduled` \| `diverted` (optional) | Per-train exceptional dates (cancelled / rescheduled / diverted calendar, cached 2h); the train name is resolved from the local master list when NTES does not echo it, and the NTES verdict `No Exceptional Details found for train X !!!` is echoed verbatim as `message` when there are none |
 
 Each live response carries a `data_source` field naming the actual upstream that produced it (`Railyatri`, `NTES` or `IRCTC`). `live-status` ("Spot Train") and `schedule` prefer NTES and fall back to Railyatri when NTES is unreachable; `trains-between` prefers NTES and falls back to the IRCTC availability API. `live-status` drives the NTES "Spot Your Train (Live Status)" web form (POST `/mntes/tr?opt=TrainRunning&subOpt=FindRunningInstancePop`), parses the returned popup's run panes and per-station timeline, and serves the active run's start date plus every reported run instance. Search endpoints are offline; PNR, schedule, live-status, live-station, trains-between, availability, chart and exceptional are live and go through the shared cache.
 

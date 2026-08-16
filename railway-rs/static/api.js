@@ -6,11 +6,19 @@ window.Api = (() => {
   async function request(path, opts = {}) {
     const method = (opts.method || 'GET').toUpperCase();
     const t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    const reqBody = opts.body
+      ? String(typeof opts.body === 'string' ? opts.body : JSON.stringify(opts.body)).slice(0, 400)
+      : undefined;
     let res;
     try {
       res = await fetch(path, opts);
     } catch (err) {
-      RailLog.error('api fetch threw:', method, path, err && err.message ? err.message : String(err));
+      const em = err && err.message ? err.message : String(err);
+      RailLog.api({
+        method, url: path, status: 0, latency_ms: 0, req_body: reqBody,
+        error: `network: ${em}`, thrown: true,
+      });
+      RailLog.error('api fetch threw:', method, path, em);
       throw err;
     }
     let body = null;
@@ -22,9 +30,17 @@ window.Api = (() => {
     if (!res.ok) {
       const err = (body && typeof body === 'object' && body.error) ? body.error : `HTTP ${res.status}`;
       RailLog.warn(`api ${method} ${path} -> ${res.status} (${elapsed}ms) error: ${err}`);
+      RailLog.api({
+        method, url: path, status: res.status, latency_ms: elapsed, req_body: reqBody,
+        error: err, body_snippet: text.slice(0, 400),
+      });
       return { ok: false, status: res.status, error: err, body };
     }
     RailLog.info(`api ${method} ${path} -> ${res.status} (${elapsed}ms)`);
+    RailLog.api({
+      method, url: path, status: res.status, latency_ms: elapsed, req_body: reqBody,
+      body_snippet: text.slice(0, 400),
+    });
     return body;
   }
 
@@ -58,7 +74,8 @@ window.Api = (() => {
     journeyStations: (train) => get(`/rail-api/ntes/journey-stations?train=${encodeURIComponent(train)}`),
     journeyBasis: (train, station) => get(`/rail-api/ntes/journey-basis?train=${encodeURIComponent(train)}&station=${encodeURIComponent(station)}`),
     trainOnMap: (train, station) => get(`/rail-api/ntes/train-on-map?train=${encodeURIComponent(train)}` + (station ? `&station=${encodeURIComponent(station)}` : '')),
-    exceptional: (type) => get(`/rail-api/ntes/exceptional?type=${encodeURIComponent(type)}`),
+    exceptional: (train, type) =>
+      get(`/rail-api/ntes/exceptional?train=${encodeURIComponent(train)}` + (type ? `&type=${encodeURIComponent(type)}` : '')),
     stations: (q) => get(`/rail-api/stations?q=${encodeURIComponent(q)}`),
     searchTrains: (q) => get(`/rail-api/search/trains?q=${encodeURIComponent(q)}`),
     searchStations: (q) => get(`/rail-api/search/stations?q=${encodeURIComponent(q)}`),

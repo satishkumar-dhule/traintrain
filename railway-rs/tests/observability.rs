@@ -70,6 +70,9 @@ async fn observability_includes_status_codes_cache_and_series() {
     assert!(cache["hit_rate"].as_f64().is_some());
     assert!(cache["entries"].as_u64().is_some());
 
+    // Bytes-served counter is present (may be 0 until a response is generated).
+    assert!(body["bytes_out"].as_u64().is_some());
+
     // Time-series shape: column arrays, all aligned with `times`.
     let series = &body["series"];
     assert!(series["times"].is_array());

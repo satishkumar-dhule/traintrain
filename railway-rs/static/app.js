@@ -20,6 +20,7 @@ window.Tabs = window.Tabs || {};
     { id: 'stations', label: 'Stations', icon: '🗺️' },
     { id: 'settings', label: 'Settings', icon: '⚙️' },
     { id: 'observability', label: 'Observability', icon: '📊' },
+    { id: 'debug', label: 'Debug', icon: '🐞' },
   ];
 
   const state = { active: 'pnr', ctx: null };

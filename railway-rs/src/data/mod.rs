@@ -124,6 +124,17 @@ impl Datasets {
             .map(|s| s.name.as_str())
     }
 
+    /// Official name for a train number (`12951` -> `NDLS TEJAS RAJ`).
+    /// Used when an NTES page does not echo the train identity (e.g. the
+    /// no-exception "Train Exception Info" page only shows the requested
+    /// number) but the local master list knows it.
+    pub fn train_name(&self, number: &str) -> Option<&str> {
+        self.trains
+            .iter()
+            .find(|t| t.number.eq_ignore_ascii_case(number))
+            .map(|t| t.name.as_str())
+    }
+
     /// IntelliSense train search over the pre-warmed index: matches number and
     /// name, ranks exact/prefix/contains, all-tokens matches first.
     pub fn search_trains(&self, query: &str, limit: usize) -> Vec<TrainRecord> {

@@ -65,6 +65,13 @@ impl Cache {
     }
 
     pub fn set(&self, key: &str, value: Value) {
+        self.set_with_ttl(key, value, self.ttl);
+    }
+
+    /// Insert an entry with a per-entry TTL (overrides the cache-wide default).
+    /// Used for slow-changing upstream data that deserves a longer shelf life,
+    /// e.g. the 2-hour per-train NTES exception calendar.
+    pub fn set_with_ttl(&self, key: &str, value: Value, ttl: Duration) {
         let mut map = self.inner.lock().ok();
         if let Some(map) = map.as_mut() {
             map.retain(|_, e| e.expires_at > Instant::now());
@@ -72,7 +79,7 @@ impl Cache {
                 key.to_string(),
                 Entry {
                     value,
-                    expires_at: Instant::now() + self.ttl,
+                    expires_at: Instant::now() + ttl,
                 },
             );
         }
@@ -120,6 +127,16 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(60)).await;
         assert!(c.get("a").is_none());
         assert_eq!(c.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn per_entry_ttl_overrides_cache_ttl() {
+        let c = Cache::new(Duration::from_millis(30));
+        c.set_with_ttl("long", json!(1), Duration::from_secs(60));
+        c.set("short", json!(2));
+        tokio::time::sleep(Duration::from_millis(60)).await;
+        assert!(c.get("short").is_none());
+        assert!(c.get("long").is_some());
     }
 
     #[tokio::test]

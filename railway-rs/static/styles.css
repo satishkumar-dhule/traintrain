@@ -184,7 +184,12 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
   font-size: 10px; font-weight: 800; text-transform: uppercase;
   letter-spacing: .06em; color: #94a3b8; margin-bottom: 8px;
 }
-.obs-gauge-canvas { width: 100%; height: 108px; }
+.obs-gauge-canvas {
+  display: block;
+  width: 100%;
+  max-width: 220px;   /* ~2:1 box -> the 180° arc renders as a clean semicircle */
+  margin: 0 auto;
+}
 .obs-kpi-sub { font-size: 11px; color: #64748b; margin-top: 6px; }
 
 .obs-charts-grid {
@@ -224,7 +229,12 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
   gap: 12px;
 }
 .obs-tables-grid > .card { margin-bottom: 0; }
-.obs-doughnut-box { position: relative; height: 180px; margin-bottom: 8px; }
+.obs-doughnut-box {
+  position: relative;
+  height: 190px;
+  max-width: 240px;
+  margin: 0 auto 8px;
+}
 
 .obs-log-controls { margin-bottom: 8px; }
 .obs-log-filter.btn { padding: 6px 12px; font-size: 12px; }

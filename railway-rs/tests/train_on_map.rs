@@ -46,7 +46,7 @@ async fn missing_or_invalid_train_is_bad_request() {
 async fn invalid_station_is_bad_request() {
     let app = TestApp::spawn().await;
     let (status, _) = app
-        .get("/rail-api/ntes/train-on-map?train=12055&station=ND")
+        .get("/rail-api/ntes/train-on-map?train=12055&station=ABCDE")
         .await;
     assert_eq!(status, 400);
 }

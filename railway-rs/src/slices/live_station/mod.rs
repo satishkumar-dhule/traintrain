@@ -35,7 +35,7 @@ pub fn router() -> Router<AppState> {
     Router::new().route("/rail-api/ntes/live-station", get(live_station_handler))
 }
 
-/// Trains expected at a station. `station` must be a 4-character code that
+/// Trains expected at a station. `station` must be a 2-4 character code that
 /// exists in the real station dataset (shared `require_station` rules);
 /// `hours` is clamped into 1..=4.
 async fn live_station_handler(

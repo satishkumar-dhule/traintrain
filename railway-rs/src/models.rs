@@ -473,23 +473,48 @@ pub struct ChartBerth {
     pub status: String,
 }
 
-/// `GET /rail-api/ntes/exceptional?type=cancelled|rescheduled|diverted`
+/// `GET /rail-api/ntes/exceptional?train=04138[&type=cancelled|rescheduled|diverted]`
+///
+/// The upstream NTES `ExcpTrains` batch form is disabled server-side, so the
+/// endpoint queries one train's exception calendar (`opt=TrainRunning,
+/// subOpt=excpInfo`) and caches the result for 2 hours.
 #[derive(Debug, Serialize, Default)]
 pub struct ExceptionalResponse {
+    /// Echoes the requested `type` filter when one was given.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub r#type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub trains: Option<Vec<ExceptionalTrain>>,
+    pub train: Option<ExceptionalTrainDetail>,
+    /// Exception dates for the train (filtered to `type` when requested).
+    pub exceptions: Vec<ExceptionEntry>,
+    /// The NTES page's own verdict when the train has no exceptional days,
+    /// verbatim: `No Exceptional Details found for train 12121 !!!`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub data_source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_ttl: Option<u64>,
 }
 
+/// Static train identity from the exception-calendar header.
 #[derive(Debug, Serialize)]
-pub struct ExceptionalTrain {
+pub struct ExceptionalTrainDetail {
     pub number: String,
     pub name: String,
+    pub source: String,
+    pub destination: String,
+    pub days_of_run: Vec<String>,
+}
+
+/// One exceptional run date from the per-train calendar. `kind` is
+/// `cancelled`, `rescheduled`, `diverted`, `new_source` or `new_destination`;
+/// `note` is the human-readable label from the NTES page.
+#[derive(Debug, Serialize)]
+pub struct ExceptionEntry {
     pub date: String,
-    pub reason: String,
+    pub kind: String,
+    pub note: String,
 }
 
 /// `GET /rail-api/stations` (array body)
@@ -538,6 +563,7 @@ pub struct ObservabilityResponse {
     pub origins: Vec<OriginStatus>,
     pub uptime_secs: u64,
     pub requests_total: u64,
+    pub bytes_out: u64,
     pub top_paths: Vec<(String, u64)>,
     pub status_codes: Vec<StatusCode>,
     pub cache: CacheStats,

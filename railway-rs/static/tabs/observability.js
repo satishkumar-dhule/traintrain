@@ -199,7 +199,7 @@ window.Tabs.observability = (() => {
     const grid = ui.el('div', { class: 'obs-kpi-grid' });
     specs().forEach((spec) => {
       gaugeMax[spec.id] = spec.max;
-      const canvas = ui.el('canvas', { class: 'obs-gauge-canvas', id: `obs-gauge-${spec.id}` });
+      const canvas = ui.el('canvas', { class: 'obs-gauge-canvas', id: `obs-gauge-${spec.id}`, width: 220, height: 110 });
       const card = ui.el('div', { class: 'obs-kpi-card' },
         ui.el('p', { class: 'obs-kpi-label', text: spec.label }),
         canvas,
@@ -293,7 +293,12 @@ window.Tabs.observability = (() => {
   function gaugeOptions(spec) {
     return {
       responsive: true,
-      maintainAspectRatio: false,
+      // Height is derived from the width (2:1). With maintainAspectRatio:false
+      // the chart fills its parent, whose height is driven by the canvas, so
+      // each resize grows the canvas again -> the gauge grows vertically
+      // without bound. aspectRatio converges instead.
+      maintainAspectRatio: true,
+      aspectRatio: 2,
       plugins: {
         legend: { display: false },
         tooltip: { enabled: false },
@@ -326,11 +331,12 @@ window.Tabs.observability = (() => {
 
       // adaptive ceiling: keep the gauge meaningful as traffic grows
       if (spec.id === 'rps' && raw > gaugeMax.rps) gaugeMax.rps = Math.ceil(raw * 1.5);
+      if (spec.id === 'latency' && raw > gaugeMax.latency) gaugeMax.latency = Math.ceil(raw * 1.5);
       if (spec.id === 'mem' && raw > gaugeMax.mem) gaugeMax.mem = Math.ceil(raw * 1.5);
       if (spec.id === 'conn' && raw > gaugeMax.conn) gaugeMax.conn = Math.ceil(raw * 1.5);
 
       const max = gaugeMax[spec.id] || spec.max;
-      const value = spec.pct ? raw : Math.min(raw, max);
+      const value = Math.min(Math.max(raw, 0), max);   // clamp so the arc never overflows
       const center = spec.id === 'cpu' ? `${(raw * 100).toFixed(0)}%` : fmtNum(raw);
       const chart = charts[`gauge-${spec.id}`];
       if (chart) {
@@ -479,7 +485,7 @@ window.Tabs.observability = (() => {
 
     container.append(
       ui.card('Status Distribution',
-        ui.el('div', { class: 'obs-doughnut-box' }, ui.el('canvas', { id: 'obs-chart-status' })),
+        ui.el('div', { class: 'obs-doughnut-box' }, ui.el('canvas', { id: 'obs-chart-status', width: 240, height: 190 })),
         ui.el('div', { id: 'obs-status-table' }, ui.table(['Code', 'Count'], [['—', '—']])),
       ),
     );
@@ -533,7 +539,6 @@ window.Tabs.observability = (() => {
     const sourceRows = origins.map((o) => [
       esc(o.name),
       `${fmtNum(o.latency)} ms`,
-      fmtNum(0),
       badge(o.status, o.status === 'live' ? 'green' : 'amber'),
     ]);
     const sourcesTbl = document.getElementById('obs-sources-table');
@@ -562,7 +567,7 @@ window.Tabs.observability = (() => {
       ui.el('div', { class: 'row gap-8 obs-log-controls' },
         ['all', 'warn', 'error'].map((lv) =>
           ui.el('button', {
-            class: 'btn secondary obs-log-filter',
+            class: `btn secondary obs-log-filter${lv === 'all' ? ' active' : ''}`,
             'data-level': lv,
             onclick: (e) => {
               logFilter = lv;

@@ -38,15 +38,20 @@ window.Tabs.train_on_map = {
         return;
       }
       const stationRaw = stationInput.value;
+      RailLog.action('train_on_map', 'submit', {
+        train_raw: trainInput.value, station_raw: stationRaw,
+      });
       let station = null;
       if (stationRaw.trim()) {
         const check = ui.stationCode(stationRaw);
         if (check.error) {
+          RailLog.action('train_on_map', 'validation', { error: check.error, station_raw: stationRaw });
           ui.render(results, ui.errorBox(`${check.error} (or leave blank for the route map only.)`));
           return;
         }
         station = check.code;
       }
+      RailLog.action('train_on_map', 'validated', { train, station });
       ui.render(results, ui.spinner());
       submit.disabled = true;
 

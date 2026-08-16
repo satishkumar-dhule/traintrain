@@ -6,8 +6,9 @@ use axum::extract::State;
 use axum::http::header;
 use axum::http::HeaderValue;
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
+use serde::{Deserialize, Serialize};
 
 use crate::core::error::AppError;
 use crate::models::{Healthz, SourceHealth, SourceStatus};
@@ -19,6 +20,7 @@ pub fn router() -> Router<AppState> {
         .route("/api/healthz", get(healthz))
         .route("/metrics", get(metrics))
         .route("/rail-api/source-status", get(source_status))
+        .route("/rail-api/debug", post(debug_report))
 }
 
 async fn healthz() -> Json<Healthz> {
@@ -46,6 +48,39 @@ async fn metrics(State(state): State<AppState>) -> Response {
         body,
     )
         .into_response()
+}
+
+/// Accept a debug report from the SPA's Debug tab and append it to the server
+/// log (e.g. `/tmp/railway-rs.log`) so a user-reported issue can be traced
+/// end-to-end. Size- and line-capped; this only writes to the log.
+#[derive(Debug, Deserialize)]
+struct DebugReport {
+    report: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct DebugReportResponse {
+    ok: bool,
+    lines: usize,
+    bytes: usize,
+}
+
+const DEBUG_MAX_BYTES: usize = 200 * 1024;
+const DEBUG_MAX_LINES: usize = 2000;
+
+async fn debug_report(Json(body): Json<DebugReport>) -> Json<DebugReportResponse> {
+    let report = body.report.unwrap_or_default();
+    let bytes = report.len().min(DEBUG_MAX_BYTES);
+    let mut lines = 0;
+    for line in report.lines().take(DEBUG_MAX_LINES) {
+        tracing::info!(target: "railway_rs::ui_debug", "{line}");
+        lines += 1;
+    }
+    Json(DebugReportResponse {
+        ok: true,
+        lines,
+        bytes,
+    })
 }
 
 /// Report which live sources are actually reachable right now. Used by the

@@ -48,8 +48,8 @@ async fn missing_or_empty_params_are_bad_request() {
 async fn malformed_codes_are_bad_request() {
     let app = TestApp::spawn().await;
     for path in [
-        "/rail-api/ntes/trains-between?src=MM&dst=NDLS",
-        "/rail-api/ntes/trains-between?src=MMCT&dst=ND",
+        "/rail-api/ntes/trains-between?src=MMMMM&dst=NDLS",
+        "/rail-api/ntes/trains-between?src=MMCT&dst=NDDDD",
         "/rail-api/ntes/trains-between?src=MM!T&dst=NDLS",
         "/rail-api/ntes/trains-between?src=MMCTT&dst=NDLS",
     ] {

@@ -203,6 +203,39 @@ fn re(pattern: &str) -> &'static Regex {
                     "parcel_travel",
                     r"Travel Time:\s*&nbsp;<b>(\d{1,2}:\d{2})\s*Hrs\.</b>",
                 ),
+                // Per-train exception calendar (opt=TrainRunning, subOpt=excpInfo).
+                (
+                    "exc_head",
+                    r"<h4>\s*(\d{4,5})\s+-\s+([^<]+?)</h4>",
+                ),
+                (
+                    "exc_route",
+                    r"</h4>\s*([^<]+?)\s*<br",
+                ),
+                (
+                    "exc_days",
+                    r"Days of Run : <b>([^<]+)</b>",
+                ),
+                (
+                    "exc_month",
+                    r#"<font size="5pt">([A-Za-z]{3})-(\d{4})</font>"#,
+                ),
+                (
+                    "exc_daynum",
+                    r"<b>(?:\s*<font[^>]*>)?\s*(?:&nbsp;)?(\d{1,2})\s*(?:</font>)?\s*</b>",
+                ),
+                (
+                    "exc_tag",
+                    r"w3-tag[^>]*>\s*\[([^\]]+)\]",
+                ),
+                (
+                    "exc_bg",
+                    r"background:\s*([a-z]+)",
+                ),
+                (
+                    "exc_fg",
+                    r#"color="([^"]+)""#,
+                ),
                 // Journey Station Basis (opt=TrainRunning, subOpt=FindStationList).
                 (
                     "fsl_train",
@@ -471,33 +504,32 @@ impl NtesWebClient {
         })
     }
 
-    /// Exceptional trains list (`kind` = `cancelled`, `rescheduled` or
-    /// `diverted`); `trainNo` stays empty for the full list.
+    /// Per-train exception calendar (`opt=TrainRunning`, `subOpt=excpInfo`).
     ///
-    /// Emits `{"list":[{"number","name","date","reason"}]}`.
-    pub async fn exceptional(&self, kind: &str) -> Result<Value, AppError> {
+    /// The old batch `ExcpTrains` form (`excpType` + `excpDateType=T`) is
+    /// disabled server-side ("Requested service in un-available at the
+    /// moment"), so the only working NTES route is this per-train calendar.
+    /// `train` is a plain number (e.g. `04138`); leading zeros are kept.
+    ///
+    /// Emits `{"train":{"number","name","source","destination","daysOfRun"},
+    /// "exceptions":[{"date","kind","note"}],"noData"}`.
+    pub async fn train_exceptions(&self, train: &str) -> Result<Value, AppError> {
         let html = self
             .post_form(
                 "q",
-                "ExcpTrains",
-                "show",
-                None,
+                "TrainRunning",
+                "excpInfo",
+                Some("Exceptional Trains Details"),
                 &[],
-                &[
-                    ("excpType", kind.to_string()),
-                    ("excpDateType", "T".to_string()),
-                    ("trainNo", String::new()),
-                ],
+                &[("trainNo", train.to_string())],
             )
             .await?;
-        parse_exceptional(&html)
-            .map(|trains| json!({ "list": trains }))
-            .ok_or_else(|| {
-                AppError::source_unavailable(
-                    "ntes",
-                    "no exceptional-trains table found in the NTES response",
-                )
-            })
+        parse_train_exceptions(&html, train).ok_or_else(|| {
+            AppError::source_unavailable(
+                "ntes",
+                "no exceptional-train calendar found in the NTES response",
+            )
+        })
     }
 
     /// Spot-a-train running instances for `train` (e.g. `12055`). The NTES
@@ -979,33 +1011,163 @@ fn parse_runs(seg: &str) -> [bool; 7] {
     days
 }
 
-/// Exceptional-trains table -> JSON array of `{number, name, date, reason}`
-/// (or `None` when no table with train rows was found).
-fn parse_exceptional(html: &str) -> Option<Vec<Value>> {
-    let rows: Vec<Value> = html.split("<tr").filter_map(parse_excp_row).collect();
-    if rows.is_empty() {
-        None
-    } else {
-        Some(rows)
+/// Calendar month-name lookup for `MMM-YYYY` headers (e.g. `Aug-2026`).
+const EXC_MONTHS: [&str; 12] = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+/// Per-train exception-calendar page -> `{"train":{...}, "exceptions":[...],
+/// "noData"}` (or `None` when the page is neither a result nor a no-data page,
+/// e.g. a challenge/error page).
+///
+/// * Result page: `<h4>04138 - BJU GWL SPL</h4>`, a `source - destination.<br/>`
+///   line, `Days of Run : <b>Wed,Sun</b>` and one `<td class="w3-tooltip">`
+///   cell per calendar day under the `<font size="5pt">Aug-2026</font>` header.
+///   Exception days carry a `w3-tag` tooltip span (e.g. `[Train is Cancelled]`)
+///   and/or a coloured circle (`<font color="white" style="background: red">`).
+/// * No-data page: `<div class="w3-panel w3-round w3-red"><h4>No Exceptional
+///   Details found for train 12951 !!!</h4></div>` with no calendar; only the
+///   requested `train` number is known.
+fn parse_train_exceptions(html: &str, train: &str) -> Option<Value> {
+    let no_data = html.contains("No Exceptional Details found");
+    if no_data {
+        return Some(json!({
+            "train": json!({
+                "number": train,
+                "name": "",
+                "source": "",
+                "destination": "",
+                "daysOfRun": [],
+            }),
+            "exceptions": [],
+            "noData": true,
+        }));
     }
+
+    let caps = re("exc_head").captures(html)?;
+    let number = caps.get(1)?.as_str().trim().to_string();
+    let name = caps.get(2)?.as_str().trim().to_string();
+
+    let (source, destination) = re("exc_route")
+        .captures(html)
+        .and_then(|c| c.get(1))
+        .map(|m| {
+            let line = m.as_str().trim().trim_end_matches('.').to_string();
+            let mut parts = line.splitn(2, " - ");
+            let src = parts.next().unwrap_or("").trim().to_string();
+            let dst = parts.next().unwrap_or("").trim().to_string();
+            (src, dst)
+        })
+        .unwrap_or((String::new(), String::new()));
+
+    let days_of_run: Vec<String> = re("exc_days")
+        .captures(html)
+        .and_then(|c| c.get(1))
+        .map(|m| {
+            m.as_str()
+                .split(',')
+                .map(|d| d.trim().to_string())
+                .filter(|d| !d.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // The calendar month/year is the anchor for the day cells; without it the
+    // page does not carry the calendar we are built to parse.
+    let (month, year) = re("exc_month")
+        .captures(html)
+        .and_then(|c| {
+            let month_name = c.get(1)?.as_str();
+            let month = EXC_MONTHS
+                .iter()
+                .position(|m| m.eq_ignore_ascii_case(month_name))?
+                + 1;
+            let year: u32 = c.get(2)?.as_str().parse().ok()?;
+            Some((month, year))
+        })
+        .unwrap_or((0, 0));
+    if month == 0 {
+        return None;
+    }
+
+    let exceptions: Vec<Value> = html
+        .split(r#"<td class="w3-tooltip""#)
+        .skip(1)
+        .filter_map(|cell| {
+            let day = re("exc_daynum")
+                .captures(cell)
+                .and_then(|c| c.get(1))
+                .map(|m| m.as_str().trim().to_string())?;
+            let day: u32 = day.parse().ok()?;
+            let (kind, note) = exception_kind(cell)?;
+            Some(json!({
+                "date": format!("{year:04}-{month:02}-{day:02}"),
+                "kind": kind,
+                "note": note,
+            }))
+        })
+        .collect();
+
+    Some(json!({
+        "train": json!({
+            "number": number,
+            "name": name,
+            "source": source,
+            "destination": destination,
+            "daysOfRun": days_of_run,
+        }),
+        "exceptions": exceptions,
+        "noData": false,
+    }))
 }
 
-fn parse_excp_row(seg: &str) -> Option<Value> {
-    let cells: Vec<String> = seg.split("<td").skip(1).map(strip_tags).collect();
-    if cells.len() < 3 {
-        return None;
+/// Classify one calendar day cell as an exception kind, or `None` for a normal
+/// (green), not-running (grey) or blank day. Kind is decided from the hover
+/// tooltip span first (`[Train is Cancelled]` etc.), then from the circle's
+/// (text, background) colour pair, matching the legend table on the page.
+fn exception_kind(cell: &str) -> Option<(&'static str, &'static str)> {
+    if let Some(caps) = re("exc_tag").captures(cell) {
+        let note = caps.get(1)?.as_str().trim();
+        return match note {
+            "Train is Cancelled" => Some(("cancelled", "Train is Cancelled")),
+            "Train is Scheduled to Run on Diverted Route" => {
+                Some(("diverted", "Train is Scheduled to Run on Diverted Route"))
+            }
+            "Train is Rescheduled from Source" => {
+                Some(("rescheduled", "Train is Rescheduled from Source"))
+            }
+            "Train is Scheduled to Start from New Source" => {
+                Some(("new_source", "Train is Scheduled to Start from New Source"))
+            }
+            "Train is Scheduled to Terminate on New Destination" => Some((
+                "new_destination",
+                "Train is Scheduled to Terminate on New Destination",
+            )),
+            _ => return None,
+        };
     }
-    let number = cells[0].trim();
-    if number.len() < 4 || !number.chars().all(|c| c.is_ascii_digit()) {
-        return None;
+
+    let bg = re("exc_bg")
+        .captures(cell)
+        .and_then(|c| c.get(1))
+        .map(|m| m.as_str().to_string())
+        .unwrap_or_default();
+    let fg = re("exc_fg")
+        .captures(cell)
+        .and_then(|c| c.get(1))
+        .map(|m| m.as_str().to_string())
+        .unwrap_or_default();
+    match (fg.as_str(), bg.as_str()) {
+        ("white", "red") => Some(("cancelled", "Train is Cancelled")),
+        ("white", "blue") => Some(("rescheduled", "Train is Rescheduled from Source")),
+        ("white", "orange") => Some(("diverted", "Train is Scheduled to Run on Diverted Route")),
+        ("green", "yellow") => Some(("new_source", "Train is Scheduled to Start from New Source")),
+        ("yellow", "red") => Some((
+            "new_destination",
+            "Train is Scheduled to Terminate on New Destination",
+        )),
+        _ => None,
     }
-    let reason = cells[3..].join(" ");
-    Some(json!({
-        "number": number,
-        "name": cells.get(1).map(|s| s.trim()).unwrap_or(""),
-        "date": cells.get(2).map(|s| s.trim()).unwrap_or(""),
-        "reason": reason,
-    }))
 }
 
 /// Station-timetable page -> `{station, stationName, date, total, list}` (or
@@ -1982,17 +2144,80 @@ mod tests {
     }
 
     #[test]
-    fn exceptional_table_parses_to_list() {
-        let html = r#"<table><tr><th>Exceptional Trains</th></tr>
-        <tr><td>02951</td><td>MUMBAI RAJDHANI SPL</td><td>2026-08-13</td><td>Track maintenance</td></tr>
-        <tr><td>04071</td><td>SOU NDLS SPL</td><td>2026-08-13</td><td>Operational reasons</td></tr></table>"#;
-        let rows = parse_exceptional(html).unwrap();
-        assert_eq!(rows.len(), 2);
-        assert_eq!(rows[0]["number"], "02951");
-        assert_eq!(rows[0]["name"], "MUMBAI RAJDHANI SPL");
-        assert_eq!(rows[0]["date"], "2026-08-13");
-        assert_eq!(rows[0]["reason"], "Track maintenance");
-        assert_eq!(rows[1]["reason"], "Operational reasons");
+    fn train_exceptions_parses_calendar() {
+        let html = r##"<html><title>Exceptional Trains Details</title><body>
+        <h4>04138 - BJU GWL SPL</h4>
+        BARAUNI JN - GWALIOR JN.<br/>
+        Days of Run : <b>Wed,Sun</b>
+        <table><tr><th colspan="7"><font size="5pt">Aug-2026</font></th></tr>
+        <tr>
+        <td class="w3-tooltip" style="padding: 10px;">
+        <font color="#bfbfbf" size="4pt"><b>&nbsp;</b></font>
+        </td>
+        <td class="w3-tooltip" style="padding: 10px;">
+        <font color="#bfbfbf" size="4pt"><b>10</b></font>
+        </td>
+        <td class="w3-tooltip" style="padding: 10px;">
+        <font color="green" size="4pt"><b>12</b></font>
+        </td>
+        <td class="w3-tooltip" style="padding: 10px;">
+        <span style="position:absolute;left:0;bottom:40px" class="w3-text w3-tag w3-red w3-round-xlarge">[Train is Cancelled]</span>
+        <b> <font color="white" size="4pt" style="background: red;border-radius: 50%;padding: 5px;">16</font></b>
+        </td>
+        <td class="w3-tooltip" style="padding: 10px;">
+        <span style="position:absolute;left:0;bottom:40px" class="w3-text w3-tag w3-orange w3-round-xlarge">[Train is Scheduled to Run on Diverted Route]</span>
+        <b> <font color="white" size="4pt" style="background: orange;border-radius: 50%;padding: 5px;">19</font></b>
+        </td>
+        </tr>
+        </table></body></html>"##;
+        let data = parse_train_exceptions(html, "04138").unwrap();
+        assert_eq!(data["noData"], false);
+        assert_eq!(data["train"]["number"], "04138");
+        assert_eq!(data["train"]["name"], "BJU GWL SPL");
+        assert_eq!(data["train"]["source"], "BARAUNI JN");
+        assert_eq!(data["train"]["destination"], "GWALIOR JN");
+        assert_eq!(data["train"]["daysOfRun"], json!(["Wed", "Sun"]));
+        let exceptions = data["exceptions"].as_array().unwrap();
+        assert_eq!(exceptions.len(), 2);
+        assert_eq!(exceptions[0]["date"], "2026-08-16");
+        assert_eq!(exceptions[0]["kind"], "cancelled");
+        assert_eq!(exceptions[0]["note"], "Train is Cancelled");
+        assert_eq!(exceptions[1]["date"], "2026-08-19");
+        assert_eq!(exceptions[1]["kind"], "diverted");
+    }
+
+    #[test]
+    fn train_exceptions_colour_pair_fallback() {
+        let html = r##"<h4>12951 - TEST EXP</h4>
+        SRC JN - DST JN<br/>
+        Days of Run : <b>Mon</b>
+        <table><tr><th><font size="5pt">Sep-2026</font></th></tr>
+        <tr>
+        <td class="w3-tooltip" style="padding: 10px;">
+        <b> <font color="yellow" size="4pt" style="background: red;border-radius: 50%;padding: 5px;">3</font></b>
+        </td>
+        <td class="w3-tooltip" style="padding: 10px;">
+        <b> <font color="white" size="4pt" style="background: blue;border-radius: 50%;padding: 5px;">4</font></b>
+        </td>
+        </tr></table>"##;
+        let data = parse_train_exceptions(html, "12951").unwrap();
+        let exceptions = data["exceptions"].as_array().unwrap();
+        assert_eq!(exceptions.len(), 2);
+        assert_eq!(exceptions[0]["date"], "2026-09-03");
+        assert_eq!(exceptions[0]["kind"], "new_destination");
+        assert_eq!(exceptions[1]["date"], "2026-09-04");
+        assert_eq!(exceptions[1]["kind"], "rescheduled");
+    }
+
+    #[test]
+    fn train_exceptions_nodata_page() {
+        let html = r##"<html><title>Exceptional Trains Details</title><body>
+        <div class="w3-panel w3-round w3-red"><h4>No Exceptional Details found for train 12951 !!!</h4></div>
+        </body></html>"##;
+        let data = parse_train_exceptions(html, "12951").unwrap();
+        assert_eq!(data["noData"], true);
+        assert_eq!(data["train"]["number"], "12951");
+        assert!(data["exceptions"].as_array().unwrap().is_empty());
     }
 
     #[test]
@@ -2006,7 +2231,7 @@ mod tests {
             None
         );
         assert_eq!(
-            parse_exceptional("<table><tr><th>No data</th></tr></table>"),
+            parse_train_exceptions("<table><tr><th>No data</th></tr></table>", "12951"),
             None
         );
     }
@@ -2889,7 +3114,7 @@ var runInfo = ["Source|#17-Aug-2026 15:20|On Time","17-Aug-2026 15:53|On Time#17
         // localhost port is closed: hermetic, fails fast, no real network.
         let c = NtesWebClient::new(&http(), "http://127.0.0.1:1");
         assert!(matches!(
-            c.exceptional("cancelled").await,
+            c.train_exceptions("04138").await,
             Err(AppError::SourceUnavailable { source, .. }) if source == "ntes"
         ));
         assert!(matches!(
@@ -2958,6 +3183,45 @@ var runInfo = ["Source|#17-Aug-2026 15:20|On Time","17-Aug-2026 15:53|On Time#17
                     n["train_number"],
                     n["instances"].as_array().unwrap().len(),
                     n["stops"].as_array().unwrap().len()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn probe_excpinfo_parses_with_new_parser() {
+        // Real NTES per-train exception calendars captured live; skip
+        // gracefully when the fixture is absent from the repo.
+        let cases = [
+            (
+                "/home/runner/workspace/.agents/fixtures/mntes_excpinfo.html",
+                "04138",
+                false,
+            ),
+            (
+                "/home/runner/workspace/.agents/fixtures/mntes_excpinfo_nodata.html",
+                "12951",
+                true,
+            ),
+        ];
+        for (path, train, expect_no_data) in cases {
+            let Ok(html) = std::fs::read_to_string(path) else {
+                return;
+            };
+            let data = parse_train_exceptions(&html, train)
+                .unwrap_or_else(|| panic!("excpInfo fixture {path} did not parse"));
+            assert_eq!(data["noData"], expect_no_data);
+            println!(
+                "OK train={} noData={} exceptions={}",
+                data["train"]["number"],
+                data["noData"],
+                data["exceptions"].as_array().unwrap().len()
+            );
+            if !expect_no_data {
+                let exceptions = data["exceptions"].as_array().unwrap();
+                assert!(
+                    exceptions.iter().any(|e| e["kind"] == "cancelled"),
+                    "fixture should contain at least one cancelled date"
                 );
             }
         }

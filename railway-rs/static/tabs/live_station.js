@@ -53,13 +53,25 @@ window.Tabs.live_station = {
       const setLoading = ui.withLoading(submit, 'Loading…');
       setLoading(true);
 
+      RailLog.action('live_station', 'submit', {
+        code_raw: code, hours, autocomplete_selected: !!selectedCode,
+      });
+
+      if (!code) {
+        setLoading(false);
+        RailLog.action('live_station', 'validation', { error: 'empty', code_raw: code });
+        ui.render(results, ui.errorBox('Enter a station code (2-4 characters, e.g. NDLS or AK).'));
+        return;
+      }
       const check = ui.stationCode(code);
       if (check.error) {
         setLoading(false);
+        RailLog.action('live_station', 'validation', { error: check.error, code_raw: code });
         ui.render(results, ui.errorBox(check.error));
         return;
       }
       code = check.code;
+      RailLog.action('live_station', 'validated', { code, hours });
 
       ui.render(results, ui.spinner());
 

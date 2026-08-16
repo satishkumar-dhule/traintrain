@@ -35,11 +35,14 @@ window.Tabs.station_timetable = {
     const results = ui.el('div', { class: 'mt-12' });
 
     const submitForm = () => {
+      RailLog.action('station_timetable', 'submit', { station_raw: stnInput.value });
       const check = ui.stationCode(stnInput.value);
       if (check.error) {
+        RailLog.action('station_timetable', 'validation', { error: check.error, raw: stnInput.value });
         ui.render(results, ui.errorBox(check.error));
         return;
       }
+      RailLog.action('station_timetable', 'validated', { station: check.code });
       ui.render(results, ui.spinner());
       submit.disabled = true;
 

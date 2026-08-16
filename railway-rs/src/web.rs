@@ -82,13 +82,19 @@ async fn metrics_mw(State(state): State<AppState>, req: Request, next: Next) -> 
     let start = Instant::now();
     let res = next.run(req).await;
     let status = res.status().as_u16();
+    let (parts, body) = res.into_parts();
+    let bytes = axum::body::to_bytes(body, 64 * 1024 * 1024)
+        .await
+        .unwrap_or_default();
+    let n = bytes.len() as u64;
     let elapsed = start.elapsed();
     state.metrics.record_status(status);
     state.metrics.record_request_latency(elapsed);
+    state.metrics.add_bytes(n);
     state
         .telemetry
         .record_http(method.as_str(), &path, status, elapsed);
-    res
+    Response::from_parts(parts, axum::body::Body::from(bytes))
 }
 
 /// Log every routed request (method, path, status, latency, client) so the
