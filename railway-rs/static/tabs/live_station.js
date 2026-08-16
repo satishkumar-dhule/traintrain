@@ -28,10 +28,9 @@ window.Tabs.live_station = {
     const codeWrap = ui.el('div', { class: 'autocomplete' }, codeInput);
 
     const hoursSelect = ui.el('select', { class: 'input' },
-      ui.el('option', { value: '1', text: '1 hour' }),
       ui.el('option', { value: '2', text: '2 hours', selected: true }),
-      ui.el('option', { value: '3', text: '3 hours' }),
       ui.el('option', { value: '4', text: '4 hours' }),
+      ui.el('option', { value: '8', text: '8 hours' }),
     );
 
     const submit = ui.el('button', { class: 'btn', text: 'Get Live Station' });
@@ -49,16 +48,18 @@ window.Tabs.live_station = {
     ui.render(root, header, form, results);
 
     function load() {
-      const code = (selectedCode || codeInput.value).trim().toUpperCase();
+      let code = (selectedCode || codeInput.value).trim().toUpperCase();
       const hours = parseInt(hoursSelect.value, 10) || 2;
       const setLoading = ui.withLoading(submit, 'Loading…');
       setLoading(true);
 
-      if (!code) {
+      const check = ui.stationCode(code);
+      if (check.error) {
         setLoading(false);
-        ui.render(results, ui.errorBox('Enter a station code (4 characters, e.g. NDLS).'));
+        ui.render(results, ui.errorBox(check.error));
         return;
       }
+      code = check.code;
 
       ui.render(results, ui.spinner());
 
@@ -69,7 +70,9 @@ window.Tabs.live_station = {
           if (!res || res.ok === false) {
             const msg = res && res.error ? res.error : 'Failed to load live station.';
             const errBox = ui.errorBox(msg);
-            errBox.append(ui.el('p', { class: 'notice', text: 'NTES did not answer the arrival-board query, so no data is shown right now. Try again in a moment.' }));
+            if (res && res.status === 502) {
+              errBox.append(ui.el('p', { class: 'notice', text: 'NTES did not answer the arrival-board query, so no data is shown right now. Try again in a moment.' }));
+            }
             ui.render(results, errBox);
             return;
           }

@@ -9,7 +9,7 @@ use crate::state::AppState;
 pub struct Service;
 
 impl Service {
-    /// Trains expected at a station within `hours` (clamped to 1..=4).
+    /// Trains expected at a station within `hours` (NTES supports 2, 4, or 8).
     pub async fn get_live_station(
         state: &AppState,
         station: &str,
@@ -48,7 +48,7 @@ fn build_response(station: &str, hours: u32, data: &Value) -> Option<LiveStation
         })?;
     Some(LiveStationResponse {
         station: Some(station.to_string()),
-        hours: Some(hours.clamp(1, 4) as u8),
+        hours: Some(hours as u8),
         trains: Some(list.iter().map(station_train).collect()),
         data_source: Some("NTES".to_string()),
     })

@@ -35,15 +35,15 @@ window.Tabs.station_timetable = {
     const results = ui.el('div', { class: 'mt-12' });
 
     const submitForm = () => {
-      const station = stnInput.value.trim();
-      if (!station) {
-        ui.render(results, ui.errorBox('Station code is required.'));
+      const check = ui.stationCode(stnInput.value);
+      if (check.error) {
+        ui.render(results, ui.errorBox(check.error));
         return;
       }
       ui.render(results, ui.spinner());
       submit.disabled = true;
 
-      ctx.api.stationTimetable(station)
+      ctx.api.stationTimetable(check.code)
         .then((res) => {
           if (!res || res.ok === false) {
             const msg = res && res.error ? res.error : 'Failed to load the station timetable.';

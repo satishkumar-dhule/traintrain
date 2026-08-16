@@ -22,7 +22,7 @@ use serde::Deserialize;
 
 use crate::core::error::AppError;
 use crate::models::TrainOnMapResponse;
-use crate::slices::station_codes::is_valid_code;
+use crate::slices::station_codes::require_station;
 use crate::state::AppState;
 
 pub mod service;
@@ -46,17 +46,11 @@ async fn train_on_map_handler(
     if !(train.len() == 5 && train.chars().all(|c| c.is_ascii_digit()) && train != "00000") {
         return Err(AppError::bad_request("train must be a 5-digit number"));
     }
-    let station = q
-        .station
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_uppercase);
-    if let Some(code) = &station {
-        if !is_valid_code(code) {
-            return Err(AppError::bad_request("invalid station code"));
-        }
-    }
+    let station = if q.station.as_deref().is_some_and(|s| !s.trim().is_empty()) {
+        Some(require_station(&state, q.station.as_deref(), "station")?)
+    } else {
+        None
+    };
     let date = q.date.as_deref().map(str::trim).filter(|d| !d.is_empty());
 
     Ok(Json(

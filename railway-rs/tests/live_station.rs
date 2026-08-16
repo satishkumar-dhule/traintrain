@@ -49,7 +49,7 @@ async fn bad_station_code_is_400() {
         .get("/rail-api/ntes/live-station?station=XYZ&hours=2")
         .await;
     assert_eq!(status, 400);
-    assert_eq!(body["error"], "Station code must be a 4-character code.");
+    assert_eq!(body["error"], "Invalid station code: XYZ");
 }
 
 #[tokio::test]
@@ -86,16 +86,22 @@ async fn live_station_returns_mapped_trains() {
 }
 
 #[tokio::test]
-async fn hours_are_clamped_into_range() {
+async fn unsupported_hour_window_is_bad_request() {
     let app = TestApp::spawn().await;
     app.mocks["ntes"].ntes_web(LS_HTML);
 
-    let (status, body) = app
-        .get("/rail-api/ntes/live-station?station=NDLS&hours=99")
-        .await;
-    assert_eq!(status, 200);
-    assert_eq!(body["station"], "NDLS");
-    assert_eq!(body["hours"], 4);
+    for hours in ["1", "3", "5", "6", "7", "99"] {
+        let (status, body) = app
+            .get(&format!(
+                "/rail-api/ntes/live-station?station=NDLS&hours={hours}"
+            ))
+            .await;
+        assert_eq!(status, 400, "hours={hours} should be 400");
+        assert_eq!(
+            body["error"], "Live station window must be 2, 4, or 8 hours.",
+            "hours={hours}"
+        );
+    }
 }
 
 #[tokio::test]

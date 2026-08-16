@@ -103,7 +103,18 @@ window.UI = (() => {
 
   function fmtTime(hhmm) { return hhmm || '--:--'; }
 
-  return { el, card, badge, errorBox, successBox, notice, spinner, emptyState, table, label, render, withLoading, debounce, fmtTime };
+  /* Normalize + validate a station-code input, mirroring the backend's
+     require_station rules. Returns { code } (uppercased 4-char) or { error }. */
+  function stationCode(value) {
+    const code = String(value || '').trim().toUpperCase();
+    if (!code) return { error: 'Enter a station code.' };
+    if (code.length !== 4 || !/^[A-Z0-9]{4}$/.test(code)) {
+      return { error: `Invalid station code: ${code}. Must be a 4-character code.` };
+    }
+    return { code };
+  }
+
+  return { el, card, badge, errorBox, successBox, notice, spinner, emptyState, table, label, render, withLoading, debounce, fmtTime, stationCode };
 })();
 
 /* Autocomplete / IntelliSense for train and station inputs. Usage:

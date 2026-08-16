@@ -37,10 +37,20 @@ window.Tabs.trains_between = {
     const results = ui.el('div', { class: 'mt-12' });
 
     const submitForm = () => {
-      const src = fromInput.value.trim();
-      const dst = toInput.value.trim();
-      if (!src || !dst) {
-        ui.render(results, ui.errorBox('Both "From" and "To" station codes are required.'));
+      const srcCheck = ui.stationCode(fromInput.value);
+      if (srcCheck.error) {
+        ui.render(results, ui.errorBox(`From station: ${srcCheck.error}`));
+        return;
+      }
+      const dstCheck = ui.stationCode(toInput.value);
+      if (dstCheck.error) {
+        ui.render(results, ui.errorBox(`To station: ${dstCheck.error}`));
+        return;
+      }
+      const src = srcCheck.code;
+      const dst = dstCheck.code;
+      if (src === dst) {
+        ui.render(results, ui.errorBox('Source and destination must differ.'));
         return;
       }
       ui.render(results, ui.spinner());

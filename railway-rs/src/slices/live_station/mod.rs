@@ -20,6 +20,7 @@ use serde::Deserialize;
 use crate::core::error::AppError;
 use crate::models::LiveStationResponse;
 use crate::slices::live_station::service::Service;
+use crate::slices::station_codes::require_station;
 use crate::state::AppState;
 
 pub mod service;
@@ -35,39 +36,24 @@ pub fn router() -> Router<AppState> {
 }
 
 /// Trains expected at a station. `station` must be a 4-character code that
-/// exists in the real station dataset; `hours` is clamped into 1..=4.
+/// exists in the real station dataset (shared `require_station` rules);
+/// `hours` is clamped into 1..=4.
 async fn live_station_handler(
     State(state): State<AppState>,
     Query(params): Query<LsQuery>,
 ) -> Result<Json<LiveStationResponse>, AppError> {
-    let station = params
-        .station
-        .as_deref()
-        .unwrap_or("")
-        .trim()
-        .to_uppercase();
-    if station.len() != 4 || !station.chars().all(|c| c.is_ascii_alphanumeric()) {
-        return Err(AppError::bad_request(
-            "Station code must be a 4-character code.",
-        ));
-    }
-    let known = state
-        .datasets
-        .stations
-        .iter()
-        .any(|s| s.code.eq_ignore_ascii_case(&station));
-    if !known {
-        return Err(AppError::bad_request(format!(
-            "Station {station} not found."
-        )));
-    }
+    let station = require_station(&state, params.station.as_deref(), "station")?;
 
     let hours = params
         .hours
         .as_deref()
         .and_then(|h| h.parse::<u32>().ok())
-        .unwrap_or(2)
-        .clamp(1, 4);
+        .unwrap_or(2);
+    if !matches!(hours, 2 | 4 | 8) {
+        return Err(AppError::bad_request(
+            "Live station window must be 2, 4, or 8 hours.",
+        ));
+    }
 
     Ok(Json(
         Service::get_live_station(&state, &station, hours).await?,

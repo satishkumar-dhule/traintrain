@@ -37,15 +37,20 @@ window.Tabs.train_on_map = {
         ui.render(results, ui.errorBox('Enter a valid train number (5 digits).'));
         return;
       }
-      const station = stationInput.value.trim().toUpperCase();
-      if (station && !/^[A-Z0-9]{4}$/.test(station)) {
-        ui.render(results, ui.errorBox('Station code must be 4 letters/digits, or left blank.'));
-        return;
+      const stationRaw = stationInput.value;
+      let station = null;
+      if (stationRaw.trim()) {
+        const check = ui.stationCode(stationRaw);
+        if (check.error) {
+          ui.render(results, ui.errorBox(`${check.error} (or leave blank for the route map only.)`));
+          return;
+        }
+        station = check.code;
       }
       ui.render(results, ui.spinner());
       submit.disabled = true;
 
-      ctx.api.trainOnMap(train, station || null)
+      ctx.api.trainOnMap(train, station)
         .then((res) => {
           if (!res || res.ok === false) {
             const msg = res && res.error ? res.error : 'Failed to load train map.';
