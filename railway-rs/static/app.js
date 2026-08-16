@@ -1,29 +1,63 @@
-/* app.js - shell: builds navigation from registered tabs (window.Tabs),
-   mounts the active tab into #tab-root, fetches source-status for the badge. */
+/* app.js - shell: hash router over the Routes table, section nav (5 primary
+   sections + a "More" menu), and section mounting. Sections live in
+   static/sections/*.js (home, track, station, plan, pnr, more) and expose
+   window.Sections.<id> with mount(container, ctx, route). */
 
 window.Tabs = window.Tabs || {};
 
 (() => {
-  const NAV = [
-    { id: 'pnr', label: 'PNR Status', icon: '🎫' },
-    { id: 'live_status', label: 'Spot Train', icon: '🚄' },
-    { id: 'live_station', label: 'Live Station', icon: '⏱️' },
-    { id: 'trains_between', label: 'Trains B/W', icon: '📍' },
-    { id: 'station_timetable', label: 'Station TT', icon: '🗓️' },
-    { id: 'average_delay', label: 'Avg Delay', icon: '⏰' },
+  const SECTIONS = [
+    { id: 'home', label: 'Home', icon: '🏠' },
+    { id: 'track', label: 'Track', icon: '🚄' },
+    { id: 'station', label: 'Station', icon: '🚉' },
+    { id: 'plan', label: 'Plan', icon: '📍' },
+    { id: 'pnr', label: 'PNR', icon: '🎫' },
+  ];
+
+  const MORE = [
     { id: 'heritage', label: 'Heritage', icon: '🚞' },
     { id: 'parcel', label: 'Parcel SPL', icon: '📦' },
-    { id: 'journey_basis', label: 'Journey Basis', icon: '🚉' },
-    { id: 'train_on_map', label: 'Train Map', icon: '🗺️' },
-    { id: 'schedule', label: 'Schedule', icon: '🚉' },
-    { id: 'exceptional', label: 'Exceptional', icon: '⚠️' },
     { id: 'stations', label: 'Stations', icon: '🗺️' },
-    { id: 'settings', label: 'Settings', icon: '⚙️' },
+    { id: 'system', label: 'System', icon: '⚙️' },
     { id: 'observability', label: 'Observability', icon: '📊' },
     { id: 'debug', label: 'Debug', icon: '🐞' },
   ];
 
-  const state = { active: 'pnr', ctx: null };
+  const VIEW_LABELS = {
+    spot: 'Spot', schedule: 'Schedule', map: 'Map', delay: 'Delay',
+    exceptions: 'Exceptions', journey: 'Journey',
+    live: 'Live', tt: 'Timetable',
+    trains: 'Trains', availability: 'Availability', chart: 'Chart',
+  };
+
+  const RECENT_KEY = 'rc.recent';
+  const RECENT_MAX = 8;
+
+  const state = { ctx: null, recent: loadRecent() };
+
+  function loadRecent() {
+    try {
+      const raw = localStorage.getItem(RECENT_KEY);
+      const arr = raw ? JSON.parse(raw) : [];
+      return Array.isArray(arr) ? arr : [];
+    } catch { return []; }
+  }
+
+  function saveRecent() {
+    try { localStorage.setItem(RECENT_KEY, JSON.stringify(state.recent.slice(0, RECENT_MAX))); } catch { /* private mode */ }
+  }
+
+  function recordRecent(route) {
+    const p = route.params || {};
+    if (!p.train && !p.station && !(p.src && p.dst) && !p.pnr) return;
+    const label = entityLabel(route);
+    const hash = Routes.href(route);
+    state.recent = [
+      { label, hash, ts: Date.now() },
+      ...state.recent.filter((r) => r.hash !== hash),
+    ].slice(0, RECENT_MAX);
+    saveRecent();
+  }
 
   function ctx() {
     if (!state.ctx) {
@@ -32,84 +66,138 @@ window.Tabs = window.Tabs || {};
         ui: window.UI,
         autocomplete: window.AutoComplete,
         captcha: { show: showCaptcha },
+        navigate,
+        recent: {
+          list: () => state.recent.slice(),
+          clear: () => { state.recent = []; saveRecent(); },
+        },
       };
     }
     return state.ctx;
   }
 
-  function navFor(containerId) {
+  /* ---------- Navigation ---------- */
+
+  function navigate(hash) {
+    const target = String(hash || '#/');
+    if (location.hash === target) render(Routes.parse(target));
+    else location.hash = target;
+  }
+
+  function onHashChange() {
+    const route = Routes.parse(location.hash);
+    if (!route) {
+      const prev = location.hash;
+      location.hash = '#/';
+      if (location.hash === prev) render(Routes.parse('#/'));
+      return;
+    }
+    render(route);
+  }
+
+  function buildNav(containerId) {
     const nav = document.getElementById(containerId);
-    NAV.forEach((t) => {
-      if (!window.Tabs[t.id]) return; // tab not built yet -> hide entry
+    if (!nav) return;
+    const items = containerId === 'side-nav'
+      ? SECTIONS
+      : [...SECTIONS, { id: 'more', label: 'More', icon: '⋯' }];
+    items.forEach((s) => {
       const btn = window.UI.el('button', {
         class: 'nav-item',
-        onclick: () => activate(t.id),
+        'data-section': s.id,
+        onclick: () => navigate(Routes.href({ section: s.id })),
       });
       btn.append(
-        window.UI.el('span', { class: 'nav-icon', text: t.icon }),
-        window.UI.el('span', { text: t.label }),
+        window.UI.el('span', { class: 'nav-icon', text: s.icon }),
+        window.UI.el('span', { text: s.label }),
       );
       nav.append(btn);
     });
+    if (containerId === 'side-nav') {
+      nav.append(window.UI.el('div', { class: 'nav-group', text: 'More' }));
+      MORE.forEach((m) => {
+        const btn = window.UI.el('button', {
+          class: 'nav-item',
+          'data-more': m.id,
+          onclick: () => navigate('#/more/' + m.id),
+        });
+        btn.append(
+          window.UI.el('span', { class: 'nav-icon', text: m.icon }),
+          window.UI.el('span', { text: m.label }),
+        );
+        nav.append(btn);
+      });
+    }
   }
 
-  function activate(id) {
-    state.active = id;
+  function updateNav(route) {
     document.querySelectorAll('.nav-item').forEach((n) => n.classList.remove('active'));
-    const navBtns = [...document.querySelectorAll('.nav-item')];
-    const idx = NAV.findIndex((t) => t.id === id);
-    if (navBtns[idx]) navBtns[idx].classList.add('active');
-    mount(id);
+    const section = route.section;
+    const hit = document.querySelector(`[data-section="${section}"]`);
+    if (hit) hit.classList.add('active');
+    if (section === 'more' && route.view) {
+      const m = document.querySelector(`[data-more="${route.view}"]`);
+      if (m) m.classList.add('active');
+    }
   }
 
-  function mount(id) {
-    const tab = window.Tabs[id];
+  /* ---------- Rendering ---------- */
+
+  function render(route) {
     const root = document.getElementById('tab-root');
-    if (!tab) {
-      RailLog.warn('mount: tab not registered:', id);
+    if (!root) return;
+    updateNav(route);
+    RailLog.info('route:', location.hash || '#/', '->', route.section, route.view || '', route.params || {});
+
+    const section = window.Sections[route.section];
+    if (!section) {
+      window.UI.render(root, window.UI.errorBox(`Section "${route.section}" is not wired up yet.`));
       return;
     }
-    window.UI.render(root, window.UI.el('div', { class: 'tab-header' }));
-    RailLog.info('mounting tab:', id);
-    try {
-      tab.mount(root, ctx());
-    } catch (err) {
-      const msg = err && err.stack ? err.stack : (err && err.message ? err.message : String(err));
-      RailLog.error('tab.mount threw for', id, '->', msg);
-      window.UI.render(root, window.UI.errorBox(`Tab "${id}" failed to render: ${msg}`));
+
+    if (route.section === 'home' || (route.section === 'more' && !route.view)) {
+      section.mount(root, ctx(), route);
+      recordRecent(route);
+      return;
     }
+
+    const content = window.UI.el('div', { class: 'tab-content' });
+    window.UI.render(root, buildSectionHeader(route), content);
+    section.mount(content, ctx(), route);
+    recordRecent(route);
   }
 
-  /* Global search selection wiring: navigate to the most relevant tab and
-     prefill its input. Public hooks: window.railwayTabs.{stations,trains};
-     a 'railway:select' CustomEvent is dispatched for any additional listeners. */
-  function prefill(id, value) {
-    if (!window.Tabs[id]) return;
-    activate(id);
-    const input = document.querySelector('#tab-root input.input');
-    if (input) input.value = value;
-    const submit = document.querySelector('#tab-root .btn');
-    if (submit) submit.click();
+  function buildSectionHeader(route) {
+    const ui = window.UI;
+    const bar = ui.el('div', { class: 'section-bar' });
+    if (route.section === 'pnr') return bar;
+    const views = Routes.viewsFor(route.section);
+    const params = route.params || {};
+    const hasEntity = !!(params.train || params.station || (params.src && params.dst));
+    if (!views.length || !hasEntity) return bar;
+    bar.append(ui.el('span', { class: 'section-title', text: entityLabel(route) }));
+    const pills = ui.el('div', { class: 'section-pills' });
+    views.forEach((v) => {
+      pills.append(ui.el('button', {
+        class: 'section-pill' + (v === route.view ? ' active' : ''),
+        text: VIEW_LABELS[v] || v,
+        onclick: () => navigate(Routes.href({ section: route.section, view: v, params })),
+      }));
+    });
+    bar.append(pills);
+    return bar;
   }
 
-  window.railwayTabs = {
-    stations: {
-      selectStation(code, name) {
-        document.dispatchEvent(new CustomEvent('railway:select', { detail: { type: 'station', code, name } }));
-        prefill('live_station', code);
-      },
-    },
-    trains: {
-      selectTrain(number, name) {
-        document.dispatchEvent(new CustomEvent('railway:select', { detail: { type: 'train', number, name } }));
-        prefill('live_status', number);
-      },
-    },
-  };
+  function entityLabel(route) {
+    const p = route.params || {};
+    if (route.section === 'track') return 'Train ' + (p.train || '');
+    if (route.section === 'station') return 'Station ' + (p.station || '');
+    if (route.section === 'plan') return p.src + ' → ' + p.dst;
+    return '';
+  }
 
-  /* Header autocomplete: debounced IntelliSense over the pre-warmed local
-     datasets via the combined suggest endpoint (stations + trains in one
-     round trip), guarded against out-of-order responses with a request token. */
+  /* ---------- Shell search ---------- */
+
   function initShellSearch() {
     const wrap = document.getElementById('shell-search');
     const input = document.getElementById('shell-search-input');
@@ -183,8 +271,8 @@ window.Tabs = window.Tabs || {};
     const debouncedSearch = window.UI.debounce(search, 250);
 
     function select(it) {
-      if (it.type === 'station') window.railwayTabs.stations.selectStation(it.code, it.name);
-      else window.railwayTabs.trains.selectTrain(it.number, it.name);
+      if (it.type === 'station') navigate(Routes.href({ section: 'station', params: { station: it.code } }));
+      else navigate(Routes.href({ section: 'track', params: { train: it.number } }));
       input.value = '';
       closeMenu();
     }
@@ -201,11 +289,8 @@ window.Tabs = window.Tabs || {};
     document.addEventListener('mousedown', (e) => { if (!wrap.contains(e.target)) closeMenu(); });
   }
 
-  /* CAPTCHA flow: given an Api result with ok:false and status 428, present the
-     image and let the user answer. Rendered as a fixed overlay on <body> so the
-     underlying tab (and its detached render targets) stays intact; the promise
-     resolves to the captcha params { session_id, source, text } or null when
-     dismissed. */
+  /* ---------- CAPTCHA ---------- */
+
   function showCaptcha(challenge) {
     return new Promise((resolve) => {
       const backdrop = window.UI.el('div', {
@@ -243,14 +328,20 @@ window.Tabs = window.Tabs || {};
     });
   }
 
+  /* ---------- Boot ---------- */
+
   document.addEventListener('DOMContentLoaded', () => {
-    RailLog.info('DOMContentLoaded: building nav');
-    navFor('side-nav');
-    navFor('mobile-nav');
-    // mark the first available tab active
-    const first = NAV.find((t) => window.Tabs[t.id]);
-    RailLog.info('first available tab:', first ? first.id : '(none)', 'registered:', Object.keys(window.Tabs).sort().join(', '));
-    activate(first ? first.id : NAV[0].id);
+    buildNav('side-nav');
+    buildNav('mobile-nav');
+
+    const initial = Routes.parse(location.hash);
+    if (!initial) {
+      location.hash = '#/';
+      render(Routes.parse('#/'));
+    } else {
+      render(initial);
+    }
+    window.addEventListener('hashchange', onHashChange);
 
     window.Api.sourceStatus().then((s) => {
       if (!s || s.ok === false) {

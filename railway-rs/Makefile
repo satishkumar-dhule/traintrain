@@ -1,4 +1,4 @@
-.PHONY: build run test check lint fmt fmt-check clean smoke
+.PHONY: build run test check lint fmt fmt-check check-js clean smoke
 
 build:
 	cargo build --release
@@ -20,6 +20,14 @@ fmt:
 
 fmt-check:
 	cargo fmt --all --check
+
+# Frontend gates: every served JS file must parse, and the routes + dom-smoke
+# suites must pass (Node >= 18 for --test).
+check-js:
+	@echo "node --check on all static JS..."
+	@set -e; for f in $$(find static -name '*.js' | sort); do node --check "$$f"; done
+	@echo "node --test tests/js/..."
+	@node --test tests/js/
 
 clean:
 	cargo clean

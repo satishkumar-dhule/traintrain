@@ -13,6 +13,9 @@ jobs:
   ci:
     name: CI
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: railway-rs
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -33,3 +36,21 @@ jobs:
 
       - name: Build
         run: cargo build --release
+
+  frontend:
+    name: Frontend JS
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: railway-rs
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: JS syntax check + tests
+        run: make check-js

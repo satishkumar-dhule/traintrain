@@ -1,0 +1,10 @@
+{
+  "name": "railway-rs-spa",
+  "private": true,
+  "type": "commonjs",
+  "description": "Vanilla-JS SPA for the railway-rs backend (classic scripts, no build step). Scopes Node module resolution so static/*.js load as CommonJS regardless of the parent workspace.",
+  "scripts": {
+    "check:js": "node --check static/routes.js && node --test tests/js/",
+    "test:js": "node --test tests/js/"
+  }
+}

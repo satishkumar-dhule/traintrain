@@ -80,6 +80,60 @@ window.UI = (() => {
     return el('label', { class: 'label', text });
   }
 
+  /* A train input wrapped in a .autocomplete container with IntelliSense.
+     Returns { wrap, input }. */
+  function trainInput(placeholder) {
+    return wrapAutocomplete('train', placeholder || 'Train number or name');
+  }
+
+  /* A station input wrapped in a .autocomplete container with IntelliSense.
+     Returns { wrap, input }. */
+  function stationInput(placeholder) {
+    return wrapAutocomplete('station', placeholder || 'Station code');
+  }
+
+  function wrapAutocomplete(type, placeholder) {
+    const wrap = el('div', { class: 'autocomplete' });
+    const input = el('input', { class: 'input', autocomplete: 'off', placeholder });
+    wrap.append(input);
+    window.AutoComplete.attach(input, { type });
+    return { wrap, input };
+  }
+
+  /* Query form card from [label, control] field rows plus an optional submit
+     button. Spacing between fields comes from `.field + .field`. */
+  function queryCard(rows, submitBtn) {
+    const c = el('div', { class: 'card' });
+    rows.forEach(([text, control]) => c.append(el('div', { class: 'field' }, label(text), control)));
+    if (submitBtn) c.append(el('div', { class: 'row mt-12' }, submitBtn));
+    return c;
+  }
+
+  /* Loading-state + honest-error flow for a fetch. Shows a spinner, runs fn(),
+     renders the error box on failure, and returns the response (or null on
+     error) for the caller to render. `opts.button` is disabled while loading;
+     `opts.failText` prefixes thrown-error messages. */
+  function fetchFlow(resultsEl, fn, opts = {}) {
+    const btn = opts.button || null;
+    render(resultsEl, spinner());
+    if (btn) btn.disabled = true;
+    return Promise.resolve()
+      .then(fn)
+      .then((res) => {
+        if (!res || res.ok === false) {
+          render(resultsEl, errorBox(res && res.error ? res.error : (opts.failText || 'Request failed.')));
+          return null;
+        }
+        return res;
+      })
+      .catch((err) => {
+        const m = err && err.message ? err.message : String(err);
+        render(resultsEl, errorBox((opts.failText ? opts.failText + ': ' : '') + m));
+        return null;
+      })
+      .finally(() => { if (btn) btn.disabled = false; });
+  }
+
   /* Clear a container and optionally append children. */
   function render(root, ...children) {
     root.replaceChildren();
@@ -103,6 +157,42 @@ window.UI = (() => {
 
   function fmtTime(hhmm) { return hhmm || '--:--'; }
 
+  /* Delay cell (HTML string for ui.table): "—" when on time, "N min" when late. */
+  function delay(minutes) {
+    if (!minutes || minutes <= 0) return '<span class="muted">-</span>';
+    return `<span class="bold">${minutes} min</span>`;
+  }
+
+  /* Runs-on letters from 7 booleans (Mon..Sun), e.g. "M-TW-FS-" -> "M-TW-FS-". */
+  function days(runsOn) {
+    const letters = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+    if (!Array.isArray(runsOn)) return '—';
+    return runsOn.map((on, i) => (on ? letters[i] : '-')).join('');
+  }
+
+  /* Status badge (HTML string for ui.table) for a station halt status. */
+  function statusCell(status) {
+    const kind = status === 'departed' ? 'slate' : status === 'expected' ? 'amber' : 'blue';
+    return `<span class="badge badge-${kind}">${status || 'scheduled'}</span>`;
+  }
+
+  /* Escape a value for use as table cell HTML (ui.table injects innerHTML). */
+  function esc(v) {
+    return String(v == null || v === '' ? '—' : v)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  /* Today's date as YYYY-MM-DD (the backend's accepted date format). */
+  function today() {
+    const d = new Date();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${d.getFullYear()}-${mm}-${dd}`;
+  }
+
   /* Normalize + validate a station-code input, mirroring the backend's
      require_station rules. Returns { code } (uppercased 2-4 char) or { error }. */
   function stationCode(value) {
@@ -114,7 +204,7 @@ window.UI = (() => {
     return { code };
   }
 
-  return { el, card, badge, errorBox, successBox, notice, spinner, emptyState, table, label, render, withLoading, debounce, fmtTime, stationCode };
+  return { el, card, badge, errorBox, successBox, notice, spinner, emptyState, table, label, render, withLoading, debounce, fmtTime, stationCode, trainInput, stationInput, queryCard, fetchFlow, delay, days, statusCell, esc, today };
 })();
 
 /* Autocomplete / IntelliSense for train and station inputs. Usage:

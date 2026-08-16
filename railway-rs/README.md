@@ -17,6 +17,8 @@ RailCompanion - an Indian Railways companion backend (Rust rewrite). Axum JSON A
 
 The app is a single axum process: a top-level router (`src/web.rs`) merges one router per vertical slice, applies shared middleware (metrics, trace, catch-panic, 30s timeout), and serves the SPA from `static/` with an `index.html` fallback for client-side routing. Each vertical slice under `src/slices/` is self-contained (`mod.rs` router + `service.rs` logic). All live data flows through the `DataSource` abstraction in `src/core/source.rs`; the aggregator in `src/core/aggregator.rs` races every registered source concurrently and returns the first success. Responses are cached in a TTL `Cache` and instrumented by a real `Metrics` collector.
 
+The SPA is vanilla JS with no build step. A pure route table (`static/routes.js`, no DOM, unit-tested) parses hash URLs like `#/train/12559/schedule`, `#/station/NDLS/tt`, `#/plan/NDLS/BSB/availability` or `#/pnr/2498761234`; `static/app.js` is a thin hash router that mounts one of six section views (`static/sections/home.js`, `track.js`, `station.js`, `plan.js`, `pnr.js`, `more.js`). Valid deep links auto-submit and are refresh-safe with working back/forward; invalid or missing params fall back to the section's input form. Two large self-contained tabs are kept as-is under `static/tabs/` (train-on-map, observability). Shared helpers live in `static/ui.js` (inputs, autocomplete, query cards, fetch pipeline) and `static/api.js` (one helper per endpoint).
+
 ```
 railway-rs/
 ├── src/
@@ -119,6 +121,7 @@ Search is IntelliSense-style: train queries match **numbers and names**, station
 ## Testing
 
 - `cargo test` - hermetic integration tests in `tests/` plus unit tests in `src/`.
+- `make check-js` (or `node --test tests/js/`) - frontend gates: every served `static/*.js` parses (`node --check`), and the pure route-table unit tests (`tests/js/routes.test.mjs`) plus a DOM-smoke suite (`tests/js/dom-smoke.test.mjs`, a fake-DOM boot + hash-navigation harness that loads all real scripts with the network stubbed) pass. Requires Node >= 18. The JS test files live in `tests/js/` so they are never publicly served.
 - Integration tests use `tests/common` (`MockServer` + `TestApp`): the real app is spawned bound to a random port, with mock upstreams (railyatri / etrain / ntes / ir / irctc) wired in via the `*_BASE` config, and driven over real HTTP.
 - Set `RAILWAY_LIVE_TESTS=1` to run the live-data test suite, which hits the real upstreams and is therefore not hermetic and not run in CI.
 
