@@ -150,7 +150,9 @@ async fn ntes_is_primary_source_when_reachable() {
     assert_eq!(body["train_start_date"], "14-Aug-2026");
 
     // All run dates NTES reports for the train are surfaced, like the NTES
-    // "Spot Train (Live Status)" page shows its "Train Instances".
+    // "Spot Train (Live Status)" page shows its "Train Instances". Per-run
+    // timelines are resolved by the `?date=` switch (see
+    // `ntes_run_instance_can_be_switched_by_date`).
     let instances = body["instances"].as_array().unwrap();
     assert_eq!(instances.len(), 5);
     assert_eq!(instances[1]["start_date"], "14-Aug-2026");
@@ -158,6 +160,7 @@ async fn ntes_is_primary_source_when_reachable() {
         .as_str()
         .unwrap()
         .contains("Departed from GHAZIABAD(GZB)"));
+    assert_eq!(instances[0]["start_date"], "15-Aug-2026");
 
     let location = body["current_location_info"].as_str().unwrap();
     assert!(
@@ -181,6 +184,56 @@ async fn ntes_is_primary_source_when_reachable() {
         stations[2]["actual_arrival"], "",
         "not reached -> no actual"
     );
+}
+
+#[tokio::test]
+async fn ntes_run_instance_can_be_switched_by_date() {
+    let app = TestApp::spawn().await;
+    mock_12055_spot_train(&app);
+
+    // Switch to the completed 13-Aug run: its own real arrivals surface and
+    // the train is reported at destination.
+    let (status, body) = app
+        .get("/rail-api/live-status?train=12055&date=2026-08-13")
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["data_source"], "NTES");
+    assert_eq!(body["train_start_date"], "13-Aug-2026");
+    assert!(
+        body["current_location_info"]
+            .as_str()
+            .unwrap()
+            .contains("Arrived at DEHRADOON"),
+        "completed run reports arrival: {}",
+        body["current_location_info"].as_str().unwrap()
+    );
+    let stations = body["stations"].as_array().unwrap();
+    assert_eq!(stations.len(), 9);
+    assert!(
+        stations.iter().all(|s| s["status"] == "departed"),
+        "every stop of a completed run is departed"
+    );
+    assert_eq!(stations[8]["actual_arrival"], "21:23");
+    assert_eq!(stations[8]["delay_minutes"], 18);
+
+    // Switch to the not-yet-started 15-Aug run: still at origin, everything
+    // scheduled and no actuals invented.
+    let (status, body) = app
+        .get("/rail-api/live-status?train=12055&date=2026-08-15")
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["train_start_date"], "15-Aug-2026");
+    assert!(body["current_location_info"]
+        .as_str()
+        .unwrap()
+        .contains("Train at NEW DELHI (origin)."));
+    let stations = body["stations"].as_array().unwrap();
+    assert_eq!(
+        stations[0]["status"], "expected",
+        "origin waits for departure"
+    );
+    assert!(stations.iter().skip(1).all(|s| s["status"] == "scheduled"));
+    assert!(stations.iter().all(|s| s["actual_arrival"] == ""));
 }
 
 #[tokio::test]

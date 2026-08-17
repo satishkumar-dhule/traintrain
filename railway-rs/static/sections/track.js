@@ -38,17 +38,17 @@ function viewSpot(container, ctx, params) {
   const results = ui.el('div', { class: 'col mt-12' });
   results.append(ui.emptyState('Enter a train number to spot it.'));
 
-  function spot() {
+  function spot(date) {
     const train = input.value.trim();
     if (!/^\d+$/.test(train)) {
       ui.render(results, ui.errorBox('Enter a valid train number (digits only).'));
       return;
     }
-    ui.fetchFlow(results, () => ctx.api.liveStatus(train), { button: submit, failText: 'Failed to load live status' })
+    ui.fetchFlow(results, () => ctx.api.liveStatus(train, date), { button: submit, failText: 'Failed to load live status' })
       .then((res) => {
         if (!res) return;
         const parts = [];
-        const instances = renderInstances(res, ui);
+        const instances = renderInstances(res, ui, (d) => spot(d));
         if (instances) parts.push(instances);
         parts.push(renderPosition(res, ui), renderStations(res, ui));
         ui.render(results, ...parts);
@@ -65,16 +65,38 @@ function viewSpot(container, ctx, params) {
 }
 
 /* All run dates NTES reports for the train - the "Train Instances" list the
-   NTES Spot Train (Live Status) page shows under the train search. */
-function renderInstances(res, ui) {
+   NTES Spot Train (Live Status) page shows under the train search. Each date
+   is a switch: tapping one re-fetches that exact run via `?date=` and the
+   timeline below swaps to that instance's own position. */
+function renderInstances(res, ui, onPick) {
   const instances = res.instances || [];
   if (!instances.length) return null;
-  const rows = instances.map((i) => [
-    i.start_date,
-    i.position || '-',
-    i.start_date === res.train_start_date ? '<span class="badge badge-blue">Current</span>' : '',
-  ]);
-  return ui.card('Train Instances (dates from NTES)', ui.table(['Start Date', 'Position', ''], rows));
+  const rows = instances.map((i) => {
+    const current = i.start_date === res.train_start_date;
+    const btn = ui.el('button', {
+      class: 'btn btn-sm' + (current ? '' : ' ghost'),
+      text: i.start_date,
+    });
+    btn.addEventListener('click', () => onPick && onPick(ntesDateToIso(i.start_date)));
+    return [
+      ui.el('div', { class: 'row' }, btn, current ? ui.badge('Current', 'blue') : null),
+      i.position || '-',
+    ];
+  });
+  return ui.card(
+    'Train Instances (tap a date to switch the run)',
+    ui.table(['Start Date', 'Position'], rows),
+  );
+}
+
+/* NTES start date `14-Aug-2026` -> wire format `2026-08-14` (empty passthrough). */
+function ntesDateToIso(d) {
+  const m = /^(\d{1,2})-([A-Za-z]{3})-(\d{4})$/.exec(d || '');
+  if (!m) return d || '';
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const mi = months.indexOf(m[2][0].toUpperCase() + m[2].slice(1).toLowerCase());
+  if (mi < 0) return d;
+  return m[3] + '-' + String(mi + 1).padStart(2, '0') + '-' + String(Number(m[1])).padStart(2, '0');
 }
 
 function renderPosition(res, ui) {

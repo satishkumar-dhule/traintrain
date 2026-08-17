@@ -141,7 +141,7 @@ mod tests {
             q: &str,
             _cap: Option<&CaptchaContext>,
         ) -> Result<Value, AppError> {
-            Ok(Value::String(format!("{}-data", q)))
+            Ok(Value::String(format!("{q}-data")))
         }
     }
 

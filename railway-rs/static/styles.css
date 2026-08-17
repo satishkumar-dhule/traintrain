@@ -201,6 +201,7 @@ body {
 .btn.ghost:hover { background: var(--primary-50); filter: none; }
 .btn.danger { background: var(--danger); }
 .btn.danger:hover { filter: brightness(1.05); }
+.btn-sm { padding: 6px 12px; font-size: 12px; min-height: 0; }
 
 .label { font-size: 12px; font-weight: 700; color: var(--muted); margin-bottom: 4px; display: block; }
 

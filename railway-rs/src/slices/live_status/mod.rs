@@ -2,10 +2,10 @@
 //!
 //! Endpoint: `GET /rail-api/live-status?train=<number>&date=<YYYY-MM-DD optional>`
 //!
-//! The frontend never asks for a date - like the NTES "Spot Train (Live
-//! Status)" page it only needs the train number. The backend resolves the
-//! running instance's `startDate` via `GetTrainInstance` and reports every
-//! run date NTES returns in `instances`, plus the active run's position.
+//! Like the NTES "Spot Train (Live Status)" page, the frontend only needs the
+//! train number: the backend resolves the active run and reports every run
+//! date NTES returns in `instances` (each with its own timeline), so the UI
+//! can switch between instances by passing the exact `date`.
 //!
 //! Primary source: NTES `ShowFullRunJson` (`enquiry.indianrail.gov.in`),
 //! following the proven mobile-protocol flow: resolve the running instance's
@@ -25,9 +25,10 @@
 //! it "departed", the next station "expected", the rest "scheduled". Never
 //! invent arrival times. NTES `ShowFullRunJson` does provide real per-stop
 //! `actualArrival` values, which are surfaced verbatim (and drive honest
-//! `delay_minutes` when the delta is unambiguous). A run date that is neither
-//! today (IST) nor the train's `train_start_date` is rejected on every source
-//! path. `data_source` reports whichever source actually served the data.
+//! `delay_minutes` when the delta is unambiguous). A `date` that is neither
+//! today (IST), the train's `train_start_date`, nor one of the reported
+//! `instances` dates is rejected on every source path. `data_source` reports
+//! whichever source actually served the data.
 //!
 //! Success model: `crate::models::LiveStatusResponse`.
 

@@ -1669,6 +1669,13 @@ struct TrainStop {
 
 /// Spot-train popup -> the shared normalized train-status JSON (or `None`
 /// when the response carried no run instances, i.e. an unknown train number).
+///
+/// NTES renders every run instance (start-date tab) with its own position
+/// banner and station timeline, so each instance is parsed with its full
+/// per-stop status and surfaced in `instances[].stops`. The active run still
+/// fills the top-level fields (next station, position) exactly as before; a
+/// later date selection swaps in the matching instance's own stops and
+/// position fields (see `live_status::service::select_run_for_date`).
 fn parse_train_status(html: &str) -> Option<Value> {
     let header = re("ts_header").captures(html)?;
     let train_number = header.get(1)?.as_str().trim().to_string();
@@ -1692,7 +1699,26 @@ fn parse_train_status(html: &str) -> Option<Value> {
 
     let instances: Vec<Value> = panes
         .iter()
-        .map(|p| json!({ "start_date": p.date, "position": p.position }))
+        .map(|p| {
+            let stops = train_stops(&p.html);
+            let (at_src, at_dstn, current_idx) = current_position(&p.position, &stops);
+            let next_idx = if at_src {
+                0
+            } else {
+                (current_idx + 1).min(stops.len().saturating_sub(1))
+            };
+            let next = stops.get(next_idx);
+            json!({
+                "start_date": p.date,
+                "position": p.position,
+                "at_src": at_src.to_string(),
+                "at_dstn": at_dstn.to_string(),
+                "next_station_code": next.map(|s| s.code.as_str()).unwrap_or(""),
+                "next_station_name": next.map(|s| s.name.as_str()).unwrap_or(""),
+                "platform_number": next.map(|s| s.platform.as_str()).unwrap_or(""),
+                "stops": stops_json(&stops),
+            })
+        })
         .collect();
 
     Some(json!({
@@ -1708,20 +1734,25 @@ fn parse_train_status(html: &str) -> Option<Value> {
         "train_start_date": active.date,
         "data_source": "NTES",
         "instances": instances,
-        "stops": stops
-            .iter()
-            .map(|s| {
-                json!({
-                    "name": s.name,
-                    "code": s.code,
-                    "arrival": s.scheduled_arrival,
-                    "actual_arrival": s.actual_arrival,
-                    "platform": s.platform,
-                    "delay_minutes": s.delay_minutes,
-                })
-            })
-            .collect::<Vec<_>>(),
+        "stops": stops_json(&stops),
     }))
+}
+
+/// One station row of a run timeline, as the shared normalized JSON.
+fn stops_json(stops: &[TrainStop]) -> Vec<Value> {
+    stops
+        .iter()
+        .map(|s| {
+            json!({
+                "name": s.name,
+                "code": s.code,
+                "arrival": s.scheduled_arrival,
+                "actual_arrival": s.actual_arrival,
+                "platform": s.platform,
+                "delay_minutes": s.delay_minutes,
+            })
+        })
+        .collect()
 }
 
 fn train_status_panes(html: &str) -> Vec<TrainStatusPane> {
@@ -2505,18 +2536,6 @@ mod tests {
   {dstn_m}
 </div>
 </div>"#,
-            code = code,
-            name = name,
-            arr_s = arr_s,
-            arr_a = arr_a,
-            badge = badge,
-            dep_s = dep_s,
-            dep_a = dep_a,
-            pf = pf,
-            km = km,
-            color = color,
-            src_m = src_m,
-            dstn_m = dstn_m,
         )
     }
 
@@ -2805,11 +2824,29 @@ mod tests {
         assert_eq!(instances.len(), 2);
         assert_eq!(instances[0]["start_date"], "15-Aug-2026");
         assert_eq!(instances[0]["position"], "Yet to start from its source");
+        assert_eq!(
+            instances[0]["at_src"], "true",
+            "upcoming run sits at its origin"
+        );
+        assert_eq!(
+            instances[0]["next_station_code"], "NDLS",
+            "upcoming run's next station is the source"
+        );
+        let up_stops = instances[0]["stops"].as_array().unwrap();
+        assert_eq!(up_stops.len(), 9, "every instance carries its own timeline");
+        assert_eq!(up_stops[1]["code"], "GZB");
+        assert_eq!(
+            up_stops[1]["actual_arrival"], "",
+            "not started -> no actual"
+        );
         assert_eq!(instances[1]["start_date"], "14-Aug-2026");
         assert!(instances[1]["position"]
             .as_str()
             .unwrap()
             .contains("Departed from GHAZIABAD(GZB)"));
+        let run_stops = instances[1]["stops"].as_array().unwrap();
+        assert_eq!(run_stops[1]["actual_arrival"], "15:56");
+        assert_eq!(run_stops[1]["delay_minutes"], 3);
 
         let stops = norm["stops"].as_array().unwrap();
         assert_eq!(stops.len(), 9);
@@ -2884,6 +2921,136 @@ mod tests {
         let stops = norm["stops"].as_array().unwrap();
         assert_eq!(stops[2]["actual_arrival"], "21:23");
         assert_eq!(stops[2]["delay_minutes"], 18);
+    }
+
+    #[test]
+    fn train_status_parses_older_completed_run_instance() {
+        // A completed 13-Aug active pane plus an older 12-Aug run still
+        // mid-journey: each instance keeps its own position fields and
+        // timeline so a date selection can switch between them.
+        let run13 = [
+            spot_block(
+                "NDLS",
+                "NEW DELHI",
+                "",
+                "",
+                "On Time",
+                "15:20 13-Aug",
+                "15:20 13-Aug",
+                "9",
+                "0",
+                true,
+                false,
+            ),
+            spot_block(
+                "GZB",
+                "GHAZIABAD",
+                "15:53 13-Aug",
+                "15:53 13-Aug",
+                "On Time",
+                "15:55 13-Aug",
+                "15:55 13-Aug",
+                "1",
+                "26",
+                false,
+                false,
+            ),
+            spot_block(
+                "DDN",
+                "DEHRADOON",
+                "21:05 13-Aug",
+                "21:23 13-Aug",
+                "18 Min",
+                "",
+                "",
+                "3",
+                "324",
+                false,
+                true,
+            ),
+        ]
+        .join("\n");
+        let run12 = [
+            spot_block(
+                "NDLS",
+                "NEW DELHI",
+                "",
+                "",
+                "On Time",
+                "15:20 12-Aug",
+                "15:20 12-Aug",
+                "9",
+                "0",
+                true,
+                false,
+            ),
+            spot_block(
+                "GZB",
+                "GHAZIABAD",
+                "15:53 12-Aug",
+                "15:56 12-Aug",
+                "3 Min",
+                "15:55 12-Aug",
+                "15:58 12-Aug",
+                "1",
+                "26",
+                false,
+                false,
+            ),
+            spot_block(
+                "MTC",
+                "MEERUT CITY",
+                "16:32 12-Aug",
+                "",
+                "On Time",
+                "16:34 12-Aug",
+                "",
+                "3",
+                "74",
+                false,
+                false,
+            ),
+            spot_block(
+                "DDN",
+                "DEHRADOON",
+                "21:05 12-Aug",
+                "",
+                "On Time",
+                "",
+                "",
+                "3",
+                "324",
+                false,
+                true,
+            ),
+        ]
+        .join("\n");
+        let popup = format!(
+            "<html><h3>12055 DDN JANSHTBDI</h3>\
+             <div class=\"tab-pane active\" id=\"train13-aug-2026\">\
+             <h5>NEW DELHI (NDLS) - DEHRADOON (DDN)</h5>\
+             <h6 class =\"text-success\"><b>Arrived at DEHRADOON(DDN) at 21:23 13-Aug (Delay: 00:18)</b></h6>\
+             {run13}\
+             </div>\
+             <div class=\"tab-pane \" id=\"train12-aug-2026\">\
+             <h5>NEW DELHI (NDLS) - DEHRADOON (DDN)</h5>\
+             <h6 class =\"text-primary\"><b>Departed from GHAZIABAD(GZB) at 15:58 12-Aug (Delay: 00:03)</b></h6>\
+             {run12}\
+             </div></html>"
+        );
+        let norm = parse_train_status(&popup).unwrap();
+        let instances = norm["instances"].as_array().unwrap();
+        assert_eq!(instances[0]["start_date"], "13-Aug-2026");
+        assert_eq!(
+            instances[0]["at_dstn"], "true",
+            "completed run is at destination"
+        );
+        assert_eq!(instances[0]["stops"][2]["actual_arrival"], "21:23");
+        assert_eq!(instances[0]["stops"][2]["delay_minutes"], 18);
+        assert_eq!(instances[1]["start_date"], "12-Aug-2026");
+        assert_eq!(instances[1]["at_src"], "false");
+        assert_eq!(instances[1]["next_station_code"], "MTC");
+        assert_eq!(instances[1]["stops"][1]["actual_arrival"], "15:56");
     }
 
     #[test]

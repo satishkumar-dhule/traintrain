@@ -4,7 +4,7 @@ use serde_json::Value;
 
 use crate::core::error::AppError;
 use crate::models::LiveStatusResponse;
-use crate::slices::live_status::mapping::map_response;
+use crate::slices::live_status::mapping::{map_response, str_at};
 use crate::state::AppState;
 
 pub struct Service;
@@ -13,8 +13,11 @@ impl Service {
     /// Resolve the live position of a running train.
     ///
     /// `date` is `YYYY-MM-DD` (optional; empty means today). A non-empty date
-    /// that is neither today (IST) nor the train's `train_start_date` is
-    /// rejected on every source path - a past-day position is never invented.
+    /// resolves to the active run (today or the train's `train_start_date`) or
+    /// to one of the exact run dates NTES reports in `instances`, whose own
+    /// timeline (real arrivals for a past run, "at origin" for an upcoming
+    /// one) replaces the active run's. Any other date is rejected on every
+    /// source path - a past-day position is never invented.
     ///
     /// NTES (`enquiry.indianrail.gov.in`) is the primary source; Railyatri's
     /// SSR page is the fallback. The winning source is reported in
@@ -42,53 +45,51 @@ impl Service {
                 state
                     .metrics
                     .record_source_latency("ntes", ntes_started.elapsed());
-                if !date.is_empty() && !matches_date(date, &norm) {
-                    return Err(AppError::not_found(
-                        "Live position is only available for today's run.",
-                    ));
-                }
-                match map_response(&norm) {
-                    Ok(resp) => {
-                        tracing::info!(
-                            %train,
-                            source = "NTES",
-                            latency_ms = ntes_started.elapsed().as_millis(),
-                            "live status resolved from NTES"
-                        );
-                        state.cache.set(&key, norm);
-                        return Ok(resp);
-                    }
-                    Err(e) => e.message(),
+                match select_run_for_date(&norm, date) {
+                    Err(msg) => return Err(AppError::not_found(msg)),
+                    Ok(selected) => match map_response(&selected) {
+                        Ok(resp) => {
+                            tracing::info!(
+                                %train,
+                                %date,
+                                source = "NTES",
+                                latency_ms = ntes_started.elapsed().as_millis(),
+                                "live status resolved from NTES"
+                            );
+                            state.cache.set(&key, selected);
+                            return Ok(resp);
+                        }
+                        Err(e) => e.message(),
+                    },
                 }
             }
             Err(e) => e.message(),
         };
 
         match railyatri_norm(state, train).await {
-            Ok(norm) => {
-                if !date.is_empty() && !matches_date(date, &norm) {
-                    return Err(AppError::not_found(
-                        "Live position is only available for today's run.",
-                    ));
+            Ok(norm) => match select_run_for_date(&norm, date) {
+                Err(msg) => Err(AppError::not_found(msg)),
+                Ok(selected) => {
+                    tracing::warn!(
+                        %train,
+                        %date,
+                        source = "Railyatri",
+                        %ntes_failure,
+                        "live status resolved from Railyatri after NTES failure"
+                    );
+                    let resp = map_response(&selected).map_err(|e| {
+                        AppError::source_unavailable(
+                            "all-sources",
+                            format!(
+                                "live status for {train} failed: NTES: {ntes_failure} | Railyatri: {}",
+                                e.message()
+                            ),
+                        )
+                    })?;
+                    state.cache.set(&key, selected);
+                    Ok(resp)
                 }
-                tracing::warn!(
-                    %train,
-                    source = "Railyatri",
-                    %ntes_failure,
-                    "live status resolved from Railyatri after NTES failure"
-                );
-                let resp = map_response(&norm).map_err(|e| {
-                    AppError::source_unavailable(
-                        "all-sources",
-                        format!(
-                            "live status for {train} failed: NTES: {ntes_failure} | Railyatri: {}",
-                            e.message()
-                        ),
-                    )
-                })?;
-                state.cache.set(&key, norm);
-                Ok(resp)
-            }
+            },
             Err(AppError::NotFound(msg)) => Err(AppError::not_found(msg)),
             Err(ry_err) => Err(AppError::source_unavailable(
                 "all-sources",
@@ -99,6 +100,53 @@ impl Service {
             )),
         }
     }
+}
+
+/// Pick the run a requested `date` refers to. Empty/today/active-start dates
+/// keep the active run; an exact NTES run instance (from `instances`, which
+/// now carries its own parsed timeline and position fields) replaces the
+/// top-level stops and position so a past run shows its real arrivals and an
+/// upcoming run shows "at origin". Anything else is rejected - a past-day
+/// position is never invented.
+fn select_run_for_date(norm: &Value, date: &str) -> Result<Value, String> {
+    if date.is_empty() || matches_date(date, norm) {
+        return Ok(norm.clone());
+    }
+    let target = normalize_date(date);
+    let instance = norm
+        .get("instances")
+        .and_then(Value::as_array)
+        .and_then(|instances| {
+            instances
+                .iter()
+                .find(|i| normalize_date(&str_at(i, "start_date")) == target)
+        });
+    let Some(instance) = instance else {
+        return Err(
+            "Live position is only available for today's run or one of the reported run dates."
+                .to_string(),
+        );
+    };
+    let stops = instance.get("stops").and_then(Value::as_array);
+    if stops.is_none_or(Vec::is_empty) {
+        return Err("That run instance carries no station timeline.".to_string());
+    }
+
+    let mut sel = norm.clone();
+    sel["stops"] = Value::Array(stops.cloned().unwrap_or_default());
+    for (field, into) in [
+        ("start_date", "train_start_date"),
+        ("at_src", "at_src"),
+        ("at_dstn", "at_dstn"),
+        ("next_station_code", "next_station_code"),
+        ("next_station_name", "next_station_name"),
+        ("platform_number", "platform_number"),
+    ] {
+        if let Some(v) = instance.get(field) {
+            sel[into] = v.clone();
+        }
+    }
+    Ok(sel)
 }
 
 /// NTES fetch via the spot-train web form (`FindRunningInstancePop`): the
