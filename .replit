@@ -1,4 +1,4 @@
-modules = ["nodejs-20", "rust", "web"]
+modules = ["rust-stable", "web", "nodejs-20", "bash"]
 
 [nix]
 channel = "stable-25_05"
