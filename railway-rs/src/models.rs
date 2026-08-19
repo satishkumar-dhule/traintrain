@@ -132,6 +132,12 @@ pub struct TrainInstance {
     pub start_date: String,
     /// NTES position text for the run (e.g. `Yet to start from its source`).
     pub position: String,
+    /// Full station-by-station timeline for this run (same shape as
+    /// `LiveStop`), so the frontend can render tabs client-side without
+    /// re-fetching.  Absent when the source does not carry per-instance
+    /// stops (e.g. Railyatri fallback).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stops: Option<Vec<LiveStop>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

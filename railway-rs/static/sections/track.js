@@ -37,22 +37,50 @@ function viewSpot(container, ctx, params) {
   const submit = ui.el('button', { class: 'btn', text: 'Spot Train' });
   const results = ui.el('div', { class: 'col mt-12' });
   results.append(ui.emptyState('Enter a train number to spot it.'));
+  let lastRes = null;
 
-  function spot(date) {
-    const train = input.value.trim();
+  function spot() {
+    const raw = input.value.trim();
+    const train = raw.replace(/\s*-\s*.+$/, '').replace(/[^\d]/g, '');
     if (!/^\d+$/.test(train)) {
       ui.render(results, ui.errorBox('Enter a valid train number (digits only).'));
       return;
     }
-    ui.fetchFlow(results, () => ctx.api.liveStatus(train, date), { button: submit, failText: 'Failed to load live status' })
+    ui.fetchFlow(results, () => ctx.api.liveStatus(train), { button: submit, failText: 'Failed to load live status' })
       .then((res) => {
         if (!res) return;
-        const parts = [];
-        const instances = renderInstances(res, ui, (d) => spot(d));
-        if (instances) parts.push(instances);
-        parts.push(renderPosition(res, ui), renderStations(res, ui));
-        ui.render(results, ...parts);
+        lastRes = res;
+        renderAll(res);
       });
+  }
+
+  function renderAll(res) {
+    const parts = [];
+    const tabCard = renderInstanceTabs(res, ui, showInstance);
+    if (tabCard) parts.push(tabCard);
+    showInstance(res, 0, parts);
+  }
+
+  /* Render the selected instance's position + stations into `parts`, then
+     call ui.render.  When `extra` is provided (initial render) the existing
+     cards are prepended; on tab switch only the content area is replaced. */
+  function showInstance(res, idx, extra) {
+    const instances = res.instances || [];
+    const inst = instances[idx] || {};
+    const hasStops = Array.isArray(inst.stops) && inst.stops.length;
+    const partList = extra || [];
+    if (!extra) {
+      partList.push(renderInstanceTabs(res, ui, showInstance));
+    }
+    if (hasStops) {
+      partList.push(
+        renderInstancePosition(res, inst, ui),
+        renderInstanceStations(inst, ui),
+      );
+    } else {
+      partList.push(renderPosition(res, ui), renderStations(res, ui));
+    }
+    ui.render(results, ...partList);
   }
 
   submit.onclick = spot;
@@ -64,31 +92,6 @@ function viewSpot(container, ctx, params) {
   if (params.train) { fillInput(params.train, input); spot(); }
 }
 
-/* All run dates NTES reports for the train - the "Train Instances" list the
-   NTES Spot Train (Live Status) page shows under the train search. Each date
-   is a switch: tapping one re-fetches that exact run via `?date=` and the
-   timeline below swaps to that instance's own position. */
-function renderInstances(res, ui, onPick) {
-  const instances = res.instances || [];
-  if (!instances.length) return null;
-  const rows = instances.map((i) => {
-    const current = i.start_date === res.train_start_date;
-    const btn = ui.el('button', {
-      class: 'btn btn-sm' + (current ? '' : ' ghost'),
-      text: i.start_date,
-    });
-    btn.addEventListener('click', () => onPick && onPick(ntesDateToIso(i.start_date)));
-    return [
-      ui.el('div', { class: 'row' }, btn, current ? ui.badge('Current', 'blue') : null),
-      i.position || '-',
-    ];
-  });
-  return ui.card(
-    'Train Instances (tap a date to switch the run)',
-    ui.table(['Start Date', 'Position'], rows),
-  );
-}
-
 /* NTES start date `14-Aug-2026` -> wire format `2026-08-14` (empty passthrough). */
 function ntesDateToIso(d) {
   const m = /^(\d{1,2})-([A-Za-z]{3})-(\d{4})$/.exec(d || '');
@@ -97,6 +100,78 @@ function ntesDateToIso(d) {
   const mi = months.indexOf(m[2][0].toUpperCase() + m[2].slice(1).toLowerCase());
   if (mi < 0) return d;
   return m[3] + '-' + String(mi + 1).padStart(2, '0') + '-' + String(Number(m[1])).padStart(2, '0');
+}
+
+/* Tabbed instance picker.  Each tab carries its own position + stops from
+   the single NTES response; switching is instant (no re-fetch). */
+function renderInstanceTabs(res, ui, onSwitch) {
+  const instances = res.instances || [];
+  if (!instances.length) return null;
+  const active = res.train_start_date;
+  const tabs = instances.map((inst, i) => ({
+    label: inst.start_date + (inst.start_date === active ? ' \u2022' : ''),
+    active: inst.start_date === active,
+    click: () => onSwitch(res, i),
+  }));
+  const rows = instances.map((inst) => {
+    const cur = inst.start_date === active;
+    return [
+      cur ? ui.el('span', { class: 'bold', text: inst.start_date }) : inst.start_date,
+      cur ? ui.badge('Current', 'blue') : null,
+      inst.position || '-',
+    ];
+  });
+  return ui.card(
+    'Train Instances (tap a date to switch the run)',
+    ui.table(['Start Date', 'Position'], rows),
+  );
+}
+
+/* Position card for an instance whose stops came from the NTES response. */
+function renderInstancePosition(res, inst, ui) {
+  const instAtSrc = inst.at_src === 'true';
+  const instAtDst = inst.at_dstn === 'true';
+  const stops = inst.stops || [];
+  let location;
+  if (instAtDst) {
+    const last = stops[stops.length - 1] || {};
+    location = 'Arrived at ' + (last.name || 'destination') + '.';
+  } else if (instAtSrc) {
+    location = 'Train at ' + (stops[0] ? stops[0].name : 'origin') + ' (origin).';
+  } else {
+    location = inst.position || 'Running; position awaiting update.';
+  }
+  const runInfo = inst.start_date
+    ? ui.el('p', { class: 'text-sm muted', text: 'Run date: ' + inst.start_date })
+    : null;
+  return ui.card('Current Position',
+    ui.el('div', { class: 'row' },
+      ui.el('span', { class: 'bold', text: res.train_name }),
+      ui.badge(res.train_number, 'blue'),
+    ),
+    ui.el('p', { class: 'text-sm bold', text: location }),
+    runInfo,
+    ui.el('div', { class: 'row mt-8' },
+      ui.badge(res.data_source || 'unknown', 'slate'),
+    ),
+  );
+}
+
+/* Stations table from an instance's per-run stops. */
+function renderInstanceStations(inst, ui) {
+  const stations = inst.stops || [];
+  if (!stations.length) return ui.card('Stations', ui.notice('No station data for this run.'));
+  const showActual = stations.some((s) => s.actual_arrival);
+  const headers = ['Station', 'Code', 'Sch. Arrival'];
+  if (showActual) headers.push('Act. Arrival');
+  headers.push('Delay', 'Status');
+  const rows = stations.map((s) => {
+    const cells = [s.name, s.code, ui.fmtTime(s.scheduled_arrival)];
+    if (showActual) cells.push(ui.fmtTime(s.actual_arrival));
+    cells.push(ui.delay(s.delay_minutes), ui.statusCell(s.status));
+    return cells;
+  });
+  return ui.card('Stations', ui.table(headers, rows));
 }
 
 function renderPosition(res, ui) {

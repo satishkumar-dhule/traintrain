@@ -183,8 +183,13 @@ async fn railyatri_norm(state: &AppState, train: &str) -> Result<Value, AppError
         AppError::source_unavailable("Railyatri", format!("read body of {url}: {e}"))
     })?;
 
-    let norm = crate::core::railyatri::parse_live_status(&html)
-        .map_err(|e| AppError::source_unavailable("Railyatri", e.message()))?;
+    let norm = crate::core::railyatri::parse_live_status(&html).map_err(|e| {
+        // Preserve the error type (e.g. NotFound for expired/invalid trains)
+        match e {
+            AppError::NotFound(msg) => AppError::not_found(format!("Railyatri: {msg}")),
+            other => AppError::source_unavailable("Railyatri", other.message()),
+        }
+    })?;
     state
         .metrics
         .record_source_latency("railyatri", started.elapsed());

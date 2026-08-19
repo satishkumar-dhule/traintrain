@@ -151,6 +151,14 @@ pub fn parse_live_status(html: &str) -> Result<Value, AppError> {
     let Some(lts) = deep_get(&nd, "props.pageProps.ltsData") else {
         return Err(AppError::internal("Railyatri: no ltsData in page"));
     };
+    // Check success field - when false, the train is not running or doesn't exist
+    if lts.get("success").and_then(Value::as_bool) == Some(false) {
+        let msg = lts
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("Train not found");
+        return Err(AppError::not_found(msg));
+    }
     let stops: Vec<Value> = deep_get(&nd, "props.pageProps.timeTableData")
         .and_then(Value::as_array)
         .and_then(|arr| arr.first())
@@ -414,6 +422,13 @@ mod tests {
     fn parse_live_status_missing_lts_data_is_error() {
         let html = "<html><script id=\"__NEXT_DATA__\" type=\"application/json\">{\"props\":{\"pageProps\":{}}}</script></html>";
         assert!(parse_live_status(html).is_err());
+    }
+
+    #[test]
+    fn parse_live_status_success_false_is_not_found() {
+        let html = r#"<html><script id="__NEXT_DATA__" type="application/json">{"props":{"pageProps":{"ltsData":{"success":false,"train_number":"04558","message":"This train has already expired"}}}}</script></html>"#;
+        let err = parse_live_status(html).unwrap_err();
+        assert!(err.message().contains("already expired"));
     }
 
     #[test]

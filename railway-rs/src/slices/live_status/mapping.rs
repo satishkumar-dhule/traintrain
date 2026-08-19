@@ -107,9 +107,63 @@ pub fn map_response(norm: &Value) -> Result<LiveStatusResponse, AppError> {
         .cloned()
         .unwrap_or_default()
         .into_iter()
-        .map(|i| TrainInstance {
-            start_date: str_at(&i, "start_date"),
-            position: str_at(&i, "position"),
+        .map(|i| {
+            let inst_stops: Option<Vec<LiveStop>> = i
+                .get("stops")
+                .and_then(Value::as_array)
+                .map(|arr| {
+                    arr.iter()
+                        .enumerate()
+                        .map(|(idx, s)| {
+                            let next_code = str_at(s, "next_station_code");
+                            let inst_next_idx = arr.iter().position(|ss| {
+                                ss.get("code").and_then(Value::as_str) == Some(next_code.as_str())
+                            });
+                            let status = if i.get("at_dstn").and_then(Value::as_str) == Some("true")
+                            {
+                                "departed"
+                            } else {
+                                match inst_next_idx {
+                                    Some(n) if idx < n => "departed",
+                                    Some(n) if idx == n => "expected",
+                                    Some(_) => "scheduled",
+                                    None if i.get("at_src").and_then(Value::as_str)
+                                        == Some("true")
+                                        && idx == 0 =>
+                                    {
+                                        "expected"
+                                    }
+                                    None => "scheduled",
+                                }
+                            };
+                            let scheduled = str_at(s, "arrival");
+                            let actual = str_at(s, "actual_arrival");
+                            LiveStop {
+                                name: str_at(s, "name"),
+                                code: str_at(s, "code"),
+                                scheduled_arrival: scheduled.clone(),
+                                actual_arrival: actual.clone(),
+                                delay_minutes: s
+                                    .get("delay_minutes")
+                                    .and_then(Value::as_i64)
+                                    .unwrap_or_else(|| {
+                                        if actual.is_empty() {
+                                            0
+                                        } else {
+                                            delay_minutes(&scheduled, &actual)
+                                        }
+                                    }),
+                                status: status.to_string(),
+                            }
+                        })
+                        .collect()
+                })
+                .filter(|v: &Vec<LiveStop>| !v.is_empty());
+            TrainInstance {
+                start_date: str_at(&i, "start_date"),
+                position: str_at(&i, "position"),
+                stops: inst_stops,
+            }
         })
         .collect();
 

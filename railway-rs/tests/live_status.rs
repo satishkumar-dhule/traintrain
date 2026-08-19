@@ -282,6 +282,39 @@ async fn ntes_failure_falls_back_to_railyatri() {
 }
 
 #[tokio::test]
+async fn ntes_instances_carry_their_own_stops() {
+    let app = TestApp::spawn().await;
+    mock_12055_spot_train(&app);
+
+    let (_status, body) = app.get("/rail-api/live-status?train=12055").await;
+    let instances = body["instances"].as_array().unwrap();
+    assert!(
+        instances.len() >= 2,
+        "fixture must have at least two instances"
+    );
+
+    // Every instance reported by NTES must carry its own `stops` array so the
+    // frontend can render tabs client-side without re-fetching.
+    for (i, inst) in instances.iter().enumerate() {
+        let stops = inst.get("stops").and_then(|v| v.as_array());
+        assert!(
+            stops.is_some_and(|s| !s.is_empty()),
+            "instance[{i}] ({}) must have non-empty stops",
+            inst["start_date"].as_str().unwrap_or("?"),
+        );
+        let first = &stops.unwrap()[0];
+        assert!(
+            first.get("name").and_then(|v| v.as_str()).is_some(),
+            "each stop must have a name"
+        );
+        assert!(
+            first.get("status").and_then(|v| v.as_str()).is_some(),
+            "each stop must have a status"
+        );
+    }
+}
+
+#[tokio::test]
 async fn both_sources_down_is_502_naming_each() {
     let app = TestApp::spawn().await;
     app.mocks["ntes"].route_error("/mntes/tr", StatusCode::INTERNAL_SERVER_ERROR);
