@@ -4,7 +4,7 @@
 
 use axum::extract::State;
 use axum::http::header;
-use axum::http::HeaderValue;
+use axum::http::{HeaderMap, HeaderValue};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -19,8 +19,76 @@ pub fn router() -> Router<AppState> {
         .route("/healthz", get(healthz))
         .route("/api/healthz", get(healthz))
         .route("/metrics", get(metrics))
+        .route("/sitemap.xml", get(sitemap))
         .route("/rail-api/source-status", get(source_status))
         .route("/rail-api/debug", post(debug_report))
+}
+
+/// The canonical pages of the SPA. The app is hash-routed, so crawler-reachable
+/// URLs are the section-level routes plus the static sub-views; entity pages
+/// (`#/train/{num}`, `#/station/{code}`) are user-supplied and cannot be listed.
+const SITEMAP_PATHS: &[&str] = &[
+    "/",
+    "/#/train",
+    "/#/station",
+    "/#/station/heritage",
+    "/#/station/parcel",
+    "/#/plan",
+    "/#/system",
+    "/#/system/observability",
+    "/#/system/settings",
+    "/#/system/debug",
+];
+
+/// Serve `sitemap.xml` listing the app's canonical pages. The base URL is
+/// derived from the request's `Host` header (and `X-Forwarded-Proto` when
+/// present, e.g. behind a TLS-terminating proxy) so the same binary works on
+/// any deployment domain.
+async fn sitemap(headers: HeaderMap) -> Response {
+    let host = headers
+        .get(header::HOST)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("localhost")
+        .to_string();
+    let scheme = headers
+        .get("x-forwarded-proto")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.split(',').next())
+        .map(str::trim)
+        .filter(|s| *s == "https" || *s == "http")
+        .unwrap_or("http");
+    let base = format!("{scheme}://{host}");
+    let urls: String = SITEMAP_PATHS
+        .iter()
+        .map(|path| {
+            format!(
+                "  <url><loc>{}</loc></url>\n",
+                xml_escape(&format!("{base}{path}"))
+            )
+        })
+        .collect();
+    let body = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+         <urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n\
+         {urls}\
+         </urlset>\n"
+    );
+    (
+        [(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/xml; charset=utf-8"),
+        )],
+        body,
+    )
+        .into_response()
+}
+
+fn xml_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
 }
 
 async fn healthz() -> Json<Healthz> {

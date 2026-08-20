@@ -1,39 +1,36 @@
 /* app.js - shell: hash router over the Routes table, section nav (5 primary
-   sections + a "More" menu), and section mounting. Sections live in
-   static/sections/*.js (home, track, station, plan, pnr, more) and expose
-   window.Sections.<id> with mount(container, ctx, route). */
+   sections: home, train, station, plan, system), and section mounting. Sections
+   live in static/sections/*.js and expose window.Sections.<id> with
+   mount(container, ctx, route). */
 
 window.Tabs = window.Tabs || {};
 
 (() => {
-  const SECTIONS = [
-    { id: 'home', label: 'Home', icon: '🏠' },
-    { id: 'track', label: 'Track', icon: '🚄' },
-    { id: 'station', label: 'Station', icon: '🚉' },
-    { id: 'plan', label: 'Plan', icon: '📍' },
-    { id: 'pnr', label: 'PNR', icon: '🎫' },
-  ];
+  const UI = window.UI;
 
-  const MORE = [
-    { id: 'heritage', label: 'Heritage', icon: '🚞' },
-    { id: 'parcel', label: 'Parcel SPL', icon: '📦' },
-    { id: 'stations', label: 'Stations', icon: '🗺️' },
-    { id: 'system', label: 'System', icon: '⚙️' },
-    { id: 'observability', label: 'Observability', icon: '📊' },
-    { id: 'debug', label: 'Debug', icon: '🐞' },
+  const SECTIONS = [
+    { id: 'home', label: 'Home', icon: 'home' },
+    { id: 'train', label: 'Train', icon: 'train' },
+    { id: 'station', label: 'Station', icon: 'station' },
+    { id: 'plan', label: 'Plan', icon: 'plan' },
+    { id: 'system', label: 'System', icon: 'system' },
   ];
 
   const VIEW_LABELS = {
     spot: 'Spot', schedule: 'Schedule', map: 'Map', delay: 'Delay',
     exceptions: 'Exceptions', journey: 'Journey',
-    live: 'Live', tt: 'Timetable',
+    live: 'Live', tt: 'Timetable', heritage: 'Heritage', parcel: 'Parcel',
     trains: 'Trains', availability: 'Availability', chart: 'Chart',
+    observability: 'Observability', settings: 'Settings', debug: 'Debug',
   };
 
   const RECENT_KEY = 'rc.recent';
   const RECENT_MAX = 8;
+  const FAV_KEY = 'rc.favs';
 
-  const state = { ctx: null, recent: loadRecent() };
+  const state = { ctx: null, recent: loadRecent(), scrollMemo: {}, lastSection: null };
+
+  /* ---------- localStorage helpers ---------- */
 
   function loadRecent() {
     try {
@@ -47,9 +44,90 @@ window.Tabs = window.Tabs || {};
     try { localStorage.setItem(RECENT_KEY, JSON.stringify(state.recent.slice(0, RECENT_MAX))); } catch { /* private mode */ }
   }
 
+  /* Favorites: [{ type: 'train'|'station', code, label, ts }] */
+  function loadFavs() {
+    try {
+      const raw = localStorage.getItem(FAV_KEY);
+      const arr = raw ? JSON.parse(raw) : [];
+      return Array.isArray(arr) ? arr : [];
+    } catch { return []; }
+  }
+
+  function saveFavs() {
+    try { localStorage.setItem(FAV_KEY, JSON.stringify(state.favs)); } catch { /* private mode */ }
+  }
+
+  function favKey(type, code) { return type + ':' + String(code).toUpperCase(); }
+
+  const favListeners = [];
+  const fav = {
+    list: () => state.favs.slice(),
+    has: (type, code) => state.favs.some((f) => f.type === type && f.code.toUpperCase() === String(code).toUpperCase()),
+    toggle(type, code, label) {
+      const key = favKey(type, code);
+      const hit = state.favs.findIndex((f) => favKey(f.type, f.code) === key);
+      let added = false;
+      if (hit >= 0) {
+        state.favs.splice(hit, 1);
+      } else {
+        state.favs.unshift({ type, code: String(code).toUpperCase(), label: label || `${type} ${code}`, ts: Date.now() });
+        added = true;
+      }
+      state.favs = state.favs.slice(0, 40);
+      saveFavs();
+      renderSidebarFavs();
+      favListeners.forEach((fn) => fn(added, type, code));
+      return added;
+    },
+    onchange(fn) { favListeners.push(fn); },
+    update(type, code, label) {
+      const hit = state.favs.findIndex((f) => favKey(f.type, f.code) === favKey(type, code));
+      if (hit < 0 || !label) return;
+      state.favs[hit].label = label;
+      saveFavs();
+      renderSidebarFavs();
+    },
+  };
+
+  state.favs = loadFavs();
+
+  /* In-flight guard so we never fetch the same schedule twice. */
+  const enriching = {};
+
+  /* Background-enrich a train's recent/favorite label with
+     "Train N · NAME (FROM → TO)" once schedule data is available. Fires on
+     navigation and again on the Home page so stored bare labels self-heal. */
+  function enrichTrain(num, hash, onDone) {
+    const code = String(num).trim();
+    if (!code || !/^\d+$/.test(code) || enriching[code]) return;
+    enriching[code] = true;
+    window.Api.schedule(code)
+      .then((res) => {
+        if (!res || res.ok === false) return;
+        const stops = Array.isArray(res.stops) ? res.stops : [];
+        const from = stops[0];
+        const to = stops[stops.length - 1];
+        const label = 'Train ' + code
+          + (res.train_name ? ' \u00b7 ' + res.train_name : '')
+          + (from && to ? ' (' + from.code + ' \u2192 ' + to.code + ')' : '');
+        const h = hash || Routes.href({ section: 'train', params: { train: code } });
+        const recHit = state.recent.findIndex((r) => r.hash === h);
+        if (recHit >= 0) state.recent[recHit].label = label;
+        const favHit = state.favs.findIndex((f) => favKey(f.type, f.code) === favKey('train', code));
+        if (favHit >= 0) state.favs[favHit].label = label;
+        saveRecent();
+        saveFavs();
+        renderSidebarFavs();
+        favListeners.forEach((fn) => fn(null, 'train', code));
+        if (onDone) onDone();
+      })
+      .catch(() => {})
+      .finally(() => { delete enriching[code]; });
+  }
+
   function recordRecent(route) {
     const p = route.params || {};
-    if (!p.train && !p.station && !(p.src && p.dst) && !p.pnr) return;
+    if (!p.train && !p.station && !(p.src && p.dst)) return;
     const label = entityLabel(route);
     const hash = Routes.href(route);
     state.recent = [
@@ -57,21 +135,34 @@ window.Tabs = window.Tabs || {};
       ...state.recent.filter((r) => r.hash !== hash),
     ].slice(0, RECENT_MAX);
     saveRecent();
+    if (p.train) enrichTrain(p.train, hash);
   }
 
   function ctx() {
     if (!state.ctx) {
       state.ctx = {
         api: window.Api,
-        ui: window.UI,
+        ui: UI,
         autocomplete: window.AutoComplete,
         captcha: { show: showCaptcha },
         navigate,
         recent: {
           list: () => state.recent.slice(),
           clear: () => { state.recent = []; saveRecent(); },
+          update: (hash, label) => {
+            const hit = state.recent.findIndex((r) => r.hash === hash);
+            if (hit < 0 || !label) return;
+            state.recent[hit].label = label;
+            saveRecent();
+          },
         },
+        fav,
+        copyLink: UI.copyLink,
+        share: UI.share,
+        enrichTrain,
+        theme: window.AppTheme || { current: () => 'system', set: () => {}, toggle: () => {} },
       };
+      window._appCtx = () => state.ctx;
     }
     return state.ctx;
   }
@@ -92,53 +183,36 @@ window.Tabs = window.Tabs || {};
       if (location.hash === prev) render(Routes.parse('#/'));
       return;
     }
+    rememberScroll();
     render(route);
+  }
+
+  function rememberScroll() {
+    const main = document.getElementById('main');
+    if (main && location.hash) state.scrollMemo[location.hash] = main.scrollTop;
   }
 
   function buildNav(containerId) {
     const nav = document.getElementById(containerId);
     if (!nav) return;
-    const items = containerId === 'side-nav'
-      ? SECTIONS
-      : [...SECTIONS, { id: 'more', label: 'More', icon: '⋯' }];
-    items.forEach((s) => {
-      const btn = window.UI.el('button', {
+    SECTIONS.forEach((s) => {
+      const btn = UI.el('button', {
         class: 'nav-item',
         'data-section': s.id,
         onclick: () => navigate(Routes.href({ section: s.id })),
       });
       btn.append(
-        window.UI.el('span', { class: 'nav-icon', text: s.icon }),
-        window.UI.el('span', { text: s.label }),
+        UI.el('span', { class: 'nav-icon', 'aria-hidden': 'true' }, UI.icon(s.icon)),
+        UI.el('span', { text: s.label }),
       );
       nav.append(btn);
     });
-    if (containerId === 'side-nav') {
-      nav.append(window.UI.el('div', { class: 'nav-group', text: 'More' }));
-      MORE.forEach((m) => {
-        const btn = window.UI.el('button', {
-          class: 'nav-item',
-          'data-more': m.id,
-          onclick: () => navigate('#/more/' + m.id),
-        });
-        btn.append(
-          window.UI.el('span', { class: 'nav-icon', text: m.icon }),
-          window.UI.el('span', { text: m.label }),
-        );
-        nav.append(btn);
-      });
-    }
   }
 
   function updateNav(route) {
     document.querySelectorAll('.nav-item').forEach((n) => n.classList.remove('active'));
-    const section = route.section;
-    const hit = document.querySelector(`[data-section="${section}"]`);
+    const hit = document.querySelector(`[data-section="${route.section}"]`);
     if (hit) hit.classList.add('active');
-    if (section === 'more' && route.view) {
-      const m = document.querySelector(`[data-more="${route.view}"]`);
-      if (m) m.classList.add('active');
-    }
   }
 
   /* ---------- Rendering ---------- */
@@ -146,54 +220,70 @@ window.Tabs = window.Tabs || {};
   function render(route) {
     const root = document.getElementById('tab-root');
     if (!root) return;
+    const main = document.getElementById('main');
     updateNav(route);
+
+    if (state.lastSection && state.lastSection !== route.section && main) {
+      state.scrollMemo = {};
+      main.scrollTop = 0;
+    }
+    state.lastSection = route.section;
+
     RailLog.info('route:', location.hash || '#/', '->', route.section, route.view || '', route.params || {});
 
     const section = window.Sections[route.section];
     if (!section) {
-      window.UI.render(root, window.UI.errorBox(`Section "${route.section}" is not wired up yet.`));
+      UI.render(root, UI.errorState(`Section "${route.section}" is not wired up yet.`));
       return;
     }
 
-    if (route.section === 'home' || (route.section === 'more' && !route.view)) {
-      section.mount(root, ctx(), route);
-      recordRecent(route);
-      return;
-    }
-
-    const content = window.UI.el('div', { class: 'tab-content' });
-    window.UI.render(root, buildSectionHeader(route), content);
+    const content = UI.el('div', { class: 'tab-content' });
+    UI.render(root, content);
     section.mount(content, ctx(), route);
     recordRecent(route);
-  }
 
-  function buildSectionHeader(route) {
-    const ui = window.UI;
-    const bar = ui.el('div', { class: 'section-bar' });
-    if (route.section === 'pnr') return bar;
-    const views = Routes.viewsFor(route.section);
-    const params = route.params || {};
-    const hasEntity = !!(params.train || params.station || (params.src && params.dst));
-    if (!views.length || !hasEntity) return bar;
-    bar.append(ui.el('span', { class: 'section-title', text: entityLabel(route) }));
-    const pills = ui.el('div', { class: 'section-pills' });
-    views.forEach((v) => {
-      pills.append(ui.el('button', {
-        class: 'section-pill' + (v === route.view ? ' active' : ''),
-        text: VIEW_LABELS[v] || v,
-        onclick: () => navigate(Routes.href({ section: route.section, view: v, params })),
-      }));
+    requestAnimationFrame(() => {
+      if (main) main.scrollTop = state.scrollMemo[location.hash] || 0;
     });
-    bar.append(pills);
-    return bar;
   }
 
   function entityLabel(route) {
     const p = route.params || {};
-    if (route.section === 'track') return 'Train ' + (p.train || '');
+    if (route.section === 'train') return 'Train ' + (p.train || '');
     if (route.section === 'station') return 'Station ' + (p.station || '');
     if (route.section === 'plan') return p.src + ' → ' + p.dst;
     return '';
+  }
+
+  /* ---------- Sidebar favorites ---------- */
+
+  function renderSidebarFavs() {
+    const box = document.getElementById('side-favs');
+    if (!box) return;
+    const list = state.favs.slice(0, 12);
+    if (!list.length) { box.classList.add('hidden'); box.replaceChildren(); return; }
+    box.classList.remove('hidden');
+    box.replaceChildren(UI.el('div', { class: 'side-favs-label', text: 'Favorites' }));
+    const rows = UI.el('div', { class: 'col', style: 'gap:3px;' });
+    list.forEach((f) => {
+      rows.append(UI.el('button', {
+        class: 'recent-item',
+        onclick: () => navigate(favHash(f)),
+        'aria-label': 'Open ' + f.label,
+      },
+        UI.el('span', { class: 'recent-label' },
+          UI.icon(f.type === 'train' ? 'train' : 'station'),
+          ' ' + f.label),
+        UI.icon('star-fill', 'fav-star'),
+      ));
+    });
+    box.append(rows);
+  }
+
+  function favHash(f) {
+    if (f.type === 'train') return Routes.href({ section: 'train', params: { train: f.code } });
+    if (f.type === 'station') return Routes.href({ section: 'station', params: { station: f.code } });
+    return '#/';
   }
 
   /* ---------- Shell search ---------- */
@@ -222,7 +312,7 @@ window.Tabs = window.Tabs || {};
     function renderMenu() {
       menu.replaceChildren();
       if (!items.length) {
-        menu.append(window.UI.el('div', { class: 'ac-group', text: 'No results' }));
+        menu.append(UI.el('div', { class: 'ac-group', text: 'No results' }));
         menu.classList.remove('hidden');
         return;
       }
@@ -232,15 +322,15 @@ window.Tabs = window.Tabs || {};
       ];
       groups.forEach(([label, list]) => {
         if (!list.length) return;
-        menu.append(window.UI.el('div', { class: 'ac-group', text: label }));
+        menu.append(UI.el('div', { class: 'ac-group', text: label }));
         list.forEach((it) => {
-          const row = window.UI.el('div', {
+          const row = UI.el('div', {
             class: 'ac-item',
             onmousedown: (e) => { e.preventDefault(); select(it); },
           });
           row.append(
-            window.UI.el('span', { class: 'ac-code', text: it.code || it.number }),
-            window.UI.el('span', { class: 'ac-name', text: it.name }),
+            UI.el('span', { class: 'ac-code', text: it.code || it.number }),
+            UI.el('span', { class: 'ac-name', text: it.name }),
           );
           menu.append(row);
         });
@@ -268,17 +358,19 @@ window.Tabs = window.Tabs || {};
       renderMenu();
     }
 
-    const debouncedSearch = window.UI.debounce(search, 250);
+    const debouncedSearch = UI.debounce(search, 250);
 
     function select(it) {
       if (it.type === 'station') navigate(Routes.href({ section: 'station', params: { station: it.code } }));
-      else navigate(Routes.href({ section: 'track', params: { train: it.number } }));
+      else navigate(Routes.href({ section: 'train', params: { train: it.number } }));
       input.value = '';
       closeMenu();
     }
 
     input.addEventListener('input', debouncedSearch);
-    input.addEventListener('focus', () => { if (input.value.trim()) debouncedSearch(); });
+    input.addEventListener('focus', () => {
+      if (input.value.trim()) debouncedSearch();
+    });
     input.addEventListener('blur', () => setTimeout(closeMenu, 150));
     input.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') { closeMenu(); input.blur(); }
@@ -289,42 +381,56 @@ window.Tabs = window.Tabs || {};
     document.addEventListener('mousedown', (e) => { if (!wrap.contains(e.target)) closeMenu(); });
   }
 
-  /* ---------- CAPTCHA ---------- */
+  /* ---------- Theme ---------- */
+
+  function syncThemeIcons() {
+    const theme = window.AppTheme;
+    if (!theme) return;
+    const btn = document.getElementById('theme-toggle');
+    if (btn) btn.replaceChildren(UI.icon(theme.icon()));
+  }
+
+  function initTheme() {
+    const t = document.getElementById('theme-toggle');
+    if (t) t.addEventListener('click', () => { window.AppTheme.toggle(); syncThemeIcons(); });
+    syncThemeIcons();
+  }
+
+  /* ---------- CAPTCHA (dialog-based) ---------- */
 
   function showCaptcha(challenge) {
-    return new Promise((resolve) => {
-      const backdrop = window.UI.el('div', {
-        class: 'card',
-        style: 'position:fixed;inset:0;z-index:100;background:rgba(15,23,42,0.55);display:flex;align-items:center;justify-content:center;padding:16px;',
-        onclick: (e) => e.stopPropagation(),
-      });
-      const panel = window.UI.el('div', {
-        class: 'card',
-        style: 'width:min(360px,100%);',
-      });
-      const input = window.UI.el('input', { class: 'input', autocomplete: 'off' });
-      const close = () => backdrop.remove();
-      panel.append(
-        window.UI.el('h3', { text: `Captcha required (${challenge.source})` }),
-        window.UI.el('img', { src: challenge.image, alt: 'captcha', style: 'border:1px solid #e2e8f0;border-radius:8px;margin:8px 0;' }),
-        window.UI.el('label', { class: 'label', text: 'It is an arithmetic question (e.g. "4 + 40 = ?" → 44). Type the answer:' }),
+    const input = UI.el('input', { class: 'input', autocomplete: 'off', placeholder: 'Answer (e.g. 44)' });
+    return UI.dialog({
+      title: 'Captcha required (' + challenge.source + ')',
+      body: [
+        UI.el('img', { src: challenge.image, alt: 'captcha' }),
+        UI.el('p', { class: 'text-sm muted', text: 'It is an arithmetic question (e.g. "4 + 40 = ?" → 44). Type the answer:' }),
         input,
-        window.UI.el('div', { class: 'row mt-12' },
-          window.UI.el('button', { class: 'btn', text: 'Submit', onclick: () => {
-            const text = input.value.trim();
-            if (!text) return;
-            close();
-            resolve({ session_id: challenge.session_id, source: challenge.source, text });
-          } }),
-          window.UI.el('button', { class: 'btn ghost', text: 'Cancel', onclick: () => {
-            close();
-            resolve(null);
-          } }),
-        ),
-      );
-      backdrop.append(panel);
-      document.body.append(backdrop);
-      input.focus();
+      ],
+      actions: [
+        { label: 'Submit', primary: true, value: '__submit' },
+        { label: 'Cancel', primary: false, value: null },
+      ],
+    }).then((v) => {
+      if (v !== '__submit') return null;
+      const text = String(input.value || '').trim();
+      if (!text) return null;
+      return { session_id: challenge.session_id, source: challenge.source, text };
+    });
+  }
+
+  /* ---------- Keyboard shortcuts ---------- */
+
+  function initKeyboard() {
+    document.addEventListener('keydown', (e) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const tag = e.target && e.target.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if (e.key === '/') {
+        e.preventDefault();
+        const input = document.getElementById('shell-search-input');
+        if (input) input.focus();
+      }
     });
   }
 
@@ -333,6 +439,9 @@ window.Tabs = window.Tabs || {};
   document.addEventListener('DOMContentLoaded', () => {
     buildNav('side-nav');
     buildNav('mobile-nav');
+    renderSidebarFavs();
+    initTheme();
+    initKeyboard();
 
     const initial = Routes.parse(location.hash);
     if (!initial) {

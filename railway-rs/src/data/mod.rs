@@ -10,9 +10,12 @@
 //!
 //! The lists are *pre-warmed*: at startup every record is normalized once into
 //! lowercase indexes (`station_lc`, `train_lc`), so autocomplete / search
-//! requests never re-normalize the dataset and stay allocation-light. Search is
-//! IntelliSense-style: it matches train numbers *and* train names (and station
-//! codes and names) with a score so exact > prefix > contains, and multi-word
+//! requests never re-normalize the dataset and stay allocation-light. Station
+//! search and autocomplete all go through the single tiered ranking authority
+//! (`Datasets::rank_stations`, over the pre-warmed `station_lc` index): exact
+//! code > exact name > code prefix (shortest first) > name prefix (shortest
+//! name first). Train search is IntelliSense-style: it matches train numbers
+//! *and* train names with a score so exact > prefix > contains, and multi-word
 //! queries rank all-tokens matches above partial ones.
 
 use std::collections::HashMap;
@@ -157,52 +160,88 @@ impl Datasets {
             .collect()
     }
 
-    /// IntelliSense station search over the pre-warmed index: matches code and
-    /// name, ranks exact/prefix/contains, all-tokens matches first.
+    /// Station search over the pre-warmed index, capped at `limit`. Uses the
+    /// single tiered ranking authority (`rank_stations`) shared by every
+    /// station query path: `/rail-api/search/stations`, `/rail-api/stations`
+    /// and the `suggest` autocomplete.
     pub fn search_stations(&self, query: &str, limit: usize) -> Vec<StationRecord> {
-        let q = query.trim().to_lowercase();
-        if q.is_empty() {
-            return Vec::new();
-        }
-        let tokens: Vec<&str> = q.split_whitespace().collect();
-        let mut scored: Vec<(i64, &StationRecord)> = Vec::new();
-        for (s, lc) in self.stations.iter().zip(self.station_lc.iter()) {
-            if let Some(score) = station_score(&lc.code, &lc.name, &tokens) {
-                scored.push((score, s));
-            }
-        }
-        scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.code.cmp(&b.1.code)));
-        scored
-            .iter()
+        self.rank_stations(query)
+            .into_iter()
             .take(limit)
-            .map(|(_, s)| (*s).clone())
+            .map(|s| (*s).clone())
             .collect()
     }
 
-    /// Combined station + train autocomplete (IntelliSense) in a single pass.
-    /// Trains and stations are interleaved by score, so `suggest("1295")` and
-    /// `suggest("MUMBAI RAJDHANI")` return the best of both lists in one hit.
-    pub fn suggest(&self, query: &str, limit: usize) -> Vec<Suggestion> {
+    /// Unified station ranking authority for search and autocomplete. Tier
+    /// order:
+    /// 1. exact code (case-insensitive) first
+    /// 2. exact name (case-insensitive) next
+    /// 3. code prefix, shortest code first
+    /// 4. name prefix, shortest name first then code
+    ///
+    /// Anything else is excluded; empty/whitespace query -> empty. Consumes
+    /// the pre-warmed lowercase `station_lc` index, so no record is
+    /// re-lowercased per request.
+    fn rank_stations<'a>(&'a self, query: &str) -> Vec<&'a StationRecord> {
         let q = query.trim().to_lowercase();
         if q.is_empty() {
             return Vec::new();
         }
-        let tokens: Vec<&str> = q.split_whitespace().collect();
-        let mut scored: Vec<(i64, Suggestion)> = Vec::new();
-
+        let mut exact_code: Vec<&StationRecord> = Vec::new();
+        let mut exact_name: Vec<&StationRecord> = Vec::new();
+        let mut code_prefix: Vec<&StationRecord> = Vec::new();
+        let mut name_prefix: Vec<&StationRecord> = Vec::new();
         for (s, lc) in self.stations.iter().zip(self.station_lc.iter()) {
-            if let Some(score) = station_score(&lc.code, &lc.name, &tokens) {
-                scored.push((
-                    score,
-                    Suggestion {
-                        kind: "station",
-                        code: Some(s.code.clone()),
-                        number: None,
-                        name: s.name.clone(),
-                    },
-                ));
+            if lc.code == q {
+                exact_code.push(s);
+            } else if lc.name == q {
+                exact_name.push(s);
+            } else if lc.code.starts_with(&q) {
+                code_prefix.push(s);
+            } else if lc.name.starts_with(&q) {
+                name_prefix.push(s);
             }
         }
+        code_prefix.sort_by(|a, b| {
+            a.code
+                .len()
+                .cmp(&b.code.len())
+                .then_with(|| a.code.cmp(&b.code))
+        });
+        name_prefix.sort_by(|a, b| {
+            a.name
+                .len()
+                .cmp(&b.name.len())
+                .then_with(|| a.code.cmp(&b.code))
+        });
+        let mut out = exact_code;
+        out.extend(exact_name);
+        out.extend(code_prefix);
+        out.extend(name_prefix);
+        out
+    }
+
+    /// Combined station + train autocomplete. Stations are ranked by the same
+    /// unified tiered authority as `search_stations`, so the From/To box and
+    /// the search endpoint agree; trains keep the IntelliSense score and fill
+    /// the remaining slots. `suggest("1295")` and `suggest("MUMBAI RAJDHANI")`
+    /// return the best of both lists in one hit.
+    pub fn suggest(&self, query: &str, limit: usize) -> Vec<Suggestion> {
+        let mut scored: Vec<(i64, Suggestion)> = Vec::new();
+
+        for (idx, s) in self.rank_stations(query).into_iter().enumerate() {
+            scored.push((
+                1000 - idx as i64,
+                Suggestion {
+                    kind: "station",
+                    code: Some(s.code.clone()),
+                    number: None,
+                    name: s.name.clone(),
+                },
+            ));
+        }
+        let q = query.trim().to_lowercase();
+        let tokens: Vec<&str> = q.split_whitespace().collect();
         for (t, lc) in self.trains.iter().zip(self.train_lc.iter()) {
             if let Some(score) = train_score(&t.number, &lc.name, &tokens) {
                 scored.push((

@@ -1,0 +1,15 @@
+{
+  "name": "RailCompanion — Indian Railways live companion",
+  "short_name": "RailCompanion",
+  "description": "Live Indian Railways data — train spot, schedules, station boards, availability and coach charts. No accounts, no keys, honest data.",
+  "start_url": "/#/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0d1626",
+  "theme_color": "#1e3a8a",
+  "icons": [
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}

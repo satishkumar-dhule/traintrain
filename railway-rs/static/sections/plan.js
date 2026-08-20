@@ -1,22 +1,35 @@
-/* sections/plan.js - Plan section. Views: trains (trains between), availability
-   (IRCTC berth availability), chart (IRCTC coach chart). Deep links like
-   #/plan/NDLS/BSB/availability auto-submit; the chart view needs a train
-   number, so it opens the form with the boarding station prefilled from src.
-   Live-data-only. */
-
 (() => {
 window.Sections = window.Sections || {};
+
+const CLASSES = [
+  ['ALL', 'All Classes'],
+  ['1A', 'AC First Class (1A)'],
+  ['2A', 'AC 2 Tier (2A)'],
+  ['3A', 'AC 3 Tier (3A)'],
+  ['3E', 'AC 3 Economy (3E)'],
+  ['FC', 'First Class (FC)'],
+  ['SL', 'Sleeper (SL)'],
+  ['2S', 'Second Sitting (2S)'],
+];
 
 window.Sections.plan = {
   mount(container, ctx, route) {
     const p = route.params || {};
     const view = route.view || 'trains';
+    const views = ['trains', 'availability', 'chart'];
+    const labels = { trains: 'Trains', availability: 'Availability', chart: 'Chart' };
+    const pills = ctx.ui.pillBar(views, labels, view, (v) => {
+      ctx.navigate(Routes.href({ section: 'plan', view: v, params: p }));
+    });
+    const content = ctx.ui.el('div');
+    ctx.ui.render(container, pills, content);
     switch (view) {
-      case 'availability': viewAvailability(container, ctx, p); break;
-      case 'chart': viewChart(container, ctx, p); break;
-      default: viewTrains(container, ctx, p);
+      case 'availability': viewAvailability(content, ctx, p); break;
+      case 'chart': viewChart(content, ctx, p); break;
+      default: viewTrains(content, ctx, p);
     }
   },
+  weekdayName,
 };
 
 function fillInput(value, input) {
@@ -43,111 +56,238 @@ function stationPairValid(ui, fromInput, toInput, results) {
   return { src, dst };
 }
 
+function planHash(src, dst, extras) {
+  const params = { src, dst };
+  if (extras && extras.date) params.date = extras.date;
+  if (extras && extras.class) params.class = extras.class;
+  if (extras && extras.flex) params.flex = '1';
+  if (extras && extras.berth) params.berth = '1';
+  return Routes.href({ section: 'plan', params });
+}
+
+function renderHero(wrap, ui, ctx, pair, res, extras) {
+  const badges = [ui.badge('Data source: ' + (res && res.data_source ? res.data_source : 'unknown'), 'slate')];
+  const hash = planHash(pair.src, pair.dst, extras);
+  const actions = [
+    ui.el('button', { class: 'btn', onclick: () => ctx.copyLink(hash) }, ui.icon('copy', 'btn-ic'), 'Copy link'),
+    ui.el('button', { class: 'btn', onclick: () => ctx.share(hash) }, ui.icon('share', 'btn-ic'), 'Share'),
+  ];
+  ui.render(wrap, ui.entityHero({
+    icon: 'plan',
+    title: `${pair.src} → ${pair.dst}`,
+    subtitle: res && res.route_description ? res.route_description : '',
+    badges,
+    actions,
+  }));
+}
+
+function travelDuration(dep, arr) {
+  const d = String(dep || '');
+  const a = String(arr || '');
+  if (!/^\d{4}$/.test(d) || !/^\d{4}$/.test(a)) return '';
+  let depMin = (+d.slice(0, 2)) * 60 + (+d.slice(2));
+  let arrMin = (+a.slice(0, 2)) * 60 + (+a.slice(2));
+  if (arrMin < depMin) arrMin += 1440;
+  const h = Math.floor((arrMin - depMin) / 60);
+  const m = (arrMin - depMin) % 60;
+  return h + 'h ' + (m ? m + 'm' : '0m');
+}
+
+/* Weekday index (0 = Mon .. 6 = Sun) of a YYYY-MM-DD date, matching the
+   runs_on array order used by the backend. */
+function weekdayIndex(dateIso) {
+  const d = new Date(String(dateIso) + 'T00:00:00');
+  if (isNaN(d.getTime())) return -1;
+  return (d.getDay() + 6) % 7;
+}
+
+/* Full weekday name for a runs_on index (0 = Monday .. 6 = Sunday). */
+function weekdayName(i) {
+  return ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][i] || '';
+}
+
+/* ---------- IRCTC-style search form ---------- */
+
+function searchForm(ui, opts) {
+  const rb = ui.routeBox({ from: opts.from || '', to: opts.to || '' });
+  const date = ui.flDate({ label: 'Journey Date', initial: opts.date || ui.today(), cls: 'console-date' });
+  const cls = opts.withClass !== false
+    ? ui.flSelect({ label: 'Class', icon: 'train', cls: 'console-class', options: CLASSES, value: opts.class || 'ALL' })
+    : null;
+  const flex = opts.withChecks !== false ? ui.checkRow({ label: 'Flexible with date', checked: !!opts.flex }) : null;
+  const berth = opts.withChecks !== false ? ui.checkRow({ label: 'Trains with available berth', checked: !!opts.berth }) : null;
+  const checks = flex ? ui.el('div', { class: 'console-checks' }, flex.row, berth.row) : null;
+  const btn = ui.searchBtn({ label: opts.btnLabel || 'Search', onclick: opts.onSubmit });
+  const form = ui.el('div', { class: 'console-form' }, rb.wrap, date.wrap);
+  if (cls) form.append(cls.wrap);
+  if (checks) form.append(checks);
+  form.append(btn);
+
+  rb.from.addEventListener('keydown', (e) => { if (e.key === 'Enter') opts.onSubmit(); });
+  rb.to.addEventListener('keydown', (e) => { if (e.key === 'Enter') opts.onSubmit(); });
+  return { form, rb, date, cls, flex, berth, btn };
+}
+
 /* ---------- trains ---------- */
 
 function viewTrains(container, ctx, params) {
   const ui = ctx.ui;
-  const header = ui.card('Trains Between Stations',
-    ui.el('p', { class: 'text-sm muted', text: 'Direct trains (NTES)' }),
-  );
+  const p = params || {};
 
-  const from = ui.stationInput('From Station Code');
-  const to = ui.stationInput('To Station Code');
-  const submit = ui.el('button', { class: 'btn', text: 'Find Trains' });
-  const results = ui.el('div', { class: 'mt-12' });
+  const results = ui.el('div', { class: 'mt-8' });
+  const heroWrap = ui.el('div');
 
-  const submitForm = () => {
-    RailLog.action('trains_between', 'submit', {
-      src_raw: from.input.value, dst_raw: to.input.value,
-    });
-    const pair = stationPairValid(ui, from.input, to.input, results);
-    if (!pair) return;
-    RailLog.action('trains_between', 'validated', pair);
-    ui.fetchFlow(results, () => ctx.api.trainsBetween(pair.src, pair.dst), { button: submit, failText: 'Failed to load trains between stations' })
-      .then((res) => { if (res) ui.render(results, ...renderTrains(res, ui)); });
+  const fetchTrains = (pair, dateVal, flexOn, clsVal, berthOn) => {
+    ui.fetchFlow(results, () => ctx.api.trainsBetween(pair.src, pair.dst), { button: form.btn, failText: 'Failed to load trains between stations' })
+      .then((res) => {
+        renderHero(heroWrap, ui, ctx, pair, res, { date: dateVal, class: clsVal, flex: flexOn, berth: berthOn });
+        if (res) ui.render(results, ...renderTrains(res, ui, ctx, pair.src, pair.dst, dateVal, flexOn, clsVal, berthOn));
+      });
   };
 
-  from.input.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitForm(); });
-  to.input.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitForm(); });
-  submit.addEventListener('click', submitForm);
+  const submit = () => {
+    RailLog.action('trains_between', 'submit', {
+      src_raw: form.rb.from.value, dst_raw: form.rb.to.value,
+    });
+    const pair = stationPairValid(ui, form.rb.from, form.rb.to, results);
+    if (!pair) return;
+    RailLog.action('trains_between', 'validated', pair);
+    const dateVal = form.date.getDate();
+    const target = Routes.href({
+      section: 'plan', view: 'trains',
+      params: {
+        src: pair.src, dst: pair.dst, date: dateVal,
+        class: form.cls && form.cls.get() !== 'ALL' ? form.cls.get() : '',
+        flex: form.flex && form.flex.get() ? '1' : '',
+        berth: form.berth && form.berth.get() ? '1' : '',
+      },
+    });
+    if (location.hash === target) fetchTrains(pair, dateVal, !!form.flex.get(), form.cls.get(), !!form.berth.get());
+    else ctx.navigate(target);
+  };
 
-  ui.render(container, header,
-    ui.queryCard([['From Station Code', from.wrap], ['To Station Code', to.wrap]], submit),
-    results);
+  const form = searchForm(ui, {
+    from: p.src || '', to: p.dst || '',
+    date: p.date || ui.today(),
+    class: p.class || 'ALL',
+    flex: p.flex, berth: p.berth,
+    btnLabel: 'Find Trains',
+    onSubmit: submit,
+  });
 
-  if (params.src && params.dst) {
-    fillInput(params.src, from.input);
-    fillInput(params.dst, to.input);
-    submitForm();
+  ui.render(container, heroWrap, form.form, results);
+
+  if (p.src && p.dst) {
+    renderHero(heroWrap, ui, ctx, { src: p.src, dst: p.dst }, null, p);
+    submit();
   }
 }
 
-function renderTrains(res, ui) {
-  const route = ui.card('Route',
-    ui.el('div', { class: 'row align-center mt-8' },
-      ui.badge(res.src || '', 'blue'),
-      ui.el('span', { class: 'bold', text: '→' }),
-      ui.badge(res.dst || '', 'blue'),
-      ui.badge('Data source: ' + (res.data_source || 'unknown'), 'slate'),
-    ),
-  );
+function renderTrains(res, ui, ctx, src, dst, dateIso, flex, clsVal, berthOn) {
+  const trains = Array.isArray(res.trains) ? res.trains : [];
+  if (!trains.length) {
+    return [ui.emptyState('train', 'No direct trains', `No direct trains found between ${res.src || ''} and ${res.dst || ''}.`)];
+  }
+  const parts = [];
+  const idx = dateIso ? weekdayIndex(dateIso) : -1;
+  const runsOnDay = (t) => idx >= 0 && Array.isArray(t.runs_on) && t.runs_on[idx] === true;
+  const running = flex ? trains : trains.filter(runsOnDay);
+  if (idx >= 0 && !flex && running.length !== trains.length) {
+    parts.push(ui.notice(
+      `${running.length} of ${trains.length} trains run on ${weekdayName(idx)}. Tick "Flexible with date" to show all.`));
+  }
+  if (clsVal && clsVal !== 'ALL') {
+    parts.push(ui.notice(`Class ${clsVal} selected — class-wise seats are listed in the Availability tab.`));
+  }
+  if (berthOn) {
+    parts.push(ui.notice('Berth availability is not part of this search — check the Availability tab for berth status.'));
+  }
+  if (!running.length) {
+    parts.push(ui.emptyState('train', 'No trains on this day',
+      `None of the ${trains.length} direct trains between ${src} and ${dst} run on ${ui.friendlyDate(dateIso)}. Tick "Flexible with date" to show all.`));
+    return parts;
+  }
+  parts.push(ui.card('Direct trains',
+    ui.el('div', { class: 'col' },
+      ...running.map((t) => trainCard(t, ui, ctx, src, dst, idx >= 0 && !runsOnDay(t) ? weekdayName(idx) : null)))));
+  return parts;
+}
 
-  const trains = res.trains || [];
-  const list = ui.card('Trains',
-    Array.isArray(trains) && trains.length
-      ? ui.table(['No.', 'Train', 'Departure', 'Arrival', 'Days'],
-          trains.map((t) => [
-            ui.el('span', { class: 'mono', text: t.number || '' }).outerHTML,
-            t.name || '',
-            ui.fmtTime(t.departure_time),
-            ui.fmtTime(t.arrival_time),
-            ui.days(t.runs_on),
-          ]))
-      : ui.notice('No direct trains found.'),
+function trainCard(t, ui, ctx, src, dst, notRunningDay) {
+  const btn = ui.el('button', {
+    class: 'train-card',
+    onclick: () => ctx.navigate(Routes.href({ section: 'train', params: { train: t.number } })),
+    'aria-label': 'Open train ' + (t.number || '') + (t.name ? ' ' + t.name : ''),
+  });
+  btn.append(ui.el('span', { class: 'train-card-num', text: t.number || '?' }));
+  const body = ui.el('div', { class: 'train-card-body' });
+  body.append(ui.el('div', { class: 'train-card-name', text: t.name || '' }));
+  const meta = ui.el('div', { class: 'train-card-meta' });
+  meta.append(ui.badge(ui.days(t.runs_on), 'slate'));
+  if (notRunningDay) meta.append(ui.badge('Not on ' + notRunningDay, 'amber'));
+  body.append(meta);
+  const times = ui.el('div', { class: 'train-card-times' });
+  times.append(
+    ui.el('span', { class: 'train-card-time', text: ui.fmtTime(t.departure_time) }),
+    ui.el('span', { class: 'train-card-station', text: src || '' }),
+    ui.el('span', { class: 'train-card-arrow', text: '→' }),
+    ui.el('span', { class: 'train-card-dur', text: travelDuration(t.departure_time, t.arrival_time) }),
+    ui.el('span', { class: 'train-card-arrow', text: '→' }),
+    ui.el('span', { class: 'train-card-time', text: ui.fmtTime(t.arrival_time) }),
+    ui.el('span', { class: 'train-card-station', text: dst || '' }),
   );
-
-  return [route, list];
+  body.append(times);
+  btn.append(body);
+  return btn;
 }
 
 /* ---------- availability ---------- */
 
 function viewAvailability(container, ctx, params) {
   const ui = ctx.ui;
-  const header = ui.card('Availability',
-    ui.el('p', { class: 'text-sm muted', text: 'Live berth availability (IRCTC). Classes vary by train.' }),
-  );
+  const p = params || {};
 
-  const from = ui.stationInput('From Station Code');
-  const to = ui.stationInput('To Station Code');
-  const dateInput = ui.el('input', { class: 'input', type: 'date', value: ui.today() });
-  const submit = ui.el('button', { class: 'btn', text: 'Check Availability' });
-  const results = ui.el('div', { class: 'mt-12' });
+  const results = ui.el('div', { class: 'mt-8' });
+  const heroWrap = ui.el('div');
 
-  const submitForm = () => {
-    const pair = stationPairValid(ui, from.input, to.input, results);
-    if (!pair) return;
-    const date = (dateInput.value || '').trim() || undefined;
-    ui.fetchFlow(results, () => ctx.api.availability(pair.src, pair.dst, date), { button: submit, failText: 'Failed to load availability' })
-      .then((res) => { if (res) ui.render(results, ...renderAvailability(res, ui)); });
+  const fetchAvail = (pair, dateVal) => {
+    ui.fetchFlow(results, () => ctx.api.availability(pair.src, pair.dst, dateVal), { button: form.btn, failText: 'Failed to load availability' })
+      .then((res) => {
+        renderHero(heroWrap, ui, ctx, pair, res, { date: dateVal });
+        if (res) ui.render(results, ...renderAvailability(res, ui, ctx));
+      });
   };
 
-  from.input.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitForm(); });
-  to.input.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitForm(); });
-  dateInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitForm(); });
-  submit.addEventListener('click', submitForm);
+  const submit = () => {
+    const pair = stationPairValid(ui, form.rb.from, form.rb.to, results);
+    if (!pair) return;
+    const dateVal = form.date.getDate();
+    const target = Routes.href({
+      section: 'plan', view: 'availability',
+      params: { src: pair.src, dst: pair.dst, date: dateVal },
+    });
+    if (location.hash === target) fetchAvail(pair, dateVal);
+    else ctx.navigate(target);
+  };
 
-  ui.render(container, header,
-    ui.queryCard([['From Station Code', from.wrap], ['To Station Code', to.wrap], ['Journey Date', dateInput]], submit),
-    results);
+  const form = searchForm(ui, {
+    from: p.src || '', to: p.dst || '',
+    date: p.date || ui.today(),
+    btnLabel: 'Check Availability',
+    onSubmit: submit,
+    withClass: false,
+    withChecks: false,
+  });
 
-  if (params.src && params.dst) {
-    fillInput(params.src, from.input);
-    fillInput(params.dst, to.input);
-    submitForm();
+  ui.render(container, heroWrap, form.form, results);
+
+  if (p.src && p.dst) {
+    renderHero(heroWrap, ui, ctx, { src: p.src, dst: p.dst }, null, p);
+    submit();
   }
 }
 
-function renderAvailability(res, ui) {
+function renderAvailability(res, ui, ctx) {
   const route = ui.card('Route',
     ui.el('div', { class: 'row align-center mt-8' },
       ui.badge(res.src || '', 'blue'),
@@ -160,34 +300,44 @@ function renderAvailability(res, ui) {
   const trains = res.trains || [];
   const list = ui.card('Trains',
     Array.isArray(trains) && trains.length
-      ? ui.table(['No.', 'Train', 'Departure', 'Arrival', 'Duration', 'Classes'],
+      ? ui.collapsibleTable(['No.', 'Train', 'Departure', 'Arrival', 'Duration', 'Classes'],
           trains.map((t) => [
-            ui.el('span', { class: 'mono', text: t.number || '' }).outerHTML,
+            ui.entityLink('train', t.number || '', t.number || '', ctx.navigate),
             t.name || '',
             ui.fmtTime(t.departure_time),
             ui.fmtTime(t.arrival_time),
             t.duration || '',
-            Array.isArray(t.classes) ? t.classes.join(' · ') : '',
+            classChips(t.classes, ui),
           ]))
-      : ui.notice('No availability data returned.'),
+      : ui.emptyState('ticket', 'No availability', 'No availability data returned for this route and date.'),
   );
   if (res.notice) list.append(ui.el('p', { class: 'notice' }, res.notice));
   return [route, list];
+}
+
+function classChips(classes, ui) {
+  if (!Array.isArray(classes) || !classes.length) return ui.el('span', { class: 'text-sm muted', text: '—' });
+  return ui.el('span', { class: 'row', style: 'gap:4px;' },
+    ...classes.map((c) => ui.badge(String(c), classKind(c))));
+}
+
+function classKind(cls) {
+  const s = String(cls || '').toUpperCase();
+  if (s.indexOf('AVAILABLE') !== -1 || s.indexOf('AVBL') !== -1) return 'green';
+  if (s.indexOf('WL') !== -1 || s.indexOf('RAC') !== -1) return 'amber';
+  return 'slate';
 }
 
 /* ---------- chart ---------- */
 
 function viewChart(container, ctx, params) {
   const ui = ctx.ui;
-  const header = ui.card('Coach Chart',
-    ui.el('p', { class: 'text-sm muted', text: 'Live coach & berth reservation chart (IRCTC).' }),
-  );
 
-  const train = ui.trainInput('Train No. (5 digits)');
+  const train = ui.trainInput('Train No.');
   const dateInput = ui.el('input', { class: 'input', type: 'date', value: ui.today() });
-  const station = ui.stationInput('Boarding station (optional)');
-  const submit = ui.el('button', { class: 'btn', text: 'Get Coach Chart' });
-  const results = ui.el('div', { class: 'mt-12' });
+  const station = ui.stationInput('Boarding (opt.)');
+  const submit = ui.el('button', { class: 'btn', text: 'Get Chart' });
+  const results = ui.el('div', { class: 'mt-8' });
 
   const submitForm = () => {
     const trainValue = train.input.value.trim();
@@ -207,7 +357,7 @@ function viewChart(container, ctx, params) {
       stationCode = sCheck.code;
     }
     ui.fetchFlow(results, () => ctx.api.chart(trainValue, date, stationCode), { button: submit, failText: 'Failed to load the coach chart' })
-      .then((res) => { if (res) ui.render(results, ...renderChart(res, ui)); });
+      .then((res) => { if (res) ui.render(results, ...ui.chartView(res, ui, ctx)); });
   };
 
   train.input.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitForm(); });
@@ -220,56 +370,8 @@ function viewChart(container, ctx, params) {
     if (!sCheck.error) fillInput(sCheck.code, station.input);
   }
 
-  ui.render(container, header,
-    ui.queryCard([['Train Number', train.wrap], ['Journey Date', dateInput], ['Boarding Station', station.wrap]], submit),
+  ui.render(container,
+    ui.el('div', { class: 'card-sm' }, ui.el('div', { class: 'row', style: 'gap:6px;' }, train.wrap, dateInput, station.wrap, submit)),
     results);
-}
-
-function renderChart(res, ui) {
-  const headerRow = ui.card('Train',
-    ui.el('div', { class: 'row align-center mt-8' },
-      ui.badge(res.train_number || '', 'blue'),
-      ui.el('span', { class: 'bold', text: res.train_name || '' }),
-      ui.badge('Journey ' + (res.journey_date || ''), 'slate'),
-      res.boarding_station ? ui.badge('Boarding ' + res.boarding_station, 'slate') : null,
-    ),
-  );
-  if (res.notice) headerRow.append(ui.el('p', { class: 'notice' }, res.notice));
-
-  const coaches = res.coaches || [];
-  const legend = ui.el('div', { class: 'row align-center mt-8', style: 'gap:12px;flex-wrap:wrap;' },
-    ui.el('span', { class: 'text-sm muted', text: 'Berth status:' }),
-    ui.badge('vacant', 'green'),
-    ui.badge('occupied', 'red'),
-    ui.badge('not reserved', 'slate'),
-  );
-
-  const list = ui.card('Coaches',
-    Array.isArray(coaches) && coaches.length
-      ? ui.table(['Coach', 'Class', 'Berths'],
-          coaches.map((c) => [
-            ui.el('span', { class: 'mono', text: c.code || '' }).outerHTML,
-            c.class_code || '',
-            berthCell(c.berths, ui),
-          ]))
-      : ui.notice('No coach data returned.'),
-  );
-
-  return [headerRow, legend, list];
-}
-
-/* Render berths as a row of small status-coloured squares (title = "N: status"). */
-function berthCell(berths, ui) {
-  const row = ui.el('div', { class: 'row', style: 'gap:4px;flex-wrap:wrap;' });
-  (Array.isArray(berths) ? berths : []).forEach((b) => {
-    const cls = b.status === 'vacant' ? 'berth vacant' : b.status === 'occupied' ? 'berth occupied' : 'berth not-reserved';
-    row.append(ui.el('span', {
-      class: cls,
-      title: `${b.number}: ${b.status}`,
-      text: String(b.number),
-    }));
-  });
-  if (!row.children.length) row.append(ui.el('span', { class: 'text-sm muted', text: '—' }));
-  return row;
 }
 })();

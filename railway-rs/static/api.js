@@ -4,47 +4,68 @@
 
 window.Api = (() => {
   async function request(path, opts = {}) {
+    const { timeout = 12000, signal: callerSignal, ...fetchOpts } = opts;
     const method = (opts.method || 'GET').toUpperCase();
     const t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
     const reqBody = opts.body
       ? String(typeof opts.body === 'string' ? opts.body : JSON.stringify(opts.body)).slice(0, 400)
       : undefined;
-    let res;
+    const controller = new AbortController();
+    if (callerSignal) {
+      if (callerSignal.aborted) controller.abort();
+      else callerSignal.addEventListener('abort', () => controller.abort(), { once: true });
+    }
+    let timedOutFlag = false;
+    const timeoutError = () => {
+      const e = new Error(`Request timed out after ${timeout}ms`);
+      e.code = 'TIMEOUT';
+      return e;
+    };
+    const timer = setTimeout(() => { timedOutFlag = true; controller.abort(); }, timeout);
+    const timedOut = new Promise((_, reject) => {
+      controller.signal.addEventListener('abort', () => {
+        if (timedOutFlag) reject(timeoutError());
+      });
+    });
     try {
-      res = await fetch(path, opts);
+      const res = await Promise.race([fetch(path, { ...fetchOpts, signal: controller.signal }), timedOut]);
+      const text = await res.text();
+      let body = null;
+      if (text) {
+        try { body = JSON.parse(text); } catch { body = text; }
+      }
+      const elapsed = Math.round(((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()) - t0);
+      if (!res.ok) {
+        const err = (body && typeof body === 'object' && body.error) ? body.error : `HTTP ${res.status}`;
+        RailLog.warn(`api ${method} ${path} -> ${res.status} (${elapsed}ms) error: ${err}`);
+        RailLog.api({
+          method, url: path, status: res.status, latency_ms: elapsed, req_body: reqBody,
+          error: err, body_snippet: text.slice(0, 400),
+        });
+        return { ok: false, status: res.status, error: err, body };
+      }
+      RailLog.info(`api ${method} ${path} -> ${res.status} (${elapsed}ms)`);
+      RailLog.api({
+        method, url: path, status: res.status, latency_ms: elapsed, req_body: reqBody,
+        body_snippet: text.slice(0, 400),
+      });
+      return body;
     } catch (err) {
       const em = err && err.message ? err.message : String(err);
+      const elapsed = Math.round(((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()) - t0);
       RailLog.api({
-        method, url: path, status: 0, latency_ms: 0, req_body: reqBody,
+        method, url: path, status: 0, latency_ms: elapsed, req_body: reqBody,
         error: `network: ${em}`, thrown: true,
       });
       RailLog.error('api fetch threw:', method, path, em);
+      if (err && (err.code === 'TIMEOUT' || (err.name === 'AbortError' && timedOutFlag))) throw timeoutError();
       throw err;
+    } finally {
+      clearTimeout(timer);
     }
-    let body = null;
-    const text = await res.text();
-    if (text) {
-      try { body = JSON.parse(text); } catch { body = text; }
-    }
-    const elapsed = Math.round(((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()) - t0);
-    if (!res.ok) {
-      const err = (body && typeof body === 'object' && body.error) ? body.error : `HTTP ${res.status}`;
-      RailLog.warn(`api ${method} ${path} -> ${res.status} (${elapsed}ms) error: ${err}`);
-      RailLog.api({
-        method, url: path, status: res.status, latency_ms: elapsed, req_body: reqBody,
-        error: err, body_snippet: text.slice(0, 400),
-      });
-      return { ok: false, status: res.status, error: err, body };
-    }
-    RailLog.info(`api ${method} ${path} -> ${res.status} (${elapsed}ms)`);
-    RailLog.api({
-      method, url: path, status: res.status, latency_ms: elapsed, req_body: reqBody,
-      body_snippet: text.slice(0, 400),
-    });
-    return body;
   }
 
-  const get = (path) => request(path);
+  const get = (path, opts = {}) => request(path, opts);
 
   return {
     request,

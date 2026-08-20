@@ -57,6 +57,7 @@ pub fn router(state: AppState, static_dir: PathBuf) -> Router {
         .layer(middleware::from_fn(request_log_mw))
         .fallback_service(
             tower::ServiceBuilder::new()
+                .layer(middleware::from_fn(security_headers_mw))
                 .layer(middleware::from_fn(static_log_mw))
                 .service(ServeDir::new(static_dir).not_found_service(ServeFile::new(index))),
         )
@@ -167,7 +168,9 @@ async fn security_headers_mw(req: Request, next: Next) -> Response {
     );
     headers.insert(
         header::CONTENT_SECURITY_POLICY,
-        HeaderValue::from_static("default-src 'self'; style-src 'self' 'unsafe-inline'"),
+        HeaderValue::from_static(
+            "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://*.tile.openstreetmap.org; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'",
+        ),
     );
     res
 }

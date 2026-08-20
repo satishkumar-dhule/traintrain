@@ -1,4 +1,4 @@
-use crate::models::{StationLite, Suggestion, TrainLite};
+use crate::models::{Suggestion, TrainLite};
 use crate::state::AppState;
 
 pub struct Service;
@@ -18,21 +18,9 @@ impl Service {
             .collect()
     }
 
-    /// Real station search over the pre-warmed station dataset.
-    pub fn search_stations(state: &AppState, query: &str, limit: usize) -> Vec<StationLite> {
-        state
-            .datasets
-            .search_stations(query, limit)
-            .into_iter()
-            .map(|s| StationLite {
-                code: s.code,
-                name: s.name,
-            })
-            .collect()
-    }
-
     /// Combined station + train IntelliSense suggestions from the pre-warmed
-    /// datasets, interleaved by relevance.
+    /// datasets, interleaved by relevance. Stations are ranked by the same
+    /// unified tiered authority as `Datasets::search_stations`.
     pub fn suggest(state: &AppState, query: &str, limit: usize) -> Vec<Suggestion> {
         state
             .datasets

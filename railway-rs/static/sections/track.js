@@ -1,23 +1,109 @@
-/* sections/track.js - Track section. Views: spot, schedule, map, delay,
-   exceptions, journey. Deep links like #/train/12559/spot auto-submit; the
-   map view delegates to the retained train_on_map tab. Live-data-only. */
+/* sections/track.js - Train section. Landing page (PNR check, recent,
+   status) when no train number; entity hero + pill tabs for
+   spot/schedule/delay/journey/exceptions/map when a train is entered.
+   Deep links like #/train/12559/schedule auto-submit. Live-data-only. */
 
 (() => {
 window.Sections = window.Sections || {};
 
-window.Sections.track = {
+const ENTITY_ICONS = { train: '🚄', station: '🚉', plan: '📍', pnr: '🎫' };
+
+const VIEWS = ['spot', 'schedule', 'delay', 'journey', 'exceptions', 'map'];
+const VIEW_LABELS = { spot: 'Spot', schedule: 'Schedule', delay: 'Delay', journey: 'Journey', exceptions: 'Exceptions', map: 'Map' };
+
+window.Sections.train = {
   mount(container, ctx, route) {
+    const ui = ctx.ui;
     const p = route.params || {};
     const view = route.view || 'spot';
-    switch (view) {
-      case 'spot': viewSpot(container, ctx, p); break;
-      case 'schedule': viewSchedule(container, ctx, p); break;
-      case 'map': viewMap(container, ctx, p); break;
-      case 'delay': viewDelay(container, ctx, p); break;
-      case 'exceptions': viewExceptions(container, ctx, p); break;
-      case 'journey': viewJourney(container, ctx, p); break;
-      default: viewSpot(container, ctx, p);
+
+    /* --- landing page when no train number is in the URL --- */
+    if (!p.train) {
+      renderLanding(container, ctx, p._pnr || null);
+      return;
     }
+
+    const num = String(p.train);
+
+    /* --- entity hero (title from the URL so deep links render instantly) --- */
+    let refreshFn = null;
+    const hero = {
+      el: null,
+      subtitle: '',
+      facts: [],
+      update(subtitle, facts) {
+        this.subtitle = subtitle || '';
+        this.facts = facts || [];
+        this.render();
+      },
+      render() {
+        const built = buildHero(ctx, num, view, this.subtitle, this.facts, () => this.render(), () => refreshFn);
+        if (this.el) {
+          this.el.replaceChildren(...built.children);
+        } else {
+          this.el = built;
+        }
+        return this.el;
+      },
+    };
+    const heroEl = hero.render();
+
+    /* --- shared train input --- */
+    const { wrap, input } = ui.trainInput('Train number');
+    const results = ui.el('div', { class: 'mt-8' });
+
+    function submitTrain() {
+      const raw = input.value.trim();
+      RailLog.action('track_train', 'submit', { train_raw: raw });
+      const train = raw.replace(/\s*-\s*.+$/, '').replace(/[^\d]/g, '');
+      if (!/^\d+$/.test(train)) {
+        RailLog.action('track_train', 'validation', { error: 'invalid train number', train_raw: raw });
+        ui.render(results, ui.errorBox('Enter a valid train number (digits only).'));
+        return;
+      }
+      RailLog.action('track_train', 'validated', { train });
+      /* update URL (preserves current view + carries train across pill switches) */
+      const href = Routes.href({ section: 'train', view: view, params: { train: train } });
+      if (location.hash !== href) {
+        location.hash = href;
+        return; /* onHashChange re-mounts with the train in params */
+      }
+      /* already at the right hash — render the view inline */
+      renderView(view, train);
+    }
+
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitTrain(); });
+
+    /* --- pill bar --- */
+    const pills = ui.pillBar(VIEWS, VIEW_LABELS, view, (v) => {
+      const t = input.value.trim().replace(/\s*-\s*.+$/, '').replace(/[^\d]/g, '');
+      const params = /^\d+$/.test(t) ? { train: t } : p;
+      ctx.navigate(Routes.href({ section: 'train', view: v, params: params }));
+    });
+
+    /* --- compact form: input + button inline --- */
+    const searchBtn = ui.el('button', { class: 'btn', text: 'Search', onclick: submitTrain });
+    const form = ui.el('div', { class: 'card-sm' },
+      ui.el('div', { class: 'row', style: 'gap:6px;' }, wrap, searchBtn),
+    );
+
+    ui.render(container, heroEl, pills, form, results);
+
+    /* --- auto-submit if train is in the URL --- */
+    fillInput(p.train, input);
+
+    /* --- view dispatcher --- */
+    function renderView(v, train) {
+      switch (v) {
+        case 'schedule': refreshFn = viewSchedule(results, ctx, train, hero); break;
+        case 'delay': refreshFn = viewDelay(results, ctx, train, hero); break;
+        case 'journey': refreshFn = viewJourney(results, ctx, train, hero); break;
+        case 'exceptions': refreshFn = viewExceptions(results, ctx, train, hero); break;
+        case 'map': refreshFn = viewMap(results, ctx, train, hero); break;
+        default: refreshFn = viewSpot(results, ctx, train, hero); break;
+      }
+    }
+    renderView(view, p.train);
   },
 };
 
@@ -25,140 +111,196 @@ function fillInput(value, input) {
   if (value && input) input.value = String(value).trim();
 }
 
-/* ---------- spot ---------- */
+/* ======================================================================
+   ENTITY HERO
+   ====================================================================== */
 
-function viewSpot(container, ctx, params) {
+function buildHero(ctx, num, view, subtitle, facts, rerender, getRefresh) {
   const ui = ctx.ui;
-  const header = ui.card('Spot Train (Live Status)',
-    ui.notice('Live position from NTES (enquiry.indianrail.gov.in), with Railyatri as fallback. Enter only the train number - no date needed.'),
-  );
+  const on = ctx.fav.has('train', num);
+  const badges = [];
+  if (view === 'spot') badges.push(ui.liveDot('Live'));
+  const favBtn = ui.iconBtn(on ? 'star-fill' : 'star', on ? 'Remove from favorites' : 'Add to favorites', () => {
+    ctx.fav.toggle('train', num, 'Train ' + num);
+    rerender();
+    ui.toast(on ? 'Removed from favorites' : 'Added to favorites', 'success');
+  }, 'fav');
+  return ui.entityHero({
+    icon: 'train',
+    title: 'Train ' + num,
+    subtitle: subtitle,
+    badges: badges,
+    facts: facts,
+    actions: [
+      favBtn,
+      ui.iconBtn('copy', 'Copy link', () => ctx.copyLink()),
+      ui.iconBtn('share', 'Share', () => ctx.share()),
+      ui.iconBtn('refresh', 'Refresh', () => { const fn = getRefresh(); if (fn) fn(); }),
+    ],
+  });
+}
 
-  const { wrap, input } = ui.trainInput('Train number or name');
-  const submit = ui.el('button', { class: 'btn', text: 'Spot Train' });
-  const results = ui.el('div', { class: 'col mt-12' });
-  results.append(ui.emptyState('Enter a train number to spot it.'));
+/* ======================================================================
+   SPOT
+   ====================================================================== */
+
+function viewSpot(container, ctx, train, hero) {
+  const ui = ctx.ui;
+  const results = ui.el('div', { class: 'mt-12' });
+  let currentIdx = 0;
   let lastRes = null;
+  let autoTimer = null;
 
-  function spot() {
-    const raw = input.value.trim();
-    const train = raw.replace(/\s*-\s*.+$/, '').replace(/[^\d]/g, '');
-    if (!/^\d+$/.test(train)) {
-      ui.render(results, ui.errorBox('Enter a valid train number (digits only).'));
-      return;
-    }
-    ui.fetchFlow(results, () => ctx.api.liveStatus(train), { button: submit, failText: 'Failed to load live status' })
+  const rr = ui.refreshRow({
+    updatedAt: null,
+    onRefresh: fetchSpot,
+    autoKey: 'train.spot.' + train,
+    autoMs: 30000,
+    onAuto: (on) => {
+      if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
+      if (on) autoTimer = setInterval(() => fetchSpot(), 30000);
+    },
+  });
+
+  container.append(rr.row);
+  container.append(results);
+
+  function fetchSpot() {
+    return ui.fetchFlow(results, () => ctx.api.liveStatus(train), { failText: 'Failed to load live status' })
       .then((res) => {
-        if (!res) return;
+        if (!res) return null;
         lastRes = res;
-        renderAll(res);
+        showInstance(res, currentIdx);
+        rr.setUpdated(new Date().toISOString());
+        hero.update(spotSubtitle(res, currentIdx), spotFacts(res, currentIdx));
+        enrichSpotLabel(ctx, train, res, currentIdx);
+        return res;
       });
   }
 
-  function renderAll(res) {
-    const parts = [];
-    const tabCard = renderInstanceTabs(res, ui, showInstance);
-    if (tabCard) parts.push(tabCard);
-    showInstance(res, 0, parts);
-  }
-
-  /* Render the selected instance's position + stations into `parts`, then
-     call ui.render.  When `extra` is provided (initial render) the existing
-     cards are prepended; on tab switch only the content area is replaced. */
-  function showInstance(res, idx, extra) {
+  function showInstance(res, idx) {
+    lastRes = res;
+    currentIdx = idx;
     const instances = res.instances || [];
     const inst = instances[idx] || {};
     const hasStops = Array.isArray(inst.stops) && inst.stops.length;
-    const partList = extra || [];
-    if (!extra) {
-      partList.push(renderInstanceTabs(res, ui, showInstance));
+    const parts = [];
+    const tabCard = renderInstanceTabs(res, idx, ui, switchInstance);
+    if (tabCard) parts.push(tabCard);
+    try {
+      if (hasStops) {
+        parts.push(renderInstancePosition(res, inst, ui), renderInstanceStations(inst, ui, ctx));
+      } else {
+        parts.push(renderPosition(res, ui), renderStations(res, ui, ctx));
+      }
+    } catch (e) {
+      parts.push(ui.errorBox('Render error: ' + (e.message || String(e))));
     }
-    if (hasStops) {
-      partList.push(
-        renderInstancePosition(res, inst, ui),
-        renderInstanceStations(inst, ui),
-      );
-    } else {
-      partList.push(renderPosition(res, ui), renderStations(res, ui));
-    }
-    ui.render(results, ...partList);
+    ui.render(results, ...parts);
   }
 
-  submit.onclick = spot;
-  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') spot(); });
+  function switchInstance(idx) {
+    if (lastRes) showInstance(lastRes, idx);
+  }
 
-  const form = ui.queryCard([['Train Number', wrap]], submit);
-  ui.render(container, header, form, results);
-
-  if (params.train) { fillInput(params.train, input); spot(); }
+  fetchSpot();
+  return fetchSpot;
 }
 
-/* NTES start date `14-Aug-2026` -> wire format `2026-08-14` (empty passthrough). */
-function ntesDateToIso(d) {
-  const m = /^(\d{1,2})-([A-Za-z]{3})-(\d{4})$/.exec(d || '');
-  if (!m) return d || '';
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  const mi = months.indexOf(m[2][0].toUpperCase() + m[2].slice(1).toLowerCase());
-  if (mi < 0) return d;
-  return m[3] + '-' + String(mi + 1).padStart(2, '0') + '-' + String(Number(m[1])).padStart(2, '0');
+function spotSubtitle(res, idx) {
+  const instances = res.instances || [];
+  const inst = instances[idx] || {};
+  return res.train_name || inst.position || '';
 }
 
-/* Tabbed instance picker.  Each tab carries its own position + stops from
-   the single NTES response; switching is instant (no re-fetch). */
-function renderInstanceTabs(res, ui, onSwitch) {
+function spotFacts(res, idx) {
+  const instances = res.instances || [];
+  const inst = instances[idx] || {};
+  const stops = inst.stops || res.stations || [];
+  const route = stops.length >= 2
+    ? stops[0].name + ' \u2192 ' + stops[stops.length - 1].name
+    : (res.current_location_info || '—');
+  return [
+    ['Route', route],
+    ['Run date', inst.start_date || res.train_start_date || '—'],
+    ['Delay', currentDelayText(stops)],
+    ['Source', res.data_source || 'unknown'],
+  ];
+}
+
+/* Index of the stop the train is at or heading to, from the per-stop
+   statuses the backend stamps (departed/expected/scheduled). */
+function spotCurrentIndex(stops) {
+  if (!Array.isArray(stops) || !stops.length) return -1;
+  const expected = stops.findIndex((s) => s && s.status === 'expected');
+  if (expected >= 0) return expected;
+  let last = -1;
+  stops.forEach((s, i) => { if (s && s.status === 'departed') last = i; });
+  return last >= 0 ? last : 0;
+}
+
+function currentDelayText(stops) {
+  if (!Array.isArray(stops) || !stops.length) return '—';
+  const idx = spotCurrentIndex(stops);
+  const s = stops[Math.min(idx, stops.length - 1)];
+  if (s && typeof s.delay_minutes === 'number' && s.delay_minutes > 0) return s.delay_minutes + ' min';
+  return 'On Time';
+}
+
+function renderInstanceTabs(res, activeIdx, ui, onSwitch) {
   const instances = res.instances || [];
   if (!instances.length) return null;
-  const active = res.train_start_date;
-  const tabs = instances.map((inst, i) => ({
-    label: inst.start_date + (inst.start_date === active ? ' \u2022' : ''),
-    active: inst.start_date === active,
-    click: () => onSwitch(res, i),
-  }));
-  const rows = instances.map((inst) => {
-    const cur = inst.start_date === active;
-    return [
-      cur ? ui.el('span', { class: 'bold', text: inst.start_date }) : inst.start_date,
-      cur ? ui.badge('Current', 'blue') : null,
-      inst.position || '-',
-    ];
+
+  const card = ui.el('div', { class: 'card' });
+  card.append(ui.el('div', { class: 'card-title', text: 'Instances (tap a date to switch)' }));
+  const wrap = ui.el('div', { class: 'table-wrap' });
+  const tbl = ui.el('table', { class: 'tbl' });
+  const thead = ui.el('thead');
+  const headRow = ui.el('tr');
+  headRow.append(ui.el('th', { text: 'Start Date' }), ui.el('th', { text: 'Position' }));
+  thead.append(headRow);
+  tbl.append(thead);
+  const tbody = ui.el('tbody');
+  instances.forEach((inst, i) => {
+    const cur = i === activeIdx;
+    const tr = ui.el('tr');
+    if (cur) tr.style.fontWeight = '700';
+    tr.style.cursor = 'pointer';
+    tr.addEventListener('click', () => onSwitch(i));
+    const tdDate = ui.el('td');
+    if (cur) tdDate.append(ui.el('span', { class: 'bold', text: inst.start_date }));
+    else tdDate.textContent = inst.start_date;
+    const tdPos = ui.el('td');
+    if (cur) tdPos.append(ui.badge('Current', 'blue'));
+    tdPos.append(document.createTextNode(inst.position || '-'));
+    tr.append(tdDate, tdPos);
+    tbody.append(tr);
   });
-  return ui.card(
-    'Train Instances (tap a date to switch the run)',
-    ui.table(['Start Date', 'Position'], rows),
-  );
+  tbl.append(tbody);
+  wrap.append(tbl);
+  card.append(wrap);
+  return card;
 }
 
-/* Position card for an instance whose stops came from the NTES response. */
 function renderInstancePosition(res, inst, ui) {
-  const instAtSrc = inst.at_src === 'true';
-  const instAtDst = inst.at_dstn === 'true';
   const stops = inst.stops || [];
   let location;
-  if (instAtDst) {
-    const last = stops[stops.length - 1] || {};
-    location = 'Arrived at ' + (last.name || 'destination') + '.';
-  } else if (instAtSrc) {
-    location = 'Train at ' + (stops[0] ? stops[0].name : 'origin') + ' (origin).';
-  } else {
-    location = inst.position || 'Running; position awaiting update.';
-  }
-  const runInfo = inst.start_date
-    ? ui.el('p', { class: 'text-sm muted', text: 'Run date: ' + inst.start_date })
-    : null;
+  if (inst.at_dstn === 'true') location = 'Arrived at ' + ((stops[stops.length - 1] || {}).name || 'destination') + '.';
+  else if (inst.at_src === 'true') location = 'Train at ' + ((stops[0] || {}).name || 'origin') + ' (origin).';
+  else location = inst.position || 'Running; position awaiting update.';
   return ui.card('Current Position',
     ui.el('div', { class: 'row' },
       ui.el('span', { class: 'bold', text: res.train_name }),
       ui.badge(res.train_number, 'blue'),
     ),
+    ui.journeyProgress(stops, spotCurrentIndex(stops)),
     ui.el('p', { class: 'text-sm bold', text: location }),
-    runInfo,
-    ui.el('div', { class: 'row mt-8' },
-      ui.badge(res.data_source || 'unknown', 'slate'),
-    ),
+    inst.start_date ? ui.el('p', { class: 'text-sm muted', text: 'Run date: ' + inst.start_date }) : null,
+    ui.el('div', { class: 'row mt-8' }, ui.badge(res.data_source || 'unknown', 'slate')),
   );
 }
 
-/* Stations table from an instance's per-run stops. */
-function renderInstanceStations(inst, ui) {
+function renderInstanceStations(inst, ui, ctx) {
   const stations = inst.stops || [];
   if (!stations.length) return ui.card('Stations', ui.notice('No station data for this run.'));
   const showActual = stations.some((s) => s.actual_arrival);
@@ -166,7 +308,7 @@ function renderInstanceStations(inst, ui) {
   if (showActual) headers.push('Act. Arrival');
   headers.push('Delay', 'Status');
   const rows = stations.map((s) => {
-    const cells = [s.name, s.code, ui.fmtTime(s.scheduled_arrival)];
+    const cells = [s.name, ui.entityLink('station', s.code, s.code, ctx.navigate), ui.fmtTime(s.scheduled_arrival)];
     if (showActual) cells.push(ui.fmtTime(s.actual_arrival));
     cells.push(ui.delay(s.delay_minutes), ui.statusCell(s.status));
     return cells;
@@ -175,26 +317,239 @@ function renderInstanceStations(inst, ui) {
 }
 
 function renderPosition(res, ui) {
-  const pos = ui.el('p', { class: 'text-sm bold', text: res.current_location_info || 'No current position reported.' });
-  const runInfo = res.train_start_date
-    ? ui.el('p', { class: 'text-sm muted', text: `Run date: ${res.train_start_date}` })
-    : null;
-  const card = ui.card('Current Position',
+  const stops = res.stations || [];
+  return ui.card('Current Position',
     ui.el('div', { class: 'row' },
       ui.el('span', { class: 'bold', text: res.train_name }),
       ui.badge(res.train_number, 'blue'),
     ),
-    pos,
-    runInfo,
-    ui.el('div', { class: 'row mt-8' },
-      ui.badge(res.data_source || 'unknown', 'slate'),
-    ),
+    ui.journeyProgress(stops, spotCurrentIndex(stops)),
+    ui.el('p', { class: 'text-sm bold', text: res.current_location_info || 'No current position reported.' }),
+    res.train_start_date ? ui.el('p', { class: 'text-sm muted', text: 'Run date: ' + res.train_start_date }) : null,
+    ui.el('div', { class: 'row mt-8' }, ui.badge(res.data_source || 'unknown', 'slate')),
   );
-  return card;
 }
 
-function renderStations(res, ui) {
+function renderStations(res, ui, ctx) {
   const stations = res.stations || [];
+  if (!stations.length) return ui.card('Stations', ui.notice('No station data returned.'));
+  const showActual = stations.some((s) => s.actual_arrival);
+  const headers = ['Station', 'Code', 'Sch. Arrival'];
+  if (showActual) headers.push('Act. Arrival');
+  headers.push('Delay', 'Status');
+  const rows = stations.map((s) => {
+    const cells = [s.name, ui.entityLink('station', s.code, s.code, ctx.navigate), ui.fmtTime(s.scheduled_arrival)];
+    if (showActual) cells.push(ui.fmtTime(s.actual_arrival));
+    cells.push(ui.delay(s.delay_minutes), ui.statusCell(s.status));
+    return cells;
+  });
+  return ui.card('Stations', ui.table(headers, rows));
+}
+
+/* ======================================================================
+   SCHEDULE
+   ====================================================================== */
+
+function viewSchedule(container, ctx, train, hero) {
+  const ui = ctx.ui;
+  const results = ui.el('div', { class: 'mt-12' });
+  container.append(results);
+  const fetchSchedule = () => ui.fetchFlow(results, () => ctx.api.schedule(train), { failText: 'Failed to load schedule' })
+    .then((res) => {
+      if (!res) return null;
+      const stops = Array.isArray(res.stops) ? res.stops : [];
+      const from = stops[0];
+      const to = stops[stops.length - 1];
+      const route = res.route_description
+        || (from && to ? from.name + ' (' + from.code + ') \u2192 ' + to.name + ' (' + to.code + ')' : '—');
+      hero.update(res.train_name || '', [
+        ['Route', route],
+        ['Runs on', (res.running_days || []).map((d) => String(d).slice(0, 3).toUpperCase()).join(' ') || '—'],
+        ['Source', res.data_source || 'unknown'],
+      ]);
+      enrichTrainLabel(ctx, train, res.train_number, res.train_name, from, to);
+      ui.render(results, ...renderSchedule(res, ui, ctx));
+      return res;
+    });
+  fetchSchedule();
+  return fetchSchedule;
+}
+
+/* Enrich the stored recent/favorite label for a train with
+   "number · name (from → to)" once we have real schedule data. */
+function enrichTrainLabel(ctx, train, trainNumber, trainName, from, to) {
+  const label = 'Train ' + (trainNumber || train)
+    + (trainName ? ' · ' + trainName : '')
+    + (from && to ? ' (' + from.code + ' \u2192 ' + to.code + ')' : '');
+  ctx.recent.update(Routes.href({ section: 'train', params: { train } }), label);
+  ctx.fav.update('train', train, label);
+}
+
+function enrichSpotLabel(ctx, train, res, idx) {
+  const inst = (res.instances || [])[idx] || {};
+  const stops = inst.stops || res.stations || [];
+  enrichTrainLabel(ctx, train, res.train_number, res.train_name, stops[0], stops[stops.length - 1]);
+}
+
+function renderSchedule(s, ui, ctx) {
+  const today = new Date().toLocaleString('en-GB', { timeZone: 'Asia/Kolkata', weekday: 'short' }).toUpperCase().slice(0, 3);
+  const days = s.running_days || [];
+  const daysCard = ui.card('Running Days',
+    ui.el('div', { class: 'row align-center mt-8' },
+      days.length
+        ? days.map((d) => ui.badge(String(d).slice(0, 3).toUpperCase(), d.toUpperCase() === today ? 'green' : 'slate'))
+        : ui.notice('Not available.'),
+    ),
+  );
+  const stops = s.stops;
+  const stations = ui.card('Stations',
+    Array.isArray(stops) && stops.length
+      ? ui.collapsibleTable(['Day', 'Code', 'Station', 'Arrival', 'Departure'],
+          stops.map((st) => [
+            ui.el('span', { text: st.day || '' }).outerHTML,
+            ui.entityLink('station', st.code || '', st.code || '', ctx.navigate),
+            st.name || '',
+            ui.fmtTime(st.arrival),
+            ui.fmtTime(st.departure),
+          ]))
+      : ui.notice('No stops returned.'),
+  );
+  const meta = [];
+  if (s.notice) meta.push(ui.notice(s.notice));
+  if (s.cache_ttl) meta.push(ui.el('p', { class: 'text-sm muted', text: 'Cached for ' + s.cache_ttl + ' seconds.' }));
+  return [daysCard, stations, ui.card('', ...meta)];
+}
+
+/* ======================================================================
+   DELAY
+   ====================================================================== */
+
+function viewDelay(container, ctx, train, hero) {
+  const ui = ctx.ui;
+  const results = ui.el('div', { class: 'mt-12' });
+  const rr = ui.refreshRow({ updatedAt: null, onRefresh: fetchDelay });
+  container.append(rr.row);
+  container.append(results);
+
+  function fetchDelay() {
+    return ui.fetchFlow(results, () => ctx.api.averageDelay(train), { failText: 'Failed to load average delay' })
+      .then((res) => {
+        if (!res) return null;
+        rr.setUpdated(new Date().toISOString());
+        hero.update(res.train_name || '', [
+          ['Days of run', res.days_of_run || '—'],
+          ['Type', res.train_type || '—'],
+          ['Source', res.data_source || 'unknown'],
+        ]);
+        ui.render(results, ...renderDelay(res, ui));
+        return res;
+      });
+  }
+
+  fetchDelay();
+  return fetchDelay;
+}
+
+function renderDelay(res, ui) {
+  const stations = res.stations || [];
+  const list = ui.card('Stations',
+    Array.isArray(stations) && stations.length
+      ? ui.table(['Sr.', 'Station', 'Code', 'Arr. Delay', 'Dep. Delay'],
+          stations.map((st) => [st.sr || '', st.name || '', st.code || '', delayBadge(st.arrival_delay), delayBadge(st.departure_delay)]))
+      : ui.notice('No delay data found.'),
+  );
+  return [list];
+}
+
+/* Delay cell (HTML string): green "On Time" when on time or 0, amber when
+   the train is running late. */
+function delayBadge(v) {
+  if (v === null || v === undefined || v === '') return '<span class="muted">\u2014</span>';
+  const t = String(v);
+  if (/^[-/]+$/.test(t) || /^[\u2013\u2014]+$/.test(t)) return '<span class="muted">\u2014</span>';
+  if (/on time/i.test(t)) return '<span class="badge badge-green">On Time</span>';
+  const m = /\d+/.exec(t);
+  const n = m ? parseInt(m[0], 10) : 0;
+  if (n <= 0) return '<span class="badge badge-green">On Time</span>';
+  return '<span class="badge badge-amber">' + mapEsc(t) + '</span>';
+}
+
+/* ======================================================================
+   JOURNEY
+   ====================================================================== */
+
+function viewJourney(container, ctx, train, hero) {
+  const ui = ctx.ui;
+  const results = ui.el('div', { class: 'mt-12' });
+  container.append(results);
+
+  const showBasis = (stationCode) => {
+    ui.fetchFlow(results, () => ctx.api.journeyBasis(train, stationCode), { failText: 'Failed to load journey basis' })
+      .then((res) => {
+        if (!res) return;
+        hero.update(res.train_name || '', [['Source', res.data_source || 'unknown']]);
+        ui.render(results, ...renderBasis(res, ui));
+      });
+  };
+
+  const fetchStations = () => ui.fetchFlow(results, () => ctx.api.journeyStations(train), { failText: 'Failed to load journey stations' })
+    .then((res) => {
+      if (!res) return null;
+      hero.update('', [['Source', res.data_source || 'unknown']]);
+      ui.render(results, ...renderStationPicker(res, ui, showBasis));
+      return res;
+    });
+
+  fetchStations();
+  return fetchStations;
+}
+
+function renderStationPicker(res, ui, onPick) {
+  const stations = Array.isArray(res.stations) ? res.stations : [];
+  if (!stations.length) return [ui.card('Journey Stations', ui.notice('No journey stations returned for this train.'))];
+  const select = ui.el('select', { class: 'input' },
+    stations.map((s) => ui.el('option', { value: s.code, text: s.code + ' - ' + s.name })),
+  );
+  const go = ui.el('button', { class: 'btn', text: 'Show Journey Basis' });
+  go.addEventListener('click', () => onPick(select.value));
+  return [ui.card('Journey Stations',
+    ui.el('div', { class: 'row mt-8' },
+      ui.el('span', { class: 'mono', text: res.train_no || '' }),
+      ui.el('span', { class: 'text-sm muted', text: stations.length + ' station(s)' }),
+      ui.badge('Source: ' + (res.data_source || 'unknown'), 'slate'),
+    ),
+    ui.label('Journey Station'), select,
+    ui.el('div', { class: 'row mt-12' }, go),
+  )];
+}
+
+function renderBasis(res, ui) {
+  const cards = [];
+  cards.push(ui.card('Journey Basis',
+    ui.el('p', { class: 'text-sm bold', text: res.current_location_info || 'No current position reported.' }),
+    ui.el('div', { class: 'row mt-8' },
+      ui.el('span', { class: 'bold', text: res.train_name }),
+      ui.badge(res.train_number || '', 'blue'),
+      ui.badge('Source: ' + (res.data_source || 'unknown'), 'slate'),
+    ),
+  ));
+  const js = res.journey_station;
+  if (js) {
+    cards.push(ui.card('Journey Station',
+      ui.el('div', { class: 'row mt-8' },
+        ui.el('span', { class: 'bold', text: js.name }),
+        ui.badge(js.code || '', 'blue'),
+        js.day_change ? ui.badge('Day Change', 'amber') : null,
+      ),
+      ui.el('p', { class: 'text-sm muted mt-8', text: 'Seq ' + (js.seq ?? '-') + ' \u00b7 Arrival days: ' + (js.arrival_days || '-') + ' \u00b7 Departure days: ' + (js.departure_days || '-') }),
+    ));
+  }
+  cards.push(stationsCard(res, ui));
+  return cards;
+}
+
+function stationsCard(res, ui) {
+  const stations = Array.isArray(res.stations) ? res.stations : [];
   if (!stations.length) return ui.card('Stations', ui.notice('No station data returned.'));
   const showActual = stations.some((s) => s.actual_arrival);
   const headers = ['Station', 'Code', 'Sch. Arrival'];
@@ -209,343 +564,477 @@ function renderStations(res, ui) {
   return ui.card('Stations', ui.table(headers, rows));
 }
 
-/* ---------- schedule ---------- */
+/* ======================================================================
+   EXCEPTIONS
+   ====================================================================== */
 
-function viewSchedule(container, ctx, params) {
+function viewExceptions(container, ctx, train, hero) {
   const ui = ctx.ui;
-  const header = ui.card('Train Schedule', ui.el('p', { class: 'text-sm muted', text: 'Live timetable from NTES (enquiry.indianrail.gov.in), with Railyatri as fallback.' }));
-
-  const { wrap, input } = ui.trainInput('e.g. 12002 or SHATABDI');
-  const submit = ui.el('button', { class: 'btn', text: 'Get Schedule' });
-  const results = ui.el('div');
-
-  function submitForm() {
-    const train = input.value.trim();
-    if (!/^\d+$/.test(train)) {
-      ui.render(results, ui.errorBox('Enter a valid train number (digits only).'));
-      return;
-    }
-    ui.fetchFlow(results, () => ctx.api.schedule(train), { button: submit, failText: 'Failed to load schedule' })
-      .then((res) => { if (res) ui.render(results, ...renderSchedule(res, ui)); });
-  }
-
-  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitForm(); });
-  submit.addEventListener('click', submitForm);
-
-  ui.render(container, header, ui.queryCard([['Train Number', wrap]], submit), results);
-
-  if (params.train) { fillInput(params.train, input); submitForm(); }
-}
-
-function renderSchedule(s, ui) {
-  const today = new Date().toLocaleString('en-GB', { timeZone: 'Asia/Kolkata', weekday: 'short' }).toUpperCase().slice(0, 3);
-
-  const trainInfo = ui.card('Train',
-    ui.el('div', { class: 'row align-center mt-8' },
-      ui.el('span', { class: 'bold', text: s.train_name || 'Unknown' }),
-      ui.badge(s.train_number || '', 'blue'),
-    ),
-    ui.el('div', { class: 'text-sm muted mt-8' }, s.route_description || ''),
-    ui.el('div', { class: 'row align-center mt-8' },
-      ui.badge('Data source: ' + (s.data_source || 'unknown'), 'slate'),
-    ),
-  );
-
-  const dayRow = ui.el('div', { class: 'row align-center mt-8' },
-    ui.el('span', { class: 'label', text: 'Runs on' }),
-    (s.running_days || []).map((d) => ui.badge(String(d).slice(0, 3).toUpperCase(), d.toUpperCase() === today ? 'green' : 'slate')),
-  );
-  trainInfo.append(dayRow);
-
-  const stops = s.stops;
-  const stations = ui.card('Stations',
-    Array.isArray(stops) && stops.length
-      ? ui.table(['Day', 'Code', 'Station', 'Arrival', 'Departure'],
-          stops.map((st) => [
-            ui.el('span', { text: st.day || '' }).outerHTML,
-            ui.el('span', { class: 'mono', text: st.code || '' }).outerHTML,
-            st.name || '',
-            ui.fmtTime(st.arrival),
-            ui.fmtTime(st.departure),
-          ]))
-      : ui.notice('No stops returned.'),
-  );
-
-  const meta = [];
-  if (s.notice) meta.push(ui.notice(s.notice));
-  if (s.cache_ttl) meta.push(ui.el('p', { class: 'text-sm muted', text: `Cached for ${s.cache_ttl} seconds.` }));
-  const footer = ui.card('', ...meta);
-
-  return [trainInfo, stations, footer];
-}
-
-/* ---------- map (delegates to the retained train_on_map tab) ---------- */
-
-function viewMap(container, ctx, params) {
-  window.Tabs.train_on_map.mount(container, ctx);
-  if (params && params.train) {
-    const input = container.querySelector('input.input');
-    const submit = container.querySelector('.btn');
-    if (input && submit) { fillInput(params.train, input); submit.click(); }
-  }
-}
-
-/* ---------- delay ---------- */
-
-function viewDelay(container, ctx, params) {
-  const ui = ctx.ui;
-  const header = ui.card('Average Delay',
-    ui.el('p', { class: 'text-sm muted', text: 'Average arrival/departure delay over the last 7 days (NTES)' }),
-  );
-
-  const { wrap, input } = ui.trainInput('Train No. (5 digits)');
-  const submit = ui.el('button', { class: 'btn', text: 'Check Delay' });
   const results = ui.el('div', { class: 'mt-12' });
-
-  function submitForm() {
-    const train = input.value.trim();
-    if (!train) {
-      ui.render(results, ui.errorBox('Train number is required.'));
-      return;
-    }
-    ui.fetchFlow(results, () => ctx.api.averageDelay(train), { button: submit, failText: 'Failed to load average delay' })
-      .then((res) => { if (res) ui.render(results, ...renderDelay(res, ui)); });
-  }
-
-  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitForm(); });
-  submit.addEventListener('click', submitForm);
-
-  ui.render(container, header, ui.queryCard([['Train Number', wrap]], submit), results);
-
-  if (params.train) { fillInput(params.train, input); submitForm(); }
+  container.append(results);
+  const fetchExceptions = () => ui.fetchFlow(results, () => ctx.api.exceptional(train), { failText: 'Failed to load exceptional dates' })
+    .then((res) => {
+      if (!res) return null;
+      const t = res.train || {};
+      hero.update(t.name || '', [
+        ['Route', (t.source && t.destination) ? t.source + ' \u2192 ' + t.destination : '—'],
+        ['Runs on', (Array.isArray(t.days_of_run) && t.days_of_run.length) ? t.days_of_run.join(' ') : '—'],
+        ['Source', res.data_source || 'unknown'],
+      ]);
+      renderExceptions(res, ui, results, ctx);
+      return res;
+    });
+  fetchExceptions();
+  return fetchExceptions;
 }
 
-function renderDelay(res, ui) {
-  const train = ui.card('Train',
-    ui.el('div', { class: 'row align-center mt-8' },
-      ui.el('span', { class: 'mono', text: res.train_no || '' }),
-      ui.el('span', { class: 'bold', text: (res.train_no && res.train_name ? ' ' : '') + (res.train_name || '') }),
-      ui.badge(res.days_of_run || ''),
-      ui.badge(res.train_type || '', 'slate'),
-      ui.badge('Data source: ' + (res.data_source || 'unknown'), 'slate'),
-    ),
-  );
-
-  const stations = res.stations || [];
-  const list = ui.card('Stations',
-    Array.isArray(stations) && stations.length
-      ? ui.table(['Sr.', 'Station', 'Code', 'Arr. Delay', 'Dep. Delay'],
-          stations.map((st) => [
-            st.sr || '',
-            st.name || '',
-            st.code || '',
-            st.arrival_delay || '—',
-            st.departure_delay || '—',
-          ]))
-      : ui.notice('No delay data found.'),
-  );
-
-  return [train, list];
-}
-
-/* ---------- exceptions ---------- */
-
-function viewExceptions(container, ctx, params) {
-  const ui = ctx.ui;
-  const header = ui.card('Exceptional Trains',
-    ui.notice('Per-train exception calendar from NTES (cached 2 hours). Enter a train number to see its cancelled / rescheduled / diverted dates.'),
-  );
-
-  const { wrap, input } = ui.trainInput('Train number');
-  const typeSelect = ui.el('select', { class: 'input' },
-    ui.el('option', { value: '', text: 'all kinds' }),
-    ui.el('option', { value: 'cancelled', text: 'cancelled' }),
-    ui.el('option', { value: 'rescheduled', text: 'rescheduled' }),
-    ui.el('option', { value: 'diverted', text: 'diverted' }),
-  );
-
-  const submit = ui.el('button', { class: 'btn', text: 'Check Train' });
-  const results = ui.el('div', { class: 'col mt-12' });
-  results.append(ui.emptyState('Enter a train number to check its exceptional dates.'));
-
-  function load() {
-    const train = input.value.trim();
-    const type = typeSelect.value;
-    if (!/^\d{4,5}$/.test(train)) {
-      ui.render(results, ui.errorBox('Enter a valid train number (4-5 digits).'));
-      return;
-    }
-    ui.fetchFlow(results, () => ctx.api.exceptional(train, type || undefined), { button: submit, failText: 'Failed to load exceptional dates' })
-      .then((res) => { if (res) renderExceptions(res, ui, results); });
-  }
-
-  submit.onclick = load;
-  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') load(); });
-
-  const form = ui.queryCard(
-    [['Train Number', wrap], ['Kind', typeSelect]],
-    submit,
-  );
-
-  ui.render(container, header, form, results);
-
-  if (params.train) { fillInput(params.train, input); load(); }
-}
-
-function renderExceptions(res, ui, results) {
+function renderExceptions(res, ui, container, ctx) {
   const t = res.train || {};
-  const name = t.name ? `${t.number} - ${t.name}` : `Train ${t.number || '?'}`;
-  const route = (t.source && t.destination) ? `${t.source} → ${t.destination}` : null;
+  const route = (t.source && t.destination) ? t.source + ' \u2192 ' + t.destination : null;
   const days = Array.isArray(t.days_of_run) && t.days_of_run.length
     ? ui.el('div', { class: 'row mt-8' }, t.days_of_run.map((d) => ui.badge(d.toUpperCase(), 'slate')))
     : null;
-
   const headerCard = ui.card('Train',
-    ui.el('div', { class: 'row' },
-      ui.el('span', { class: 'bold', text: name }),
+    ui.el('div', { class: 'row align-center' },
+      ui.entityLink('train', t.number || '', t.number || '', ctx.navigate),
+      ui.el('span', { class: 'bold', text: t.name || '' }),
     ),
     route ? ui.el('p', { class: 'text-sm muted', text: route }) : null,
     days,
     ui.el('div', { class: 'row mt-8' },
       ui.badge(res.data_source || 'unknown', 'slate'),
-      res.cache_ttl ? ui.badge(`cached ${Math.round(res.cache_ttl / 60)} min`, 'blue') : null,
+      res.cache_ttl ? ui.badge('cached ' + Math.round(res.cache_ttl / 60) + ' min', 'blue') : null,
     ),
   );
-
   const exceptions = Array.isArray(res.exceptions) ? res.exceptions : [];
   let listCard;
   if (res.message) {
     listCard = ui.card('Train Exception Info', ui.notice(res.message));
   } else if (!exceptions.length) {
-    listCard = ui.card('Exceptional Dates',
-      ui.notice(`No exceptional details found for train ${t.number || ''}.`),
-    );
+    listCard = ui.card('Exceptional Dates', ui.notice('No exceptional details found for train ' + (t.number || '') + '.'));
   } else {
     listCard = ui.card('Exceptional Dates',
-      ui.table(['Date', 'Kind', 'Note'],
-        exceptions.map((e) => [e.date, kindBadge(e.kind), e.note || '-'])),
+      ui.collapsibleTable(['Date', 'Kind', 'Note'], exceptions.map((e) => [e.date, kindBadge(e.kind), e.note || '-'])),
     );
   }
-
-  ui.render(results, headerCard, listCard);
+  ui.render(container, headerCard, listCard);
 }
 
-/* HTML string; ui.table renders cells via innerHTML. */
 function kindBadge(kind) {
-  const color = kind === 'cancelled' ? 'red'
-    : kind === 'rescheduled' ? 'amber'
-    : kind === 'diverted' ? 'amber'
-    : kind === 'new_source' ? 'green'
-    : kind === 'new_destination' ? 'blue'
-    : 'slate';
-  return `<span class="badge badge-${color}">${kind || '-'}</span>`;
+  const color = kind === 'cancelled' ? 'red' : kind === 'rescheduled' ? 'amber' : kind === 'diverted' ? 'amber' : kind === 'new_source' ? 'green' : kind === 'new_destination' ? 'blue' : 'slate';
+  return '<span class="badge badge-' + color + '">' + (kind || '-') + '</span>';
 }
 
-/* ---------- journey ---------- */
+/* ======================================================================
+   MAP (inline from former train_on_map tab)
+   ====================================================================== */
 
-function viewJourney(container, ctx, params) {
+function viewMap(container, ctx, train, hero) {
   const ui = ctx.ui;
-  const header = ui.card('Journey Station Basis',
-    ui.notice('Enter a train number to load its journey stations, then pick one to see the live run from that station (NTES).'),
+
+  /* station input is specific to map view */
+  const stationInput = ui.el('input', { class: 'input', autocomplete: 'off', placeholder: 'Station code (optional, e.g. NDLS)' });
+  const submit = ui.el('button', { class: 'btn', text: 'Show Map' });
+  const mapForm = ui.el('div', { class: 'card' },
+    ui.label('Station Code (optional)'), stationInput,
+    ui.el('div', { class: 'row mt-12' }, submit),
   );
+  const results = ui.el('div', { class: 'mt-12' });
 
-  const { wrap, input } = ui.trainInput('Train No. (5 digits)');
-  const loadBtn = ui.el('button', { class: 'btn', text: 'Load Stations' });
-  const results = ui.el('div', { class: 'col mt-12' });
-  let train = '';
-
-  const showBasis = (stationCode) => {
-    ui.fetchFlow(results, () => ctx.api.journeyBasis(train, stationCode), { failText: 'Failed to load journey basis' })
-      .then((res) => { if (res) ui.render(results, ...renderBasis(res, ui)); });
-  };
-
-  const loadStations = () => {
-    train = input.value.trim();
-    RailLog.action('journey_basis', 'load_stations', { train_raw: train });
-    if (!/^\d{5}$/.test(train)) {
-      RailLog.action('journey_basis', 'validation', { error: 'train must be 5 digits', train_raw: train });
-      ui.render(results, ui.errorBox('Enter a valid 5-digit train number.'));
-      return;
+  const submitMap = () => {
+    let station = null;
+    if (stationInput.value.trim()) {
+      const check = ui.stationCode(stationInput.value);
+      if (check.error) { ui.render(results, ui.errorBox(check.error)); return; }
+      station = check.code;
     }
-    ui.fetchFlow(results, () => ctx.api.journeyStations(train), { button: loadBtn, failText: 'Failed to load journey stations' })
-      .then((res) => { if (res) ui.render(results, ...renderStationPicker(res, ui, showBasis)); });
+    ui.render(results, ui.spinner());
+    submit.disabled = true;
+    ctx.api.trainOnMap(train, station)
+      .then((res) => {
+        if (!res || res.ok === false) { ui.render(results, ui.errorBox(res && res.error ? res.error : 'Failed to load train map.')); return; }
+        hero.update(res.train_name || '', [
+          ['Route', (res.source || '') + ' \u2192 ' + (res.destination || '')],
+          ['Source', res.data_source || 'unknown'],
+        ]);
+        ui.render(results, ...renderMapResults(res, ui, ctx));
+      })
+      .catch((err) => ui.render(results, ui.errorBox('Failed to load train map: ' + (err.message || String(err)))))
+      .finally(() => { submit.disabled = false; });
   };
 
-  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') loadStations(); });
-  loadBtn.addEventListener('click', loadStations);
-
-  ui.render(container, header, ui.queryCard([['Train Number', wrap]], loadBtn), results);
-
-  if (params.train) { fillInput(params.train, input); loadStations(); }
+  stationInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitMap(); });
+  submit.addEventListener('click', submitMap);
+  ui.render(container, mapForm, results);
+  submitMap();
+  return submitMap;
 }
 
-function renderStationPicker(res, ui, onPick) {
-  const stations = Array.isArray(res.stations) ? res.stations : [];
-  if (!stations.length) {
-    return [ui.card('Journey Stations', ui.notice('No journey stations returned for this train.'))];
-  }
-  const select = ui.el('select', { class: 'input' },
-    stations.map((s) => ui.el('option', { value: s.code, text: `${s.code} - ${s.name}` })),
-  );
-  const go = ui.el('button', { class: 'btn', text: 'Show Journey Basis' });
-  go.addEventListener('click', () => onPick(select.value));
-
-  return [
-    ui.card('Journey Stations',
-      ui.el('div', { class: 'row mt-8' },
-        ui.el('span', { class: 'mono', text: res.train_no || '' }),
-        ui.el('span', { class: 'text-sm muted', text: `${stations.length} station(s)` }),
-        ui.badge('Source: ' + (res.data_source || 'unknown'), 'slate'),
-      ),
-      ui.label('Journey Station'),
-      select,
-      ui.el('div', { class: 'row mt-12' }, go),
+function renderMapResults(res, ui, ctx) {
+  const parts = [];
+  parts.push(ui.card('Train',
+    ui.el('div', { class: 'row align-center mt-8' },
+      ui.entityLink('train', res.train_no || '', res.train_no || '', ctx.navigate),
+      ui.el('span', { class: 'bold', text: (res.train_no && res.train_name ? ' ' : '') + (res.train_name || '') }),
+      res.source_code ? ui.badge(res.source_code) : null,
+      res.dest_code ? ui.badge(res.dest_code, 'blue') : null,
+      ui.badge('Data source: ' + (res.data_source || 'unknown'), 'slate'),
     ),
-  ];
-}
-
-function renderBasis(res, ui) {
-  const cards = [];
-  cards.push(ui.card('Journey Basis',
-    ui.el('p', { class: 'text-sm bold', text: res.current_location_info || 'No current position reported.' }),
-    ui.el('div', { class: 'row mt-8' },
-      ui.el('span', { class: 'bold', text: res.train_name }),
-      ui.badge(res.train_number || '', 'blue'),
-      ui.badge('Source: ' + (res.data_source || 'unknown'), 'slate'),
-    ),
+    ui.el('p', { class: 'text-sm muted mt-8', text: (res.source || '') + ' \u2192 ' + (res.destination || '') }),
   ));
+  if (res.current_station) parts.push(...renderMapLive(res, ui));
+  parts.push(renderMapLeaflet(res, ui));
+  parts.push(renderMapStations(res, ui));
+  return parts;
+}
 
-  const js = res.journey_station;
-  if (js) {
-    cards.push(ui.card('Journey Station',
-      ui.el('div', { class: 'row mt-8' },
-        ui.el('span', { class: 'bold', text: js.name }),
-        ui.badge(js.code || '', 'blue'),
-        js.day_change ? ui.badge('Day Change', 'amber') : null,
-      ),
-      ui.el('p', { class: 'text-sm muted mt-8', text: `Seq ${js.seq ?? '-'} · Arrival days: ${js.arrival_days || '-'} · Departure days: ${js.departure_days || '-'}` }),
-    ));
-  }
-
-  cards.push(stationsCard(res, ui));
+function renderMapLive(res, ui) {
+  const current = res.current_station || {};
+  const cards = [ui.card('Live Position',
+    ui.el('div', { class: 'row align-center mt-8' },
+      ui.badge('\u25cf CURRENT: ' + (current.code || '?'), 'blue'),
+    ),
+  )];
+  const j = res.journey_station;
+  if (!j) return cards;
+  cards.push(ui.card('Journey Station',
+    [['Station', (j.name || '') + ' (' + (j.code || '') + ')'], ['Label', j.label || ''],
+     ['Expected arrival', j.expected_arrival || '\u2014'], ['Actual arrival', j.actual_arrival || '\u2014'],
+     ['Delay', j.delay_status || '\u2014'], ['Platform', j.platform || '\u2014'],
+    ].map(([k, v]) => ui.el('div', { class: 'row mt-4' },
+      ui.el('span', { class: 'text-sm muted', text: k + ': ' }),
+      ui.el('span', { class: 'text-sm bold', text: v }),
+    )),
+  ));
   return cards;
 }
 
-function stationsCard(res, ui) {
-  const stations = Array.isArray(res.stations) ? res.stations : [];
-  if (!stations.length) {
-    return ui.card('Stations', ui.notice('No station data returned.'));
-  }
-  const showActual = stations.some((s) => s.actual_arrival);
-  const headers = ['Station', 'Code', 'Sch. Arrival'];
-  if (showActual) headers.push('Act. Arrival');
-  headers.push('Delay', 'Status');
-  const rows = stations.map((s) => {
-    const cells = [s.name, s.code, ui.fmtTime(s.scheduled_arrival)];
-    if (showActual) cells.push(ui.fmtTime(s.actual_arrival));
-    cells.push(ui.delay(s.delay_minutes), ui.statusCell(s.status));
-    return cells;
+function renderMapLeaflet(res, ui) {
+  var track = (res.track || []).filter(function(s) { return typeof s.lat === 'number' && typeof s.lng === 'number'; });
+  var route = (res.route || []).filter(function(s) { return typeof s.lat === 'number' && typeof s.lng === 'number'; });
+  var coords = track.length >= 2 ? track : route;
+  if (coords.length < 2) return ui.card('Route Map', ui.notice('No coordinate data for this route.'));
+  var mapDiv = ui.el('div', { class: 'route-map' });
+  var card = ui.card('Route Map', mapDiv);
+  setTimeout(function() {
+    if (typeof L === 'undefined') return;
+    var map = L.map(mapDiv, { zoomControl: true, attributionControl: true });
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors',
+      maxZoom: 18,
+    }).addTo(map);
+    var allCoords = track.length >= 2 ? track : route;
+    var latlngs = allCoords.map(function(s) { return [s.lat, s.lng]; });
+    L.polyline(latlngs, { color: '#2563eb', weight: 3, opacity: 0.85, lineJoin: 'round', lineCap: 'round' }).addTo(map);
+    var currentCode = res.current_station && res.current_station.code;
+    route.forEach(function(s) {
+      var isCurrent = currentCode && s.code === currentCode;
+      var marker;
+      if (isCurrent) {
+        marker = L.circleMarker([s.lat, s.lng], {
+          radius: 7, fillColor: '#dc2626', color: '#fff', weight: 2, fillOpacity: 0.9,
+        }).addTo(map);
+      } else {
+        marker = L.circleMarker([s.lat, s.lng], {
+          radius: 4, fillColor: '#2563eb', color: '#fff', weight: 1.5, fillOpacity: 0.85,
+        }).addTo(map);
+      }
+      marker.bindTooltip(s.code + (s.name ? ' \u2014 ' + s.name : ''), { permanent: false, direction: 'top', offset: [0, -6] });
+    });
+    if (res.current_station && typeof res.current_station.lat === 'number') {
+      var cs = res.current_station;
+      L.circleMarker([cs.lat, cs.lng], {
+        radius: 5, fillColor: '#f97316', color: '#fff', weight: 2, fillOpacity: 0.9,
+      }).addTo(map).bindTooltip('Current: ' + (cs.code || ''), { permanent: true, direction: 'top', offset: [0, -6], className: 'map-tooltip-current' });
+    }
+    map.fitBounds(allCoords.map(function(s) { return [s.lat, s.lng]; }), { padding: [30, 30] });
+  }, 0);
+  return card;
+}
+
+function renderMapStations(res, ui) {
+  const route = res.route || [];
+  if (!route.length) return ui.card('Stations', ui.notice('No station data returned.'));
+  const currentCode = res.current_station && res.current_station.code;
+  const rows = route.map((st, i) => {
+    const marker = st.code === currentCode ? '<span style="color:#dc2626;font-weight:bold">\u25cf</span> ' : '';
+    return [String(i + 1), marker + mapEsc(st.name || ''), mapEsc(st.code || ''),
+      st.arrival || '\u2014', st.departure || '\u2014', st.day || '', st.distance || '',
+      st.expected_arrival || '', st.expected_departure || '',
+      mapDelayCell(st.arrival_delay, st.departure_delay),
+      mapStatusBadge(st.arrival_delay, st.departure_delay),
+    ];
   });
-  return ui.card('Stations', ui.table(headers, rows));
+  return ui.card('Stations', ui.table(['#', 'Station', 'Code', 'Arr', 'Dep', 'Day', 'Dist', 'Exp. Arr', 'Exp. Dep', 'Delay', 'Status'], rows));
+}
+
+function mapDelayCell(arr, dep) {
+  const kind = (d) => (d === 'On Time' ? 'green' : 'amber');
+  const p = [];
+  if (arr) p.push('Arr <span class="badge badge-' + kind(arr) + '">' + mapEsc(arr) + '</span>');
+  if (dep) p.push('Dep <span class="badge badge-' + kind(dep) + '">' + mapEsc(dep) + '</span>');
+  return p.join(' \u00b7 ') || '<span class="muted">\u2014</span>';
+}
+
+function mapStatusBadge(arr, dep) {
+  const p = [arr, dep].filter(Boolean);
+  if (!p.length) return '<span class="muted">\u2014</span>';
+  const onTime = p.every((x) => x === 'On Time');
+  return '<span class="badge badge-' + (onTime ? 'green' : 'amber') + '">' + (onTime ? 'On Time' : 'Delayed') + '</span>';
+}
+
+function mapEsc(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+/* ======================================================================
+   LANDING PAGE (PNR check, recent lookups, system status)
+   ====================================================================== */
+
+function renderLanding(container, ctx, prefillPnr) {
+  const ui = ctx.ui;
+  const navigate = ctx.navigate;
+
+  const landing = ui.el('div');
+
+  if (prefillPnr) {
+    /* PNR deep-link: show only PNR card, auto-submit */
+    const pnrCard = buildPNRCard(ui, ctx);
+    ui.render(landing, pnrCard);
+    container.append(landing);
+    const pnrInput = landing.querySelector('.pnr-input');
+    if (pnrInput) {
+      pnrInput.value = prefillPnr;
+      pnrInput.dispatchEvent(new Event('input'));
+      const pnrBtn = landing.querySelector('.pnr-submit');
+      if (pnrBtn) pnrBtn.click();
+    }
+  } else {
+    /* Normal landing: train search + PNR + recent + status */
+    const trainCard = buildTrainSearchCard(ui, navigate);
+    const pnrCard = buildPNRCard(ui, ctx);
+    const bottomRow = ui.el('div', { class: 'grid grid-2' });
+    const recentWrap = ui.el('div');
+    renderRecent(recentWrap, ctx);
+    const statusWrap = ui.el('div');
+    renderStatus(statusWrap, ctx);
+    bottomRow.append(recentWrap, statusWrap);
+    ui.render(landing, trainCard, pnrCard, bottomRow);
+    container.append(landing);
+    const trainInput = landing.querySelector('.autocomplete .input');
+    if (trainInput) trainInput.focus();
+  }
+}
+
+/* ---------- Train Search ---------- */
+
+function buildTrainSearchCard(ui, navigate) {
+  const card = ui.card('Track a Train');
+  const { wrap, input } = ui.trainInput('Train number (e.g. 12559)');
+  const btn = ui.el('button', { class: 'btn', text: 'Search' });
+
+  function submit() {
+    const raw = input.value.trim();
+    RailLog.action('track_train', 'submit', { train_raw: raw });
+    const train = raw.replace(/\s*-\s*.+$/, '').replace(/[^\d]/g, '');
+    if (!/^\d+$/.test(train)) {
+      RailLog.action('track_train', 'validation', { error: 'invalid train number', train_raw: raw });
+      input.focus();
+      return;
+    }
+    RailLog.action('track_train', 'validated', { train });
+    navigate(Routes.href({ section: 'train', params: { train: train } }));
+  }
+
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+  btn.addEventListener('click', submit);
+
+  card.append(
+    ui.el('div', { class: 'row', style: 'gap:6px;' }, wrap, btn),
+  );
+  return card;
+}
+
+/* ---------- PNR Check ---------- */
+
+function buildPNRCard(ui, ctx) {
+  const card = ui.card('PNR Check');
+  const input = ui.el('input', {
+    class: 'input pnr-input',
+    autocomplete: 'off',
+    maxlength: '10',
+    inputmode: 'numeric',
+    placeholder: '10-digit PNR number',
+  });
+  const btn = ui.el('button', { class: 'btn pnr-submit', text: 'Check' });
+  const results = ui.el('div');
+
+  function submit() {
+    const pnr = input.value.trim();
+    if (!/^\d{10}$/.test(pnr)) {
+      ui.render(results, ui.errorBox('PNR must be exactly 10 digits.'));
+      return;
+    }
+    const setLoading = ui.withLoading(btn, 'Checking...');
+    setLoading(true);
+    ui.render(results, ui.spinner());
+    fetchPNR(pnr, null, 3, ctx, setLoading)
+      .then((resolved) => {
+        if (!resolved) return;
+        if (resolved.kind === 'ok') {
+          ui.render(results, ...renderPNRResult(resolved.data, ctx));
+        } else if (resolved.kind === 'error') {
+          ui.render(results, ui.errorBox(resolved.text));
+        } else if (resolved.kind === 'notice') {
+          ui.render(results, ui.notice(resolved.text));
+        }
+      })
+      .catch((err) => {
+        ui.render(results, ui.errorBox('Request failed: ' + (err && err.message ? err.message : String(err))));
+      })
+      .finally(() => setLoading(false));
+  }
+
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+  btn.addEventListener('click', submit);
+
+  card.append(
+    ui.el('div', { class: 'row', style: 'gap:6px;' }, input, btn),
+    results,
+  );
+  return card;
+}
+
+async function fetchPNR(pnr, captcha, attemptsLeft, ctx, setLoading) {
+  const res = await ctx.api.pnr(pnr, captcha);
+  if (!res || res.ok !== false) {
+    return res ? { kind: 'ok', data: res } : { kind: 'error', text: 'No response from server.' };
+  }
+  if (res.status === 428 && attemptsLeft > 1) {
+    const params = await ctx.captcha.show(res.body);
+    if (!params) return { kind: 'notice', text: 'Check cancelled.' };
+    return fetchPNR(pnr, {
+      session_id: params.session_id,
+      source: params.source,
+      text: params.text,
+    }, attemptsLeft - 1, ctx, setLoading);
+  }
+  return { kind: 'error', text: res.error || 'Request failed.' };
+}
+
+function renderPNRResult(data, ctx) {
+  const ui = ctx.ui;
+  const train = ui.card('Train',
+    ui.el('div', { class: 'row mt-8' },
+      ui.el('span', { class: 'bold', text: data.train_name || 'Unknown train' }),
+      data.train_number != null ? ui.entityLink('train', String(data.train_number), String(data.train_number), ctx.navigate) : null,
+    ),
+    data.journey_date
+      ? ui.el('div', { class: 'text-sm muted mt-8', text: 'Journey: ' + ui.friendlyDate(data.journey_date) })
+      : null,
+    ui.el('div', { class: 'row mt-8' },
+      stationCell(data.from, ui, ctx),
+      ui.el('span', { class: 'muted', text: '\u2192' }),
+      stationCell(data.to, ui, ctx),
+    ),
+  );
+
+  const passengers = (Array.isArray(data.passengers) && data.passengers.length)
+    ? ui.card('Passengers', ui.table(
+        ['Booking Status', 'Current Status', 'Coach', 'Berth'],
+        data.passengers.map((p) => [
+          ui.esc(p && p.booking_status),
+          ui.esc(p && p.current_status),
+          ui.esc(p && p.coach),
+          ui.esc(p && p.berth),
+        ]),
+      ))
+    : ui.card('Passengers', ui.notice('No passenger data returned.'));
+
+  const meta = ui.card('Details',
+    ui.el('div', { class: 'row mt-8' },
+      data.data_source ? ui.badge(String(data.data_source), 'green') : null,
+      data.freshness ? ui.el('span', { class: 'text-sm muted', text: data.freshness }) : null,
+      data.last_updated ? ui.el('span', { class: 'text-sm muted', text: 'Updated ' + ui.friendlyTime(data.last_updated) }) : null,
+    ),
+    data.notice ? ui.el('p', { class: 'text-sm muted mt-8', text: data.notice }) : null,
+  );
+
+  const actions = ui.contextualActions(
+    data.train_number ? { type: 'train', code: String(data.train_number) } : null,
+    ctx.navigate,
+  );
+
+  return [train, passengers, meta, actions];
+}
+
+function stationCell(s, ui, ctx) {
+  if (!s || !s.name) return ui.el('span', { class: 'muted', text: '\u2014' });
+  const sub = [s.code, ui.fmtTime(s.time), s.day ? 'Day ' + s.day : ''].filter(Boolean).join(' \u00b7 ');
+  const codeLink = s.code ? ui.entityLink('station', s.code, s.code, ctx.navigate) : null;
+  return ui.el('div', { class: 'col' },
+    ui.el('span', { class: 'bold', text: s.name }),
+    ui.el('span', { class: 'text-sm muted', text: sub }),
+  );
+}
+
+/* ---------- Recent ---------- */
+
+function renderRecent(wrap, ctx) {
+  const ui = ctx.ui;
+  const card = ui.card('Recent');
+  const list = ctx.recent.list();
+  if (!list.length) {
+    card.append(ui.notice('No recent lookups.'));
+  } else {
+    const rows = ui.el('div', { class: 'col', style: 'gap:3px;' });
+    list.forEach((r) => {
+      const entityType = r.hash.includes('/train/') ? 'train'
+        : r.hash.includes('/station/') ? 'station'
+        : r.hash.includes('/plan/') ? 'plan'
+        : r.hash.includes('/pnr/') ? 'pnr' : '';
+      const icon = ENTITY_ICONS[entityType] || '';
+      const ts = r.ts ? ui.friendlyTime(new Date(r.ts).toISOString()) : '';
+      rows.append(ui.el('button', { class: 'recent-item', onclick: () => ctx.navigate(r.hash) },
+        ui.el('span', { class: 'recent-label' },
+          icon ? ui.el('span', { text: icon + ' ' }) : null,
+          ui.el('span', { text: r.label }),
+        ),
+        ui.el('span', { class: 'text-xs muted', text: ts }),
+      ));
+    });
+    card.append(rows);
+    card.append(ui.el('div', { class: 'row mt-8' },
+      ui.el('button', { class: 'btn ghost btn-sm', text: 'Clear', onclick: () => { ctx.recent.clear(); renderRecent(wrap, ctx); } }),
+    ));
+  }
+  ui.render(wrap, card);
+}
+
+/* ---------- System Status ---------- */
+
+function renderStatus(wrap, ctx) {
+  const ui = ctx.ui;
+  const card = ui.card('Status', ui.skeleton(1));
+  ui.render(wrap, card);
+  ctx.api.sourceStatus().then((s) => {
+    if (!s || s.ok === false) {
+      ui.render(wrap, ui.card('Status', ui.notice('Unavailable')));
+      return;
+    }
+    const liveBadge = s.live_enabled ? ui.badge('Live', 'green') : ui.badge('Offline', 'red');
+    const sources = (s.sources || []).map((src) =>
+      ui.badge(src.name + (src.reachable ? ' ↑' : ' ↓'), src.reachable ? 'green' : 'red')
+    );
+    ui.render(wrap, ui.card('Status',
+      ui.el('div', { class: 'row align-center' },
+        liveBadge,
+        ui.el('span', { class: 'text-xs muted', text: (s.primary_source || '?') }),
+      ),
+      ui.el('div', { class: 'row mt-8', style: 'gap:4px;flex-wrap:wrap;' }, ...sources),
+    ));
+  }).catch(() => {
+    ui.render(wrap, ui.card('Status', ui.notice('Unavailable')));
+  });
 }
 })();

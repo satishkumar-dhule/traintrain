@@ -104,3 +104,42 @@ document.addEventListener('DOMContentLoaded', () => {
   const tabs = Object.keys(window.Tabs || {}).sort();
   RailLog.lifecycle(`DOMContentLoaded -> globals [${globals}] tabs (${tabs.length}) [${tabs.join(', ')}]`);
 });
+
+/* ---------- Offline banner ---------- */
+
+function updateOfflineBanner() {
+  const banner = document.getElementById('offline-banner');
+  if (!banner) return;
+  const offline = !navigator.onLine;
+  banner.classList.toggle('hidden', !offline);
+}
+
+window.addEventListener('online', () => {
+  updateOfflineBanner();
+  RailLog.info('network online');
+});
+window.addEventListener('offline', () => {
+  updateOfflineBanner();
+  RailLog.warn('network offline — live fetches will fail');
+});
+document.addEventListener('DOMContentLoaded', updateOfflineBanner);
+
+/* ---------- PWA install prompt (no service worker; shell assets only) ---------- */
+
+let deferredInstall = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredInstall = e;
+  RailLog.info('beforeinstallprompt captured');
+});
+window.InstallApp = {
+  available: () => !!deferredInstall,
+  prompt() {
+    if (!deferredInstall) return Promise.resolve(false);
+    return deferredInstall.prompt()
+      .then(() => deferredInstall.userChoice)
+      .then((choice) => choice && choice.outcome === 'accepted')
+      .catch(() => false)
+      .finally(() => { deferredInstall = null; });
+  },
+};
