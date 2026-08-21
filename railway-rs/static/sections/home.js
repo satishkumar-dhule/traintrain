@@ -1,6 +1,7 @@
-/* sections/home.js - Home dashboard (default #/). IRCTC-style booking console
-   (PNR STATUS | CHARTS/VACANCY | BOOK TICKET) as the hero, then favorites,
-   recents and source status below. Pure presentation over shared ctx. */
+/* sections/home.js - Home dashboard (default #/). Aurora hero with the
+   IRCTC-style booking console (BOOK TICKET | PNR STATUS | CHARTS/VACANCY),
+   then a bento grid: quick-jump chips, favorites, recent lookups and live
+   source status. Pure presentation over shared ctx. */
 
 (() => {
 window.Sections = window.Sections || {};
@@ -17,18 +18,25 @@ const CLASSES = [
 ];
 
 window.Sections.home = {
-  mount(container, ctx, route) {
+  mount(container, ctx) {
     const ui = ctx.ui;
     const parts = [];
     parts.push(buildHero(ctx));
-    const grid = ui.el('div', { class: 'home-grid' });
+
+    const bento = ui.el('div', { class: 'bento' });
+
+    const jumpWrap = ui.el('div', { class: 'bento-wide' });
+    renderQuickJumps(jumpWrap, ctx);
+    bento.append(jumpWrap);
+
     const favWrap = ui.el('div');
-    grid.append(favWrap);
+    bento.append(favWrap);
     const recentWrap = ui.el('div');
-    grid.append(recentWrap);
-    const statusWrap = ui.el('div', { class: 'home-status' });
-    grid.append(statusWrap);
-    parts.push(grid);
+    bento.append(recentWrap);
+    const statusWrap = ui.el('div', { class: 'bento-wide' });
+    bento.append(statusWrap);
+
+    parts.push(bento);
     renderFavs(favWrap, ctx);
     renderRecent(recentWrap, ctx);
     renderStatus(statusWrap, ctx);
@@ -62,11 +70,37 @@ function favHash(f) {
   return '#/';
 }
 
+/* ---------- Quick-jump chips ---------- */
+
+function renderQuickJumps(wrap, ctx) {
+  const ui = ctx.ui;
+  const jumps = [
+    { icon: 'train', label: 'Track a train', sub: 'live spot & delay', hash: '#/train' },
+    { icon: 'station', label: 'Station board', sub: 'arrivals & departures', hash: '#/station' },
+    { icon: 'map', label: 'Plan a journey', sub: 'trains between stations', hash: '#/plan' },
+    { icon: 'pulse', label: 'Observability', sub: 'server vitals', hash: '#/system/observability' },
+  ];
+  const row = ui.el('div', { class: 'chip-row' });
+  jumps.forEach((j) => {
+    row.append(ui.el('button', {
+      class: 'chip',
+      onclick: () => ctx.navigate(j.hash),
+      'aria-label': j.label + ' — ' + j.sub,
+      title: j.sub,
+    },
+      ui.icon(j.icon),
+      ui.el('span', { class: 'chip-code', text: j.label }),
+      ui.el('span', { text: j.sub }),
+    ));
+  });
+  ui.render(wrap, row);
+}
+
 /* ---------- IRCTC booking console ---------- */
 
 function buildConsole(ctx) {
   const ui = ctx.ui;
-  const { card, body } = ui.console({
+  const { card } = ui.console({
     tabs: [
       ['book', 'Book Ticket', 'ticket'],
       ['pnr', 'PNR Status', 'list'],
@@ -166,7 +200,7 @@ function buildChartTab(ctx) {
     ui.el('p', { class: 'console-note', text: 'Live coach position & berth chart for a journey date.' }));
 }
 
-/* ---------- Favorites / Recent / Status (below the console) ---------- */
+/* ---------- Favorites / Recent / Status (bento tiles) ---------- */
 
 function renderFavs(wrap, ctx) {
   const ui = ctx.ui;

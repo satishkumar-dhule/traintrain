@@ -176,22 +176,45 @@ function liveBoard(trains, filter, ui, ctx) {
   if (!shown.length) {
     return ui.card('Live Board', ui.notice('No trains in window.'));
   }
-  const rows = shown.map((t) => [
-    ui.entityLink('train', t.number, t.number, ctx.navigate),
-    t.name,
-    t.route || '—',
-    `<span class="mono">${ui.fmtTime(t.sta)}</span>`,
-    ui.el('span', { class: 'mono bold' }, ui.fmtTime(t.eta)),
-    delayChip(t),
-    `<span class="badge badge-slate">${ui.esc(t.platform || '—')}</span>`,
-  ]);
-  return ui.card('Live Board', ui.collapsibleTable(['No.', 'Train', 'Route', 'STA', 'ETA', 'Delay', 'Platform'], rows));
+  const board = ui.el('div', { class: 'board' });
+  shown.forEach((t) => {
+    const late = delayMinutes(t);
+    const row = ui.el('button', {
+      class: 'board-row',
+      onclick: () => ctx.navigate(Routes.href({ section: 'train', params: { train: t.number } })),
+      'aria-label': 'Open train ' + t.number + (t.name ? ' ' + t.name : ''),
+    });
+    row.append(
+      ui.el('span', { class: 'board-num', text: t.number }),
+      ui.el('span', { class: 'board-name' },
+        ui.el('span', { class: 'board-train-name', text: t.name || '' }),
+        ui.el('span', { class: 'board-route', text: t.route || '\u2014' })),
+      ui.el('span', { class: 'board-times' },
+        boardTime(ui, 'SCH', t.sta, false),
+        boardTime(ui, t.eta ? 'ETA' : 'ETD', t.eta || t.dep || '', !!late),
+        platformCell(ui, t)),
+    );
+    board.append(row);
+  });
+  return ui.card('Live Board', board);
 }
 
-function delayChip(t) {
-  if (!t.delay_arr) return '<span class="badge badge-green">ON TIME</span>';
-  const mins = delayMinutes(t);
-  return '<span class="badge badge-red">' + (mins ? '+' + mins + ' min' : 'LATE') + '</span>';
+function boardTime(ui, label, value, late) {
+  const cell = ui.el('span', { class: 'board-time' + (late ? ' late' : '') });
+  cell.append(
+    ui.el('span', { class: 'bt-label', text: label }),
+    ui.el('span', { class: 'bt-val', text: ui.fmtTime(value) }),
+  );
+  return cell;
+}
+
+function platformCell(ui, t) {
+  const cell = ui.el('span', { class: 'board-time' });
+  cell.append(
+    ui.el('span', { class: 'bt-label', text: 'PF' }),
+    ui.el('span', { class: 'bt-platform', text: t.platform || '\u2014' }),
+  );
+  return cell;
 }
 
 function delayMinutes(t) {

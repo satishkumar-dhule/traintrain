@@ -6,8 +6,6 @@
 (() => {
 window.Sections = window.Sections || {};
 
-const ENTITY_ICONS = { train: '🚄', station: '🚉', plan: '📍', pnr: '🎫' };
-
 const VIEWS = ['spot', 'schedule', 'delay', 'journey', 'exceptions', 'map'];
 const VIEW_LABELS = { spot: 'Spot', schedule: 'Schedule', delay: 'Delay', journey: 'Journey', exceptions: 'Exceptions', map: 'Map' };
 
@@ -810,16 +808,14 @@ function renderLanding(container, ctx, prefillPnr) {
       if (pnrBtn) pnrBtn.click();
     }
   } else {
-    /* Normal landing: train search + PNR + recent + status */
+    /* Normal landing: train search + PNR + recent chips + status */
     const trainCard = buildTrainSearchCard(ui, navigate);
     const pnrCard = buildPNRCard(ui, ctx);
-    const bottomRow = ui.el('div', { class: 'grid grid-2' });
     const recentWrap = ui.el('div');
     renderRecent(recentWrap, ctx);
     const statusWrap = ui.el('div');
     renderStatus(statusWrap, ctx);
-    bottomRow.append(recentWrap, statusWrap);
-    ui.render(landing, trainCard, pnrCard, bottomRow);
+    ui.render(landing, trainCard, pnrCard, recentWrap, statusWrap);
     container.append(landing);
     const trainInput = landing.querySelector('.autocomplete .input');
     if (trainInput) trainInput.focus();
@@ -851,6 +847,7 @@ function buildTrainSearchCard(ui, navigate) {
 
   card.append(
     ui.el('div', { class: 'row', style: 'gap:6px;' }, wrap, btn),
+    ui.el('p', { class: 'text-sm muted mt-8', text: 'Enter a train number or name — or press ⌘K to search anything.' }),
   );
   return card;
 }
@@ -982,28 +979,29 @@ function stationCell(s, ui, ctx) {
 
 function renderRecent(wrap, ctx) {
   const ui = ctx.ui;
-  const card = ui.card('Recent');
+  const card = ui.card('Recent lookups');
   const list = ctx.recent.list();
   if (!list.length) {
     card.append(ui.notice('No recent lookups.'));
   } else {
-    const rows = ui.el('div', { class: 'col', style: 'gap:3px;' });
+    const row = ui.el('div', { class: 'chip-row' });
     list.forEach((r) => {
       const entityType = r.hash.includes('/train/') ? 'train'
         : r.hash.includes('/station/') ? 'station'
         : r.hash.includes('/plan/') ? 'plan'
         : r.hash.includes('/pnr/') ? 'pnr' : '';
-      const icon = ENTITY_ICONS[entityType] || '';
-      const ts = r.ts ? ui.friendlyTime(new Date(r.ts).toISOString()) : '';
-      rows.append(ui.el('button', { class: 'recent-item', onclick: () => ctx.navigate(r.hash) },
-        ui.el('span', { class: 'recent-label' },
-          icon ? ui.el('span', { text: icon + ' ' }) : null,
-          ui.el('span', { text: r.label }),
-        ),
-        ui.el('span', { class: 'text-xs muted', text: ts }),
+      const icons = { train: 'train', station: 'station', plan: 'map', pnr: 'ticket' };
+      row.append(ui.el('button', {
+        class: 'chip',
+        onclick: () => ctx.navigate(r.hash),
+        title: r.hash,
+        'aria-label': 'Open recent lookup ' + r.label,
+      },
+        icons[entityType] ? ui.icon(icons[entityType]) : null,
+        ui.el('span', { class: 'chip-code', text: r.label }),
       ));
     });
-    card.append(rows);
+    card.append(row);
     card.append(ui.el('div', { class: 'row mt-8' },
       ui.el('button', { class: 'btn ghost btn-sm', text: 'Clear', onclick: () => { ctx.recent.clear(); renderRecent(wrap, ctx); } }),
     ));

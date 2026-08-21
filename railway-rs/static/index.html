@@ -3,41 +3,53 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <meta name="theme-color" content="#0d1626" />
+  <meta name="theme-color" content="#f7f9fc" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#0b1220" media="(prefers-color-scheme: dark)" />
   <meta name="description" content="RailCompanion — live Indian Railways data: train spot, schedules, station boards, availability, coach charts. Honest data, no accounts." />
   <title>RailCompanion — Live Indian Railways</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="stylesheet" href="/vendor/leaflet/leaflet.css" />
-  <link rel="stylesheet" href="/styles.css?v=17" />
+  <link rel="stylesheet" href="/styles.css?v=19" />
   <script src="/theme.js?v=3"></script>
 </head>
 <body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
   <div id="app" class="shell">
-    <header class="mobile-header">
-      <div class="brand"><span class="logo"><svg class="ic" aria-hidden="true"><use href="/icons.svg#i-train"/></svg></span> <span>RailCompanion</span></div>
-      <div class="shell-search" id="shell-search">
-        <input id="shell-search-input" class="input" type="text" placeholder="Search station or train…" autocomplete="off" spellcheck="false" aria-label="Search station or train" />
-        <div id="shell-search-menu" class="ac-menu hidden"></div>
-      </div>
-      <div class="header-actions">
-        <button id="theme-toggle" class="btn icon-btn ghost" type="button" aria-label="Toggle theme" title="Toggle theme"></button>
-        <span id="mode-badge" class="badge badge-blue hidden">live</span>
+    <header class="topbar">
+      <a class="brand" href="#/" aria-label="RailCompanion home">
+        <span class="brand-mark" aria-hidden="true"><svg class="ic"><use href="/icons.svg#i-train"/></svg></span>
+        <span class="brand-name">RailCompanion</span>
+      </a>
+      <nav class="topnav" aria-label="Primary">
+        <a class="topnav-link" data-nav="home" href="#/"><svg class="ic" aria-hidden="true"><use href="/icons.svg#i-home"/></svg><span>Home</span></a>
+        <a class="topnav-link" data-nav="train" href="#/train"><svg class="ic" aria-hidden="true"><use href="/icons.svg#i-train"/></svg><span>Trains</span></a>
+        <a class="topnav-link" data-nav="station" href="#/station"><svg class="ic" aria-hidden="true"><use href="/icons.svg#i-station"/></svg><span>Stations</span></a>
+        <a class="topnav-link" data-nav="plan" href="#/plan"><svg class="ic" aria-hidden="true"><use href="/icons.svg#i-plan"/></svg><span>Journeys</span></a>
+        <a class="topnav-link" data-nav="system" href="#/system"><svg class="ic" aria-hidden="true"><use href="/icons.svg#i-system"/></svg><span>System</span></a>
+      </nav>
+      <div class="topbar-actions">
+        <button id="topbar-search" class="btn ghost btn-sm topbar-search" type="button" aria-label="Search and commands">
+          <svg class="ic btn-ic" aria-hidden="true"><use href="/icons.svg#i-search"/></svg>
+          <span>Search</span>
+          <kbd class="pi-kbd">⌘K</kbd>
+        </button>
+        <button id="theme-toggle" class="icon-btn" type="button" aria-label="Toggle theme">
+          <svg class="ic" aria-hidden="true"><use href="/icons.svg#i-sun" id="theme-toggle-use"/></svg>
+        </button>
       </div>
     </header>
-
-    <div class="layout">
-      <aside class="sidebar">
-        <nav id="side-nav" class="side-nav" aria-label="Sections"></nav>
-        <div id="side-favs" class="side-favs hidden" aria-label="Favorites"></div>
-      </aside>
-
-      <main id="main" class="main">
-        <div id="tab-root"></div>
-      </main>
-    </div>
-
-    <nav id="mobile-nav" class="mobile-nav" aria-label="Sections"></nav>
+    <main id="main" class="main" tabindex="-1" aria-label="Content">
+      <div id="tab-root"></div>
+    </main>
+    <nav class="tabbar" aria-label="Primary">
+      <a class="tabbar-item" data-nav="home" href="#/"><svg class="ic" aria-hidden="true"><use href="/icons.svg#i-home"/></svg><span>Home</span></a>
+      <a class="tabbar-item" data-nav="train" href="#/train"><svg class="ic" aria-hidden="true"><use href="/icons.svg#i-train"/></svg><span>Trains</span></a>
+      <a class="tabbar-item" data-nav="station" href="#/station"><svg class="ic" aria-hidden="true"><use href="/icons.svg#i-station"/></svg><span>Stations</span></a>
+      <a class="tabbar-item" data-nav="plan" href="#/plan"><svg class="ic" aria-hidden="true"><use href="/icons.svg#i-plan"/></svg><span>Journeys</span></a>
+      <a class="tabbar-item" data-nav="system" href="#/system"><svg class="ic" aria-hidden="true"><use href="/icons.svg#i-system"/></svg><span>System</span></a>
+    </nav>
   </div>
 
   <div id="toast-host" class="toast-host" aria-live="polite" aria-atomic="false"></div>
@@ -46,17 +58,17 @@
     <span>You're offline — showing cached data.</span>
   </div>
 
-  <script src="/boot.js?v=9"></script>
-  <script src="/ui.js?v=15"></script>
+  <script src="/boot.js?v=10"></script>
+  <script src="/ui.js?v=16"></script>
   <script src="/api.js?v=10"></script>
   <script src="/routes.js?v=7"></script>
   <script src="/vendor/leaflet/leaflet.js" defer></script>
-  <script src="/sections/home.js?v=6"></script>
-  <script src="/sections/track.js?v=7"></script>
-  <script src="/sections/station.js?v=8"></script>
-  <script src="/sections/plan.js?v=8"></script>
-  <script src="/sections/system.js?v=4"></script>
-  <script src="/palette.js?v=4"></script>
-  <script src="/app.js?v=13"></script>
+  <script src="/sections/home.js?v=8"></script>
+  <script src="/sections/track.js?v=9"></script>
+  <script src="/sections/station.js?v=10"></script>
+  <script src="/sections/plan.js?v=10"></script>
+  <script src="/sections/system.js?v=6"></script>
+  <script src="/palette.js?v=8"></script>
+  <script src="/app.js?v=15"></script>
 </body>
 </html>

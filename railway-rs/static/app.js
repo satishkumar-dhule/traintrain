@@ -1,7 +1,13 @@
-/* app.js - shell: hash router over the Routes table, section nav (5 primary
-   sections: home, train, station, plan, system), and section mounting. Sections
-   live in static/sections/*.js and expose window.Sections.<id> with
-   mount(container, ctx, route). */
+/* app.js - application shell for RailCompanion v5 ("Transit").
+   Responsibilities:
+     - hash router over the Routes table (sections: home/train/station/plan/system)
+     - section mounting with view transitions, scroll memory and focus management
+   Sections live in static/sections/*.js and expose window.Sections.<id> with
+   mount(container, ctx, route). v5 adds persistent chrome — a topbar (desktop
+   nav + search + theme toggle) and a mobile tabbar — alongside the command
+   palette (palette.js), which remains the primary search/command surface.
+   app.js syncs active states on [data-nav] links and wires the topbar buttons;
+   the keyboard shortcuts below are unchanged. */
 
 window.Tabs = window.Tabs || {};
 
@@ -10,19 +16,11 @@ window.Tabs = window.Tabs || {};
 
   const SECTIONS = [
     { id: 'home', label: 'Home', icon: 'home' },
-    { id: 'train', label: 'Train', icon: 'train' },
-    { id: 'station', label: 'Station', icon: 'station' },
-    { id: 'plan', label: 'Plan', icon: 'plan' },
+    { id: 'train', label: 'Trains', icon: 'train' },
+    { id: 'station', label: 'Stations', icon: 'station' },
+    { id: 'plan', label: 'Journeys', icon: 'plan' },
     { id: 'system', label: 'System', icon: 'system' },
   ];
-
-  const VIEW_LABELS = {
-    spot: 'Spot', schedule: 'Schedule', map: 'Map', delay: 'Delay',
-    exceptions: 'Exceptions', journey: 'Journey',
-    live: 'Live', tt: 'Timetable', heritage: 'Heritage', parcel: 'Parcel',
-    trains: 'Trains', availability: 'Availability', chart: 'Chart',
-    observability: 'Observability', settings: 'Settings', debug: 'Debug',
-  };
 
   const RECENT_KEY = 'rc.recent';
   const RECENT_MAX = 8;
@@ -75,7 +73,6 @@ window.Tabs = window.Tabs || {};
       }
       state.favs = state.favs.slice(0, 40);
       saveFavs();
-      renderSidebarFavs();
       favListeners.forEach((fn) => fn(added, type, code));
       return added;
     },
@@ -85,7 +82,6 @@ window.Tabs = window.Tabs || {};
       if (hit < 0 || !label) return;
       state.favs[hit].label = label;
       saveFavs();
-      renderSidebarFavs();
     },
   };
 
@@ -117,7 +113,6 @@ window.Tabs = window.Tabs || {};
         if (favHit >= 0) state.favs[favHit].label = label;
         saveRecent();
         saveFavs();
-        renderSidebarFavs();
         favListeners.forEach((fn) => fn(null, 'train', code));
         if (onDone) onDone();
       })
@@ -160,6 +155,7 @@ window.Tabs = window.Tabs || {};
         copyLink: UI.copyLink,
         share: UI.share,
         enrichTrain,
+        openSearch: () => window.Palette && window.Palette.open(),
         theme: window.AppTheme || { current: () => 'system', set: () => {}, toggle: () => {} },
       };
       window._appCtx = () => state.ctx;
@@ -192,58 +188,63 @@ window.Tabs = window.Tabs || {};
     if (main && location.hash) state.scrollMemo[location.hash] = main.scrollTop;
   }
 
-  function buildNav(containerId) {
-    const nav = document.getElementById(containerId);
-    if (!nav) return;
-    SECTIONS.forEach((s) => {
-      const btn = UI.el('button', {
-        class: 'nav-item',
-        'data-section': s.id,
-        onclick: () => navigate(Routes.href({ section: s.id })),
-      });
-      btn.append(
-        UI.el('span', { class: 'nav-icon', 'aria-hidden': 'true' }, UI.icon(s.icon)),
-        UI.el('span', { text: s.label }),
-      );
-      nav.append(btn);
+  /* ---------- Rendering ---------- */
+
+  /* Keep topnav/tabbar chrome in sync with the active section. */
+  function syncChrome(route) {
+    document.querySelectorAll('[data-nav]').forEach((el) => {
+      const active = el.dataset.nav === route.section;
+      el.classList.toggle('active', active);
+      if (active) el.setAttribute('aria-current', 'page');
+      else el.removeAttribute('aria-current');
     });
   }
 
-  function updateNav(route) {
-    document.querySelectorAll('.nav-item').forEach((n) => n.classList.remove('active'));
-    const hit = document.querySelector(`[data-section="${route.section}"]`);
-    if (hit) hit.classList.add('active');
+  function reducedMotion() {
+    try {
+      return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    } catch { return false; }
   }
 
-  /* ---------- Rendering ---------- */
-
-  function render(route) {
+  function swapContent(route) {
     const root = document.getElementById('tab-root');
     if (!root) return;
+    const content = UI.el('div', { class: 'tab-content reveal' });
+    UI.render(root, content);
+    const section = window.Sections[route.section];
+    if (!section) {
+      UI.render(content, UI.errorState(`Section "${route.section}" is not wired up yet.`));
+      return;
+    }
+    section.mount(content, ctx(), route);
+  }
+
+  function render(route) {
     const main = document.getElementById('main');
-    updateNav(route);
 
     if (state.lastSection && state.lastSection !== route.section && main) {
       state.scrollMemo = {};
-      main.scrollTop = 0;
     }
     state.lastSection = route.section;
+    syncChrome(route);
 
     RailLog.info('route:', location.hash || '#/', '->', route.section, route.view || '', route.params || {});
 
-    const section = window.Sections[route.section];
-    if (!section) {
-      UI.render(root, UI.errorState(`Section "${route.section}" is not wired up yet.`));
-      return;
+    const canTransition = typeof document.startViewTransition === 'function' && !reducedMotion();
+    if (canTransition) {
+      document.startViewTransition(() => swapContent(route));
+    } else {
+      swapContent(route);
     }
-
-    const content = UI.el('div', { class: 'tab-content' });
-    UI.render(root, content);
-    section.mount(content, ctx(), route);
     recordRecent(route);
 
     requestAnimationFrame(() => {
       if (main) main.scrollTop = state.scrollMemo[location.hash] || 0;
+      /* Focus management for screen readers: move focus to the content region
+         unless a section already placed focus (e.g. an autofocused input). */
+      if (main && (!document.activeElement || document.activeElement === document.body)) {
+        try { main.focus({ preventScroll: true }); } catch { main.focus(); }
+      }
     });
   }
 
@@ -255,146 +256,7 @@ window.Tabs = window.Tabs || {};
     return '';
   }
 
-  /* ---------- Sidebar favorites ---------- */
-
-  function renderSidebarFavs() {
-    const box = document.getElementById('side-favs');
-    if (!box) return;
-    const list = state.favs.slice(0, 12);
-    if (!list.length) { box.classList.add('hidden'); box.replaceChildren(); return; }
-    box.classList.remove('hidden');
-    box.replaceChildren(UI.el('div', { class: 'side-favs-label', text: 'Favorites' }));
-    const rows = UI.el('div', { class: 'col', style: 'gap:3px;' });
-    list.forEach((f) => {
-      rows.append(UI.el('button', {
-        class: 'recent-item',
-        onclick: () => navigate(favHash(f)),
-        'aria-label': 'Open ' + f.label,
-      },
-        UI.el('span', { class: 'recent-label' },
-          UI.icon(f.type === 'train' ? 'train' : 'station'),
-          ' ' + f.label),
-        UI.icon('star-fill', 'fav-star'),
-      ));
-    });
-    box.append(rows);
-  }
-
-  function favHash(f) {
-    if (f.type === 'train') return Routes.href({ section: 'train', params: { train: f.code } });
-    if (f.type === 'station') return Routes.href({ section: 'station', params: { station: f.code } });
-    return '#/';
-  }
-
-  /* ---------- Shell search ---------- */
-
-  function initShellSearch() {
-    const wrap = document.getElementById('shell-search');
-    const input = document.getElementById('shell-search-input');
-    const menu = document.getElementById('shell-search-menu');
-    if (!wrap || !input || !menu) return;
-
-    let token = 0;
-    let items = [];
-    let hl = -1;
-
-    function closeMenu() {
-      menu.replaceChildren();
-      menu.classList.add('hidden');
-      items = [];
-      hl = -1;
-    }
-
-    function updateHighlight() {
-      [...menu.querySelectorAll('.ac-item')].forEach((row, i) => row.classList.toggle('hl', i === hl));
-    }
-
-    function renderMenu() {
-      menu.replaceChildren();
-      if (!items.length) {
-        menu.append(UI.el('div', { class: 'ac-group', text: 'No results' }));
-        menu.classList.remove('hidden');
-        return;
-      }
-      const groups = [
-        ['Stations', items.filter((it) => it.type === 'station')],
-        ['Trains', items.filter((it) => it.type === 'train')],
-      ];
-      groups.forEach(([label, list]) => {
-        if (!list.length) return;
-        menu.append(UI.el('div', { class: 'ac-group', text: label }));
-        list.forEach((it) => {
-          const row = UI.el('div', {
-            class: 'ac-item',
-            onmousedown: (e) => { e.preventDefault(); select(it); },
-          });
-          row.append(
-            UI.el('span', { class: 'ac-code', text: it.code || it.number }),
-            UI.el('span', { class: 'ac-name', text: it.name }),
-          );
-          menu.append(row);
-        });
-      });
-      menu.classList.remove('hidden');
-      updateHighlight();
-    }
-
-    async function search() {
-      const q = input.value.trim();
-      if (!q) { closeMenu(); return; }
-      const my = ++token;
-      const suggestions = await window.Api.suggest(q);
-      if (my !== token) return;
-      items = [];
-      if (Array.isArray(suggestions)) {
-        suggestions.forEach((it) => items.push({
-          type: it.type === 'train' ? 'train' : 'station',
-          code: it.code,
-          number: it.number,
-          name: it.name,
-        }));
-      }
-      hl = -1;
-      renderMenu();
-    }
-
-    const debouncedSearch = UI.debounce(search, 250);
-
-    function select(it) {
-      if (it.type === 'station') navigate(Routes.href({ section: 'station', params: { station: it.code } }));
-      else navigate(Routes.href({ section: 'train', params: { train: it.number } }));
-      input.value = '';
-      closeMenu();
-    }
-
-    input.addEventListener('input', debouncedSearch);
-    input.addEventListener('focus', () => {
-      if (input.value.trim()) debouncedSearch();
-    });
-    input.addEventListener('blur', () => setTimeout(closeMenu, 150));
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') { closeMenu(); input.blur(); }
-      else if (e.key === 'ArrowDown' && items.length) { e.preventDefault(); hl = (hl + 1) % items.length; updateHighlight(); }
-      else if (e.key === 'ArrowUp' && items.length) { e.preventDefault(); hl = (hl - 1 + items.length) % items.length; updateHighlight(); }
-      else if (e.key === 'Enter' && hl >= 0 && items[hl]) { e.preventDefault(); select(items[hl]); }
-    });
-    document.addEventListener('mousedown', (e) => { if (!wrap.contains(e.target)) closeMenu(); });
-  }
-
   /* ---------- Theme ---------- */
-
-  function syncThemeIcons() {
-    const theme = window.AppTheme;
-    if (!theme) return;
-    const btn = document.getElementById('theme-toggle');
-    if (btn) btn.replaceChildren(UI.icon(theme.icon()));
-  }
-
-  function initTheme() {
-    const t = document.getElementById('theme-toggle');
-    if (t) t.addEventListener('click', () => { window.AppTheme.toggle(); syncThemeIcons(); });
-    syncThemeIcons();
-  }
 
   /* ---------- CAPTCHA (dialog-based) ---------- */
 
@@ -419,29 +281,74 @@ window.Tabs = window.Tabs || {};
     });
   }
 
-  /* ---------- Keyboard shortcuts ---------- */
+  /* ---------- Keyboard shortcuts ----------
+     ⌘K / Ctrl+K or /  → command palette (wired in palette.js too)
+     1..5              → jump to section
+     t                 → toggle theme
+     ?                 → shortcut help                                    */
 
   function initKeyboard() {
     document.addEventListener('keydown', (e) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       const tag = e.target && e.target.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      const typing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+      if (typing) return;
+
       if (e.key === '/') {
         e.preventDefault();
-        const input = document.getElementById('shell-search-input');
-        if (input) input.focus();
+        if (window.Palette) window.Palette.open();
+        return;
       }
+      if (e.key === '?') {
+        e.preventDefault();
+        showShortcuts();
+        return;
+      }
+      if (e.key === 't' || e.key === 'T') {
+        if (window.AppTheme) window.AppTheme.toggle();
+        return;
+      }
+      const n = parseInt(e.key, 10);
+      if (n >= 1 && n <= SECTIONS.length) {
+        navigate(Routes.href({ section: SECTIONS[n - 1].id }));
+      }
+    });
+  }
+
+  function showShortcuts() {
+    const kbd = (k) => UI.el('kbd', { class: 'pi-kbd', text: k });
+    const row = (keys, desc) => UI.el('div', { class: 'row justify-between', style: 'padding:4px 0;' },
+      UI.el('span', { class: 'text-sm', text: desc }),
+      UI.el('span', { class: 'row', style: 'gap:4px;' }, ...keys.map(kbd)));
+    UI.dialog({
+      title: 'Keyboard shortcuts',
+      body: [
+        row(['⌘K', '/'], 'Search & commands'),
+        row(['1', '…', '5'], 'Jump to section'),
+        row(['t'], 'Toggle theme'),
+        row(['?'], 'This help'),
+      ],
+      actions: [{ label: 'Got it', primary: true, value: true }],
     });
   }
 
   /* ---------- Boot ---------- */
 
   document.addEventListener('DOMContentLoaded', () => {
-    buildNav('side-nav');
-    buildNav('mobile-nav');
-    renderSidebarFavs();
-    initTheme();
     initKeyboard();
+
+    const searchBtn = document.getElementById('topbar-search');
+    if (searchBtn) searchBtn.addEventListener('click', () => { if (window.Palette) window.Palette.open(); });
+
+    const themeBtn = document.getElementById('theme-toggle');
+    function syncThemeIcon() {
+      const use = document.getElementById('theme-toggle-use');
+      const t = window.AppTheme;
+      if (use && t) use.setAttribute('href', '/icons.svg#' + (t.icon() === 'sun' ? 'i-sun' : 'i-moon'));
+    }
+    if (themeBtn) themeBtn.addEventListener('click', () => { if (window.AppTheme) window.AppTheme.toggle(); });
+    if (window.AppTheme && window.AppTheme.onChange) window.AppTheme.onChange(syncThemeIcon);
+    syncThemeIcon();
 
     const initial = Routes.parse(location.hash);
     if (!initial) {
@@ -457,14 +364,10 @@ window.Tabs = window.Tabs || {};
         RailLog.warn('source-status:', s && s.ok === false ? `${s.status} ${s.error}` : 'no response');
         return;
       }
-      const badge = document.getElementById('mode-badge');
-      badge.textContent = s.mode || 'live';
-      badge.classList.remove('hidden');
       RailLog.info('source-status ok: mode=' + s.mode + ' primary=' + (s.primary_source || '?') +
         ' sources=[' + (s.sources || []).map((x) => `${x.name}:${x.reachable ? 'up' : 'down'}`).join(', ') + ']');
     }).catch((err) => RailLog.error('source-status fetch threw:', err && err.message ? err.message : String(err)));
 
-    initShellSearch();
     RailLog.info('app init complete');
   });
 })();

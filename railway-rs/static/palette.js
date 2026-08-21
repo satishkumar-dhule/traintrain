@@ -1,5 +1,7 @@
-/* palette.js - Command palette (Cmd+K / Ctrl+K). Smart query parsing,
-   recent lookups, quick actions, and search results. */
+/* palette.js - Command palette (Cmd+K / Ctrl+K / "/"). The primary search and
+   navigation surface: smart query parsing (PNR, train+view, station+view,
+   origin>destination), grouped initial state (Recent / Favorites / Actions),
+   grouped live results, and keyboard-first navigation with a hint footer. */
 
 (() => {
   let isOpen = false;
@@ -101,7 +103,7 @@
     return box;
   }
 
-  /* ---------- Palette UI ---------- */
+  /* ---------- Stored lookups ---------- */
 
   function getRecent() {
     try {
@@ -111,29 +113,79 @@
     } catch { return []; }
   }
 
+  function getFavs() {
+    try {
+      const raw = localStorage.getItem('rc.favs');
+      const arr = raw ? JSON.parse(raw) : [];
+      return Array.isArray(arr) ? arr : [];
+    } catch { return []; }
+  }
+
+  function favHash(f) {
+    if (f.type === 'train') return Routes.href({ section: 'train', params: { train: f.code } });
+    if (f.type === 'station') return Routes.href({ section: 'station', params: { station: f.code } });
+    return '#/';
+  }
+
+  /* ---------- Palette UI ---------- */
+
   function buildPalette() {
     const UI = window.UI;
     backdrop = UI.el('div', { class: 'palette-backdrop' });
-    const panel = UI.el('div', { class: 'palette' });
+    const panel = UI.el('div', { class: 'palette', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Command palette' });
     const input = UI.el('input', {
       class: 'palette-input',
-      placeholder: 'Search trains, stations, or type a command...',
+      placeholder: 'Search trains, stations, or try "12559 schedule", "NDLS > BSB", a 10-digit PNR…',
       autocomplete: 'off',
       spellcheck: 'false',
+      'aria-label': 'Search trains, stations, or run a command',
     });
     const body = UI.el('div', { class: 'palette-body' });
+
+    const footer = UI.el('div', { class: 'palette-footer' });
+    footer.append(
+      UI.el('span', {}, UI.el('kbd', { class: 'pi-kbd', text: '\u2191\u2193' }), ' navigate'),
+      UI.el('span', {}, UI.el('kbd', { class: 'pi-kbd', text: '\u21b5' }), ' open'),
+      UI.el('span', {}, UI.el('kbd', { class: 'pi-kbd', text: 'esc' }), ' close'),
+    );
 
     backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
     input.addEventListener('keydown', (e) => onKeydown(e, body));
     input.addEventListener('input', () => onInput(input.value, body));
 
-    panel.append(input, body);
+    panel.append(input, body, footer);
     backdrop.append(panel);
     document.body.append(backdrop);
 
     // Render initial state
     renderInitial(body);
     input.focus();
+  }
+
+  function sectionOf(ui, body, label) {
+    const sec = ui.el('div', { class: 'palette-section' });
+    sec.append(ui.el('div', { class: 'palette-section-label', text: label }));
+    body.append(sec);
+    return sec;
+  }
+
+  function addItem(sec, item) {
+    sec.append(item);
+    currentItems.push(item);
+  }
+
+  function navItem(ui, { iconName, text, hint, hash }) {
+    const item = ui.el('div', {
+      class: 'palette-item',
+      'data-hash': hash,
+      onclick: () => { navigate(hash); close(); },
+    });
+    item.append(
+      iconItem('pi-icon', iconName),
+      ui.el('span', { class: 'pi-text', text }),
+    );
+    if (hint) item.append(ui.el('span', { class: 'pi-hint', text: hint }));
+    return item;
   }
 
   function renderInitial(body) {
@@ -145,52 +197,44 @@
     // Recent
     const recent = getRecent().slice(0, 5);
     if (recent.length) {
-      const sec = UI.el('div', { class: 'palette-section' });
-      sec.append(UI.el('div', { class: 'palette-section-label', text: 'Recent' }));
+      const sec = sectionOf(UI, body, 'Recent');
       recent.forEach((r) => {
         const entityType = r.hash.includes('/train/') ? 'train'
           : r.hash.includes('/station/') ? 'station'
           : r.hash.includes('/plan/') ? 'plan'
           : r.hash.includes('/pnr/') ? 'pnr' : '';
         const icons = { train: 'train', station: 'station', plan: 'map', pnr: 'ticket' };
-        const item = UI.el('div', {
-          class: 'palette-item',
-          'data-hash': r.hash,
-          onclick: () => { navigate(r.hash); close(); },
-        });
-        item.append(
-          iconItem('pi-icon', icons[entityType] || 'clock'),
-          UI.el('span', { class: 'pi-text', text: r.label }),
-          UI.el('span', { class: 'pi-hint', text: r.hash }),
-        );
-        sec.append(item);
-        currentItems.push(item);
+        addItem(sec, navItem(UI, { iconName: icons[entityType] || 'clock', text: r.label, hint: r.hash, hash: r.hash }));
       });
-      body.append(sec);
+    }
+
+    // Favorites
+    const favs = getFavs().slice(0, 5);
+    if (favs.length) {
+      const sec = sectionOf(UI, body, 'Favorites');
+      favs.forEach((f) => {
+        addItem(sec, navItem(UI, {
+          iconName: f.type === 'train' ? 'star-fill' : 'star-fill',
+          text: f.label || (f.type === 'train' ? 'Train ' + f.code : 'Station ' + f.code),
+          hint: f.code,
+          hash: favHash(f),
+        }));
+      });
     }
 
     // Quick actions
     const actions = [
       { icon: 'home', label: 'Go to Home', hash: '#/' },
+      { icon: 'train', label: 'Track a Train', hash: '#/train' },
+      { icon: 'station', label: 'Station Live Board', hash: '#/station' },
+      { icon: 'map', label: 'Plan a Journey', hash: '#/plan' },
       { icon: 'pulse', label: 'Open Observability', hash: '#/system/observability' },
-      { icon: 'settings', label: 'System Settings', hash: '#/system/settings' },
       { icon: 'log', label: 'Debug Log', hash: '#/system/debug' },
     ];
-    const sec2 = UI.el('div', { class: 'palette-section' });
-    sec2.append(UI.el('div', { class: 'palette-section-label', text: 'Actions' }));
-    actions.forEach((a) => {
-      const item = UI.el('div', {
-        class: 'palette-item',
-        onclick: () => { navigate(a.hash); close(); },
-      });
-      item.append(
-        iconItem('pi-icon', a.icon),
-        UI.el('span', { class: 'pi-text', text: a.label }),
-      );
-      sec2.append(item);
-      currentItems.push(item);
-    });
-    body.append(sec2);
+    const sec2 = sectionOf(UI, body, 'Actions');
+    actions.forEach((a) => addItem(sec2, navItem(UI, { iconName: a.icon, text: a.label, hash: a.hash })));
+
+    markHighlight();
   }
 
   async function onInput(query, body) {
@@ -213,21 +257,11 @@
       body.replaceChildren();
       currentItems = [];
       highlight = -1;
-      const sec = UI.el('div', { class: 'palette-section' });
-      sec.append(UI.el('div', { class: 'palette-section-label', text: 'Result' }));
+      const sec = sectionOf(UI, body, 'Result');
       const hash = parsedToNav(parsed);
-      const item = UI.el('div', {
-        class: 'palette-item hl',
-        onclick: () => { navigate(hash); close(); },
-      });
-      item.append(
-        iconItem('pi-icon', parsedIcon(parsed)),
-        UI.el('span', { class: 'pi-text', text: parsedLabel(parsed) }),
-        UI.el('span', { class: 'pi-hint', text: hash }),
-      );
-      sec.append(item);
-      body.append(sec);
-      currentItems = [item];
+      const item = navItem(UI, { iconName: parsedIcon(parsed), text: parsedLabel(parsed), hint: hash, hash });
+      item.classList.add('hl');
+      addItem(sec, item);
       highlight = 0;
       return;
     }
@@ -245,27 +279,27 @@
         return;
       }
 
-      const sec = UI.el('div', { class: 'palette-section' });
-      sec.append(UI.el('div', { class: 'palette-section-label', text: 'Results' }));
-
-      suggestions.forEach((s) => {
-        const isTrain = s.type === 'train';
-        const hash = isTrain
-          ? Routes.href({ section: 'train', params: { train: s.number } })
-          : Routes.href({ section: 'station', params: { station: s.code } });
-        const item = UI.el('div', {
-          class: 'palette-item',
-          onclick: () => { navigate(hash); close(); },
-        });
-        item.append(
-          iconItem('pi-icon', isTrain ? 'train' : 'station'),
-          UI.el('span', { class: 'pi-text', text: s.name }),
-          UI.el('span', { class: 'pi-hint', text: isTrain ? s.number : s.code }),
-        );
-        sec.append(item);
-        currentItems.push(item);
-      });
-      body.append(sec);
+      const trains = suggestions.filter((s) => s.type === 'train');
+      const stations = suggestions.filter((s) => s.type !== 'train');
+      if (trains.length) {
+        const sec = sectionOf(UI, body, 'Trains');
+        trains.forEach((s) => addItem(sec, navItem(UI, {
+          iconName: 'train',
+          text: s.name,
+          hint: s.number,
+          hash: Routes.href({ section: 'train', params: { train: s.number } }),
+        })));
+      }
+      if (stations.length) {
+        const sec = sectionOf(UI, body, 'Stations');
+        stations.forEach((s) => addItem(sec, navItem(UI, {
+          iconName: 'station',
+          text: s.name,
+          hint: s.code,
+          hash: Routes.href({ section: 'station', params: { station: s.code } }),
+        })));
+      }
+      markHighlight();
     } catch (err) {
       body.replaceChildren(UI.el('div', { class: 'palette-empty', text: 'Search failed' }));
     }
@@ -295,10 +329,16 @@
     }
   }
 
+  function markHighlight() {
+    if (highlight < 0 && currentItems.length) highlight = 0;
+    updateHighlight();
+  }
+
   function updateHighlight() {
     currentItems.forEach((item, i) => item.classList.toggle('hl', i === highlight));
-    if (highlight >= 0 && currentItems[highlight]) {
-      currentItems[highlight].scrollIntoView({ block: 'nearest' });
+    const el = currentItems[highlight];
+    if (el && typeof el.scrollIntoView === 'function') {
+      el.scrollIntoView({ block: 'nearest' });
     }
   }
 
@@ -346,6 +386,6 @@
     }
   });
 
-  /* ---------- Expose open() for search bar click ---------- */
+  /* ---------- Expose open() for keyboard shortcuts ---------- */
   window.Palette = { open, close };
 })();

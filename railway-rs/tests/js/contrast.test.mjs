@@ -1,6 +1,8 @@
 /* contrast.test.mjs - unit tests for static/styles.css dark-mode contrast.
-   Guards the --primary-strong token (dark navy in both modes) and the rule
-   that white text must never sit on a plain var(--primary) background.
+   Guards the --primary-strong token (dark blue in both modes), pins
+   --on-primary-strong to pure white (so color: var(--on-primary-strong)
+   counts as white text), and keeps the rule that white text must never sit
+   on a plain var(--primary) background.
    Runs with the built-in Node test runner: `node --test tests/js/`. */
 
 import test from 'node:test';
@@ -39,19 +41,24 @@ function blocks() {
   return CSS.split('}');
 }
 
-/* A block must declare a white-ish text color (color: #fff / #ffffff / white). */
-const WHITE_COLOR = /(?:^|[{;])\s*color:\s*(?:#fff|#ffffff|white)\b/;
+/* A block must declare a white-ish text color (color: #fff / #ffffff / white,
+   or the pinned-white --on-primary-strong token). */
+const WHITE_COLOR = /(?:^|[{;])\s*color:\s*(?:(?:#fff|#ffffff|white)\b|var\(--on-primary-strong\))/;
 const PRIMARY_BG = /background:\s*var\(--primary\)/;
 const PRIMARY_STRONG_BG = /background:\s*var\(--primary-strong\)/;
 
-test('dark-mode token --primary-strong exists and stays dark navy', () => {
-  assert.match(CSS, /--primary-strong:\s*light-dark\(#213d77,\s*#1e3a8a\);/);
+test('dark-mode token --primary-strong exists and stays dark blue', () => {
+  assert.match(CSS, /--primary-strong:\s*light-dark\(#1e40af,\s*#1d4ed8\);/);
+});
+
+test('--on-primary-strong is pinned to pure white', () => {
+  assert.match(CSS, /--on-primary-strong:\s*#ffffff;/);
 });
 
 test('white text passes WCAG AA on both --primary-strong shades', () => {
   const ratios = {
-    '#fff vs #213d77 (light)': contrast('#ffffff', '#213d77'),
-    '#fff vs #1e3a8a (dark)': contrast('#ffffff', '#1e3a8a'),
+    '#fff vs #1e40af (light)': contrast('#ffffff', '#1e40af'),
+    '#fff vs #1d4ed8 (dark)': contrast('#ffffff', '#1d4ed8'),
   };
   for (const [label, ratio] of Object.entries(ratios)) {
     assert.ok(ratio >= 4.5, `${label} ratio ${ratio.toFixed(2)}:1 is below 4.5`);
