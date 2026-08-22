@@ -1,7 +1,8 @@
 /* sections/home.js - Home dashboard (default #/). Aurora hero with the
    IRCTC-style booking console (BOOK TICKET | PNR STATUS | CHARTS/VACANCY),
-   then a bento grid: quick-jump chips, favorites, recent lookups and live
-   source status. Pure presentation over shared ctx. */
+   then a bento grid: quick-jump chips, favorites and recent lookups.
+   Train data only — system/observability details live in the System section.
+   Pure presentation over shared ctx. */
 
 (() => {
 window.Sections = window.Sections || {};
@@ -33,13 +34,10 @@ window.Sections.home = {
     bento.append(favWrap);
     const recentWrap = ui.el('div');
     bento.append(recentWrap);
-    const statusWrap = ui.el('div', { class: 'bento-wide' });
-    bento.append(statusWrap);
 
     parts.push(bento);
     renderFavs(favWrap, ctx);
     renderRecent(recentWrap, ctx);
-    renderStatus(statusWrap, ctx);
     ui.render(container, ...parts);
   },
 };
@@ -73,7 +71,6 @@ function renderQuickJumps(wrap, ctx) {
     { icon: 'train', label: 'Track a train', sub: 'live spot & delay', hash: '#/train' },
     { icon: 'station', label: 'Station board', sub: 'arrivals & departures', hash: '#/station' },
     { icon: 'map', label: 'Plan a journey', sub: 'trains between stations', hash: '#/plan' },
-    { icon: 'pulse', label: 'Observability', sub: 'server vitals', hash: '#/system/observability' },
   ];
   const row = ui.el('div', { class: 'chip-row' });
   jumps.forEach((j) => {
@@ -249,29 +246,5 @@ function renderRecent(wrap, ctx) {
     ));
   }
   ui.render(wrap, card);
-}
-
-function renderStatus(wrap, ctx) {
-  const ui = ctx.ui;
-  const card = ui.card('Live Data Status', ui.skeletonCard(2));
-  ui.render(wrap, card);
-  ctx.api.sourceStatus().then((s) => {
-    if (!s || s.ok === false) {
-      ui.render(wrap, ui.card('Live Data Status', ui.errorState('Status unavailable', s && s.error ? s.error : 'The source check failed.')));
-      return;
-    }
-    const sources = (s.sources || []).map((src) => src.name);
-    const up = (s.sources || []).filter((src) => src.reachable).length;
-    const tiles = ui.el('div', { class: 'grid grid-2' },
-      ui.statTile('Mode', s.mode || 'live', s.live_enabled ? 'live data enabled' : 'offline', s.live_enabled ? 'green' : 'red'),
-      ui.statTile('Primary source', s.primary_source || '—', up + '/' + sources.length + ' sources up', up === sources.length ? 'green' : 'amber'),
-    );
-    const badges = ui.el('div', { class: 'row mt-8', style: 'gap:4px;flex-wrap:wrap;' },
-      (s.sources || []).map((src) =>
-        ui.badge(src.name + (src.reachable ? ' ↑' : ' ↓'), src.reachable ? 'green' : 'red')));
-    ui.render(wrap, ui.card('Live Data Status', tiles, badges));
-  }).catch((err) => {
-    ui.render(wrap, ui.card('Live Data Status', ui.errorState('Status unavailable', err && err.message ? err.message : String(err))));
-  });
 }
 })();

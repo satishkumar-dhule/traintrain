@@ -431,8 +431,8 @@ function obsBuildTables(ui) {
   );
 
   container.append(
-    ui.card('Sources',
-      ui.el('div', { id: 'obs-sources-table' }, ui.table(['Source', 'Latency', 'Samples'], [['—', '—', '—']])),
+    ui.card('Upstream origins',
+      ui.el('div', { id: 'obs-sources-table' }, ui.table(['Origin', 'Requests', 'Latency', 'Status'], [['—', '—', '—', '—']])),
     ),
   );
 
@@ -470,11 +470,12 @@ function obsUpdateTables(m) {
   const origins = obsArr(m.origins);
   const sourceRows = origins.map((o) => [
     obsEsc(o.name),
+    obsFmtNum(o.requests),
     `${obsFmtNum(o.latency)} ms`,
     obsBadge(o.status, o.status === 'live' ? 'green' : 'amber'),
   ]);
   const sourcesTbl = document.getElementById('obs-sources-table');
-  if (sourcesTbl) sourcesTbl.replaceChildren(ui.table(['Source', 'Latency', 'Status'], sourceRows.length ? sourceRows : [['—', '—', '—']]));
+  if (sourcesTbl) sourcesTbl.replaceChildren(ui.table(['Origin', 'Requests', 'Latency', 'Status'], sourceRows.length ? sourceRows : [['—', '—', '—', '—']]));
 
   const c = m.cache || {};
   const cacheRows = [

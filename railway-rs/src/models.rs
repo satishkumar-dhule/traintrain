@@ -607,6 +607,8 @@ pub struct OriginStatus {
     pub name: String,
     pub latency: u64,
     pub status: String,
+    /// Upstream requests served by this origin (recorded fetch count).
+    pub requests: u64,
 }
 
 /// HTTP status-code distribution (`2xx/3xx/4xx/5xx` counts).

@@ -288,7 +288,7 @@ impl TestApp {
     /// Spawn with a caller-provided config (e.g. custom data dir).
     pub async fn spawn_with_config(mut config: Config) -> Self {
         let mut mocks = HashMap::new();
-        for name in ["railyatri", "etrain", "ntes", "ir", "irctc", "paytm"] {
+        for name in ["railyatri", "etrain", "ntes", "ir", "irctc", "paytm", "zen"] {
             let m = MockServer::new();
             m.spawn().await;
             mocks.insert(name.to_string(), m);
@@ -300,6 +300,7 @@ impl TestApp {
         config.ir_base = mocks["ir"].base_url();
         config.irctc_base = mocks["irctc"].base_url();
         config.paytm_base = mocks["paytm"].base_url();
+        config.ai_base = mocks["zen"].base_url();
 
         let state = AppState::from_config(config).expect("state builds");
         let app = web::router(state.clone(), state.config.static_dir.clone());
@@ -336,5 +337,55 @@ impl TestApp {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
         (status, text)
+    }
+
+    /// POST a JSON body and return the parsed JSON response.
+    pub async fn post_json(&self, path: &str, body: Value) -> (StatusCode, Value) {
+        let (status, text) = self.post_raw(path, body).await;
+        let json: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
+        (status, json)
+    }
+
+    /// POST a JSON body and return the raw response body — for streaming
+    /// endpoints (`text/event-stream`) whose frames tests assert verbatim.
+    pub async fn post_raw(&self, path: &str, body: Value) -> (StatusCode, String) {
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .unwrap();
+        let resp = client
+            .post(format!("{}{}", self.base_url(), path))
+            .json(&body)
+            .send()
+            .await
+            .expect("request to app");
+        let status = resp.status();
+        let headers = resp.headers().clone();
+        let text = resp.text().await.unwrap_or_default();
+        if let Some(ct) = headers.get("content-type") {
+            tracing::debug!(content_type = %ct.to_str().unwrap_or(""), "post_raw response header");
+        }
+        (status, text)
+    }
+
+    /// POST and expose the full response (status + content-type) without
+    /// reading the body into memory first — reserved for future streaming
+    /// assertions that need incremental reads.
+    pub async fn post_probe(&self, path: &str, body: Value) -> (StatusCode, String) {
+        let client = reqwest::Client::new();
+        let resp = client
+            .post(format!("{}{}", self.base_url(), path))
+            .json(&body)
+            .send()
+            .await
+            .expect("request to app");
+        let status = resp.status();
+        let ct = resp
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_string();
+        (status, ct)
     }
 }

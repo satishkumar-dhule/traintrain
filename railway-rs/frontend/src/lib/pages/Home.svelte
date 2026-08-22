@@ -3,51 +3,110 @@
   import { navigate } from '$lib/router.svelte.js'
   import * as Card from '$lib/components/ui/card/index.js'
   import { Badge } from '$lib/components/ui/badge/index.js'
-  import * as Alert from '$lib/components/ui/alert/index.js'
   import { Skeleton } from '$lib/components/ui/skeleton/index.js'
   import { Input } from '$lib/components/ui/input/index.js'
+  import { Label } from '$lib/components/ui/label/index.js'
   import { Separator } from '$lib/components/ui/separator/index.js'
+  import { Button } from '$lib/components/ui/button/index.js'
+  import AutoCompleteInput from '$lib/components/AutoCompleteInput.svelte'
   import TrainFront from 'lucide-svelte/icons/train-front'
   import Building2 from 'lucide-svelte/icons/building-2'
   import RouteIcon from 'lucide-svelte/icons/route'
   import Ticket from 'lucide-svelte/icons/ticket'
   import SearchIcon from 'lucide-svelte/icons/search'
 
-  let state = $state({ phase: 'loading', data: null })
-  let obs = $state(null)
-
-  $effect(() => {
-    api('/rail-api/source-status').then((res) => {
-      state = res.ok ? { phase: 'ok', data: res.data } : { phase: 'error', data: null }
-    })
-    api('/rail-api/observability').then((res) => {
-      if (res.ok && res.data && typeof res.data === 'object') {
-        obs = res.data
-      }
-    })
-  })
-
-  function fmtUptime(secs) {
-    const n = Number(secs)
-    if (!Number.isFinite(n) || n <= 0) return null
-    const h = Math.floor(n / 3600)
-    const m = Math.floor((n % 3600) / 60)
-    return h > 0 ? `${h}h ${m}m` : `${m}m`
-  }
-
-  const uptimeLabel = $derived(fmtUptime(obs?.uptime_secs))
-  const showObs = $derived(
-    Boolean(obs && (obs?.requests_total != null || uptimeLabel || obs?.active_connections != null))
-  )
-
   const popularTrains = [12951, 12309, 12002]
 
-  const features = [
-    { href: '/train', icon: TrainFront, title: 'Live train status', desc: 'Where is my train right now, delay per station.' },
-    { href: '/station', icon: Building2, title: 'Station boards', desc: 'Arrivals and departures for the next hours.' },
-    { href: '/journeys', icon: RouteIcon, title: 'Find journeys', desc: 'Trains between any two stations, with run days.' },
-    { href: '/pnr', icon: Ticket, title: 'PNR status', desc: 'Passenger reservation status with captcha retry.' }
-  ]
+  let trainQuery = $state('')
+  let stationQuery = $state('')
+  let journeyFrom = $state('')
+  let journeyTo = $state('')
+  let pnrQuery = $state('')
+  let trainErr = $state('')
+  let trainResolving = $state(false)
+  let stationErr = $state('')
+  let journeyErr = $state('')
+  let pnrErr = $state('')
+
+  function norm(v) {
+    return String(v ?? '').trim().toUpperCase()
+  }
+
+  function goTrain(t) {
+    trainErr = ''
+    navigate(`/train/${encodeURIComponent(t)}`)
+  }
+
+  async function submitTrain(e) {
+    e?.preventDefault?.()
+    const t = String(trainQuery ?? '').trim()
+    if (!t) {
+      trainErr = 'Enter a train number or name.'
+      return
+    }
+    if (/^\d{1,8}$/.test(t)) {
+      goTrain(t)
+      return
+    }
+    // Free-text name: resolve to a train number via the suggest index.
+    trainErr = ''
+    trainResolving = true
+    const res = await api(`/rail-api/search/suggest?q=${encodeURIComponent(t)}`)
+    trainResolving = false
+    const items = Array.isArray(res.data) ? res.data.filter((r) => r.type === 'train') : []
+    if (!res.ok || items.length === 0) {
+      trainErr = 'No train matched — type a number or pick a name from the suggestions.'
+      return
+    }
+    const ql = t.toLowerCase()
+    const exact = items.filter(
+      (r) => String(r.number ?? '') === t || String(r.name ?? '').toLowerCase() === ql
+    )
+    const best = exact.length ? exact : items
+    if (best.length > 1) {
+      trainErr = 'Several trains match — pick one from the suggestions.'
+      return
+    }
+    goTrain(String(best[0].number))
+  }
+
+  function submitStation(e) {
+    e?.preventDefault?.()
+    const c = norm(stationQuery)
+    if (!c) {
+      stationErr = 'Pick a station code, e.g. NDLS.'
+      return
+    }
+    stationErr = ''
+    navigate(`/station/${encodeURIComponent(c)}`)
+  }
+
+  function submitJourney(e) {
+    e?.preventDefault?.()
+    const s = norm(journeyFrom)
+    const d = norm(journeyTo)
+    if (!s || !d) {
+      journeyErr = 'Enter both source and destination codes.'
+      return
+    }
+    if (s === d) {
+      journeyErr = 'Source and destination must differ.'
+      return
+    }
+    journeyErr = ''
+    navigate(`/journeys/${encodeURIComponent(s)}/${encodeURIComponent(d)}`)
+  }
+
+  function submitPnr(e) {
+    e?.preventDefault?.()
+    const p = String(pnrQuery ?? '').trim()
+    if (!/^\d{10}$/.test(p)) {
+      pnrErr = 'Enter a valid 10-digit PNR.'
+      return
+    }
+    pnrErr = ''
+    navigate(`/pnr/${p}`)
+  }
 
   const LETTERS = ['All', ...Array.from({ length: 26 }, (_, i) => String.fromCharCode(65 + i)), '#']
   const ALL_CAP = 24
@@ -149,42 +208,8 @@
   <div class="grid gap-3">
     <h1 class="text-4xl font-semibold tracking-tight">Train Bro</h1>
     <p class="max-w-xl text-muted-foreground">
-      Live Indian Railways data served by a Rust backend — honest sources, no accounts,
-      no fabricated numbers.
+      Live train status, station boards, journey planning and PNR — free, no accounts.
     </p>
-    <div class="flex flex-wrap items-center gap-2 pt-1">
-      {#if state.phase === 'loading'}
-        <Skeleton class="h-6 w-40" />
-        <Skeleton class="h-6 w-24" />
-      {:else if state.phase === 'error'}
-        <Badge variant="destructive">source status unavailable</Badge>
-      {:else}
-        <Badge variant={state.data.live_enabled ? 'default' : 'destructive'}>
-          {state.data.live_enabled ? `live · ${state.data.mode}` : 'live disabled'}
-        </Badge>
-        <Badge variant="secondary">cache {state.data.cache_ttl_seconds}s</Badge>
-        <Badge variant="outline">
-          {state.data.sources.filter((s) => s.reachable).length}/{state.data.sources.length} upstreams up
-        </Badge>
-      {/if}
-    </div>
-
-    {#if showObs}
-      <div class="flex flex-wrap gap-2">
-        <div class="rounded-md border bg-muted/40 px-3 py-1.5">
-          <p class="text-[10px] uppercase tracking-wide text-muted-foreground">requests_total</p>
-          <p class="text-sm font-medium tabular-nums">{obs?.requests_total ?? '—'}</p>
-        </div>
-        <div class="rounded-md border bg-muted/40 px-3 py-1.5">
-          <p class="text-[10px] uppercase tracking-wide text-muted-foreground">uptime</p>
-          <p class="text-sm font-medium tabular-nums">{uptimeLabel ?? '—'}</p>
-        </div>
-        <div class="rounded-md border bg-muted/40 px-3 py-1.5">
-          <p class="text-[10px] uppercase tracking-wide text-muted-foreground">active connections</p>
-          <p class="text-sm font-medium tabular-nums">{obs?.active_connections ?? '—'}</p>
-        </div>
-      </div>
-    {/if}
 
     <div class="flex flex-wrap items-center gap-2 pt-1">
       <span class="text-xs text-muted-foreground">Popular trains</span>
@@ -201,24 +226,162 @@
   </div>
 
   <div class="grid gap-4 sm:grid-cols-2">
-    {#each features as f (f.href)}
-      <Card.Root class="transition-colors hover:border-primary/50">
-        <a
-          href={f.href}
-          class="flex h-full flex-col gap-3 p-6"
-          onclick={(e) => {
-            e.preventDefault()
-            navigate(f.href)
-          }}
-        >
-          <span class="flex size-10 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <f.icon class="size-5" />
+    <Card.Root class="transition-colors hover:border-primary/50">
+      <form class="flex h-full flex-col gap-3 p-6" onsubmit={submitTrain}>
+        <div class="flex items-start gap-3">
+          <span class="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+            <TrainFront class="size-5" />
           </span>
-          <Card.Title class="text-base">{f.title}</Card.Title>
-          <Card.Description>{f.desc}</Card.Description>
-        </a>
-      </Card.Root>
-    {/each}
+          <div class="grid gap-0.5">
+            <a
+              href="/train"
+              class="text-base font-semibold hover:underline"
+              onclick={(e) => { e.preventDefault(); navigate('/train') }}
+            >Live train status</a>
+            <p class="text-sm text-muted-foreground">Where is my train right now, delay per station.</p>
+          </div>
+        </div>
+        <div class="mt-auto flex items-end gap-2">
+          <div class="grid flex-1 gap-1.5">
+            <Label for="home-train">Train number or name</Label>
+            <AutoCompleteInput
+              id="home-train"
+              kind="train"
+              placeholder="Train number or name…"
+              bind:value={trainQuery}
+              onpick={(item) => {
+                trainQuery = String(item.number)
+                goTrain(String(item.number))
+              }}
+              inputClass={trainErr ? 'border-destructive' : ''}
+            />
+          </div>
+          <Button type="submit" disabled={trainResolving}>
+            <SearchIcon data-icon="inline-start" />
+            {trainResolving ? '…' : 'Track'}
+          </Button>
+        </div>
+        {#if trainErr}
+          <p class="text-xs text-destructive">{trainErr}</p>
+        {/if}
+      </form>
+    </Card.Root>
+
+    <Card.Root class="transition-colors hover:border-primary/50">
+      <form class="flex h-full flex-col gap-3 p-6" onsubmit={submitStation}>
+        <div class="flex items-start gap-3">
+          <span class="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+            <Building2 class="size-5" />
+          </span>
+          <div class="grid gap-0.5">
+            <a
+              href="/station"
+              class="text-base font-semibold hover:underline"
+              onclick={(e) => { e.preventDefault(); navigate('/station') }}
+            >Station boards</a>
+            <p class="text-sm text-muted-foreground">Arrivals and departures for the next hours.</p>
+          </div>
+        </div>
+        <div class="mt-auto flex items-end gap-2">
+          <div class="grid flex-1 gap-1.5">
+            <Label for="home-station">Station</Label>
+            <AutoCompleteInput
+              id="home-station"
+              kind="station"
+              placeholder="Station name or code, e.g. NDLS"
+              bind:value={stationQuery}
+              onpick={submitStation}
+            />
+          </div>
+          <Button type="submit">
+            <SearchIcon data-icon="inline-start" />
+            Board
+          </Button>
+        </div>
+        {#if stationErr}
+          <p class="text-xs text-destructive">{stationErr}</p>
+        {/if}
+      </form>
+    </Card.Root>
+
+    <Card.Root class="transition-colors hover:border-primary/50 sm:col-span-2">
+      <form class="flex h-full flex-col gap-3 p-6" onsubmit={submitJourney}>
+        <div class="flex items-start gap-3">
+          <span class="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+            <RouteIcon class="size-5" />
+          </span>
+          <div class="grid gap-0.5">
+            <a
+              href="/journeys"
+              class="text-base font-semibold hover:underline"
+              onclick={(e) => { e.preventDefault(); navigate('/journeys') }}
+            >Find journeys</a>
+            <p class="text-sm text-muted-foreground">Trains between any two stations, with run days.</p>
+          </div>
+        </div>
+        <div class="flex flex-wrap items-end gap-2">
+          <div class="grid min-w-44 flex-1 gap-1.5">
+            <Label for="home-journey-from">From</Label>
+            <AutoCompleteInput id="home-journey-from" kind="station" placeholder="NDLS" bind:value={journeyFrom} />
+          </div>
+          <div class="grid min-w-44 flex-1 gap-1.5">
+            <Label for="home-journey-to">To</Label>
+            <AutoCompleteInput
+              id="home-journey-to"
+              kind="station"
+              placeholder="DLI"
+              bind:value={journeyTo}
+              onpick={() => { if (norm(journeyFrom)) submitJourney() }}
+            />
+          </div>
+          <Button type="submit" disabled={!journeyFrom.trim() || !journeyTo.trim()}>
+            <SearchIcon data-icon="inline-start" />
+            Search
+          </Button>
+        </div>
+        {#if journeyErr}
+          <p class="text-xs text-destructive">{journeyErr}</p>
+        {/if}
+      </form>
+    </Card.Root>
+
+    <Card.Root class="transition-colors hover:border-primary/50 sm:col-span-2">
+      <form class="flex h-full flex-col gap-3 p-6 sm:flex-row sm:gap-6" onsubmit={submitPnr}>
+        <div class="flex shrink-0 items-start gap-3">
+          <span class="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+            <Ticket class="size-5" />
+          </span>
+          <div class="grid gap-0.5">
+            <a
+              href="/pnr"
+              class="text-base font-semibold hover:underline"
+              onclick={(e) => { e.preventDefault(); navigate('/pnr') }}
+            >PNR status</a>
+            <p class="text-sm text-muted-foreground">Passenger reservation status with captcha retry.</p>
+          </div>
+        </div>
+        <div class="grid flex-1 content-center gap-1.5">
+          <Label for="home-pnr">PNR number</Label>
+          <div class="flex items-end gap-2">
+            <Input
+              id="home-pnr"
+              bind:value={pnrQuery}
+              inputmode="numeric"
+              placeholder="10-digit PNR"
+              maxlength={10}
+              aria-invalid={pnrErr ? 'true' : undefined}
+            />
+            <Button type="submit">
+              <SearchIcon data-icon="inline-start" />
+              Check status
+            </Button>
+          </div>
+          {#if pnrErr}
+            <p class="text-xs text-destructive">{pnrErr}</p>
+          {/if}
+        </div>
+      </form>
+    </Card.Root>
   </div>
 
   <Separator />
@@ -291,11 +454,4 @@
       {/if}
     {/if}
   </section>
-
-  {#if state.phase === 'error'}
-    <Alert.Root variant="destructive">
-      <Alert.Title>Backend unreachable</Alert.Title>
-      <Alert.Description>Could not load source status from /rail-api/source-status.</Alert.Description>
-    </Alert.Root>
-  {/if}
 </section>

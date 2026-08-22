@@ -28,57 +28,22 @@ impl Service {
             }
         };
 
+        let origin = |name: &str, source: &str| {
+            let sample = metrics.source_latency.iter().find(|s| s.source == source);
+            OriginStatus {
+                name: name.into(),
+                latency: sample.map(|s| s.avg_latency_ms as u64).unwrap_or(0),
+                status: "live".into(),
+                requests: sample.map(|s| s.samples).unwrap_or(0),
+            }
+        };
+
         let origins = vec![
-            OriginStatus {
-                name: "Railyatri".into(),
-                latency: metrics
-                    .source_latency
-                    .iter()
-                    .find(|s| s.source == "railyatri")
-                    .map(|s| s.avg_latency_ms as u64)
-                    .unwrap_or(0),
-                status: "live".into(),
-            },
-            OriginStatus {
-                name: "etrain".into(),
-                latency: metrics
-                    .source_latency
-                    .iter()
-                    .find(|s| s.source == "etrain")
-                    .map(|s| s.avg_latency_ms as u64)
-                    .unwrap_or(0),
-                status: "live".into(),
-            },
-            OriginStatus {
-                name: "NTES".into(),
-                latency: metrics
-                    .source_latency
-                    .iter()
-                    .find(|s| s.source == "ntes")
-                    .map(|s| s.avg_latency_ms as u64)
-                    .unwrap_or(0),
-                status: "live".into(),
-            },
-            OriginStatus {
-                name: "IRCTC".into(),
-                latency: metrics
-                    .source_latency
-                    .iter()
-                    .find(|s| s.source == "irctc")
-                    .map(|s| s.avg_latency_ms as u64)
-                    .unwrap_or(0),
-                status: "live".into(),
-            },
-            OriginStatus {
-                name: "Paytm".into(),
-                latency: metrics
-                    .source_latency
-                    .iter()
-                    .find(|s| s.source == "paytm")
-                    .map(|s| s.avg_latency_ms as u64)
-                    .unwrap_or(0),
-                status: "live".into(),
-            },
+            origin("Railyatri", "railyatri"),
+            origin("etrain", "etrain"),
+            origin("NTES", "ntes"),
+            origin("IRCTC", "irctc"),
+            origin("Paytm", "paytm"),
         ];
 
         let top_paths = metrics

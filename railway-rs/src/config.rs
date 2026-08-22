@@ -18,10 +18,10 @@ use std::time::Duration;
 /// - `RAILWAY_SOURCE_PAYTM_BASE`     (default `https://travel.paytm.com`)
 /// - `RAILWAY_AI_ENABLED`    (default `true`) — master switch for AI endpoints
 /// - `RAILWAY_AI_BASE`       (default `https://opencode.ai/zen/v1`) — OpenAI-compatible
-///                           inference gateway; override to point at any compatible server
+///   inference gateway; override to point at any compatible server
 /// - `RAILWAY_AI_MODEL`      (default `x-preview-f-free` — keyless free Zen model)
 /// - `RAILWAY_AI_API_KEY`    (optional) — sent as `Authorization: Bearer` when set;
-///                           the free tier works without any key (no login required)
+///   the free tier works without any key (no login required)
 /// - `RAILWAY_AI_TIMEOUT_SECS` (default `120`) — total timeout for LLM completions
 ///
 /// Every source URL is prefixed by these base URLs so tests can point them at
@@ -96,11 +96,18 @@ impl Config {
             irctc_base: std::env::var("RAILWAY_SOURCE_IRCTC_BASE").unwrap_or(d.irctc_base),
             paytm_base: std::env::var("RAILWAY_SOURCE_PAYTM_BASE").unwrap_or(d.paytm_base),
             ai_enabled: std::env::var("RAILWAY_AI_ENABLED")
-                .map(|v| !matches!(v.trim().to_ascii_lowercase().as_str(), "0" | "false" | "off" | "no"))
+                .map(|v| {
+                    !matches!(
+                        v.trim().to_ascii_lowercase().as_str(),
+                        "0" | "false" | "off" | "no"
+                    )
+                })
                 .unwrap_or(d.ai_enabled),
             ai_base: std::env::var("RAILWAY_AI_BASE").unwrap_or(d.ai_base),
             ai_model: std::env::var("RAILWAY_AI_MODEL").unwrap_or(d.ai_model),
-            ai_api_key: std::env::var("RAILWAY_AI_API_KEY").ok().filter(|v| !v.trim().is_empty()),
+            ai_api_key: std::env::var("RAILWAY_AI_API_KEY")
+                .ok()
+                .filter(|v| !v.trim().is_empty()),
             ai_timeout: Duration::from_secs(env_u64(
                 "RAILWAY_AI_TIMEOUT_SECS",
                 d.ai_timeout.as_secs(),

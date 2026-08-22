@@ -28,6 +28,26 @@ async fn observability_returns_real_metrics() {
     for origin in origins {
         assert!(origin["latency"].as_u64().is_some());
         assert!(origin["status"].as_str().is_some());
+        assert!(
+            origin["requests"].as_u64().is_some(),
+            "each origin must report its served-request count"
+        );
+    }
+}
+
+#[tokio::test]
+async fn observability_origin_requests_match_recorded_fetches() {
+    let app = common::TestApp::spawn().await;
+
+    let (status, body) = app.get("/rail-api/observability").await;
+    assert_eq!(status, StatusCode::OK);
+
+    // The per-origin counter is the real recorded-fetch tally; until an
+    // upstream call happens it must be 0, never fabricated.
+    let origins = body["origins"].as_array().unwrap();
+    for origin in origins {
+        assert_eq!(origin["requests"].as_u64().unwrap(), 0);
+        assert_eq!(origin["latency"].as_u64().unwrap(), 0);
     }
 }
 

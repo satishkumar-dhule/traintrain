@@ -7,6 +7,8 @@
 //! - handlers take `State<AppState>`
 //! - live data only; failures surface as honest `AppError`s.
 
+pub mod ai_chat;
+pub mod ai_insight;
 pub mod availability;
 pub mod average_delay;
 pub mod chart;

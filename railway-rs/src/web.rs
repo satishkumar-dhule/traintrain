@@ -26,10 +26,18 @@ use crate::system;
 /// Build the full application router (slices + system + static) and materialize
 /// it with `state`. Slices return `Router<AppState>`; this is the single place
 /// they are merged and handed a concrete state.
+///
+/// Two route families are kept apart deliberately:
+/// - **buffered** routes return bounded JSON bodies and get the full stack,
+///   including `metrics_mw` (which buffers each response to count bytes).
+/// - **streaming** AI routes answer with unbounded SSE bodies; they merge
+///   *after* the layered sub-router so they skip metrics buffering and the
+///   30s timeout (an LLM completion can legitimately run longer). Panic
+///   safety, tracing, logging and security headers still apply.
 pub fn router(state: AppState, static_dir: PathBuf) -> Router {
     let index = static_dir.join("index.html");
 
-    Router::new()
+    let buffered = Router::new()
         .merge(system::router())
         .merge(slices::pnr::router())
         .merge(slices::schedule::router())
@@ -52,7 +60,17 @@ pub fn router(state: AppState, static_dir: PathBuf) -> Router {
         .layer(middleware::from_fn_with_state(state.clone(), metrics_mw))
         .layer(CatchPanicLayer::new())
         .layer(TraceLayer::new_for_http())
-        .layer(TimeoutLayer::new(Duration::from_secs(30)))
+        .layer(TimeoutLayer::new(Duration::from_secs(30)));
+
+    let streaming = Router::new()
+        .merge(slices::ai_chat::router())
+        .merge(slices::ai_insight::router())
+        .layer(CatchPanicLayer::new())
+        .layer(TraceLayer::new_for_http());
+
+    Router::new()
+        .merge(buffered)
+        .merge(streaming)
         .layer(middleware::from_fn(security_headers_mw))
         .layer(middleware::from_fn(request_log_mw))
         .fallback_service({

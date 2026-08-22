@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use crate::config::Config;
+use crate::core::ai::AiClient;
 use crate::core::cache::Cache;
 use crate::core::http::HttpClient;
 use crate::core::irctc::IrctcClient;
@@ -23,6 +24,7 @@ pub struct AppState {
     pub ntes_web: NtesWebClient,
     pub irctc: IrctcClient,
     pub paytm: PaytmClient,
+    pub ai: AiClient,
     pub datasets: Arc<Datasets>,
     pub started_at: Instant,
 }
@@ -36,6 +38,12 @@ impl AppState {
         let ntes_web = NtesWebClient::new(&http, &config.ntes_base);
         let irctc = IrctcClient::new(&http, &config.irctc_base);
         let paytm = PaytmClient::new(&http, &config.paytm_base);
+        let ai = AiClient::new(
+            &config.ai_base,
+            &config.ai_model,
+            config.ai_api_key.clone(),
+            config.ai_timeout,
+        )?;
         let datasets = Arc::new(Datasets::load(&config.data_dir)?);
         let metrics = Arc::new(Metrics::new());
         Ok(Self {
@@ -48,6 +56,7 @@ impl AppState {
             ntes_web,
             irctc,
             paytm,
+            ai,
             datasets,
             started_at: Instant::now(),
         })

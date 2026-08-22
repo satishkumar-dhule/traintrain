@@ -11,7 +11,7 @@ pub struct CaptchaContext {
 }
 
 /// Error carrying a CAPTCHA challenge back to the client (HTTP 428).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CaptchaRequiredError {
     pub source: String,
     pub image: String,
@@ -35,7 +35,7 @@ impl CaptchaRequiredError {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum AppError {
     /// Client supplied a bad query. HTTP 400.
     BadRequest(String),

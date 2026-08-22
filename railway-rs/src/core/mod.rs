@@ -1,4 +1,5 @@
 pub mod aggregator;
+pub mod ai;
 pub mod cache;
 pub mod error;
 pub mod http;

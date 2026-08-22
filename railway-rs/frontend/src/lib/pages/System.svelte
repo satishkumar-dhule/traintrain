@@ -1,6 +1,7 @@
 <script>
   import { untrack } from 'svelte'
   import { api } from '$lib/api.js'
+  import SourceStatus from '$lib/SourceStatus.svelte'
   import * as Card from '$lib/components/ui/card/index.js'
   import { Badge } from '$lib/components/ui/badge/index.js'
   import * as Table from '$lib/components/ui/table/index.js'
@@ -276,6 +277,8 @@
       <p class="text-xs text-destructive">{note}</p>
     {/if}
   </div>
+
+  <SourceStatus />
 
   {#if obs.phase === 'loading'}
     <div class="grid grid-cols-2 gap-3 sm:grid-cols-4" aria-busy="true">
