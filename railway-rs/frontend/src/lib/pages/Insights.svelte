@@ -11,6 +11,7 @@
   import ActivityIcon from 'lucide-svelte/icons/activity'
   import ChartColumnIcon from 'lucide-svelte/icons/chart-column'
   import RouteIcon from 'lucide-svelte/icons/route'
+  import { renderMarkdown } from '$lib/markdown.js'
   import SparklesIcon from 'lucide-svelte/icons/sparkles'
 
   // LLM completions legitimately run long; the backend serves this route
@@ -214,7 +215,7 @@
         </div>
       </Card.Header>
       <Card.Content>
-        <p class="whitespace-pre-wrap text-sm leading-relaxed">{result.summary}</p>
+        <div class="md text-sm leading-relaxed break-words">{@html renderMarkdown(result.summary)}</div>
       </Card.Content>
     </Card.Root>
   {/if}

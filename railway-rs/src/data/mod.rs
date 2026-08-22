@@ -273,6 +273,30 @@ impl Datasets {
         Ok(Self::new(stations, trains, coords))
     }
 
+    /// BM25 index entries for the AI retrieval layer: every station and train
+    /// becomes one searchable document.
+    pub fn retrieval_entries(&self) -> Vec<crate::core::retrieval::IndexEntry> {
+        use crate::core::retrieval::IndexEntry;
+        let mut out = Vec::with_capacity(self.stations.len() + self.trains.len());
+        for s in self.stations.iter() {
+            out.push(IndexEntry {
+                kind: "station",
+                code: s.code.clone(),
+                title: s.name.clone(),
+                detail: format!("{} {}", s.state, s.district.clone().unwrap_or_default()),
+            });
+        }
+        for t in self.trains.iter() {
+            out.push(IndexEntry {
+                kind: "train",
+                code: t.number.clone(),
+                title: t.name.clone(),
+                detail: String::new(),
+            });
+        }
+        out
+    }
+
     /// Build a `Datasets` and pre-warm the lowercase indexes for both lists.
     /// Doing this once at startup keeps every later autocomplete/search cheap.
     pub fn new(

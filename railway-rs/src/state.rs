@@ -11,6 +11,7 @@ use crate::core::metrics::{Metrics, SharedMetrics};
 use crate::core::ntes::{NtesClient, NtesWebClient};
 use crate::core::obs::Telemetry;
 use crate::core::paytm::PaytmClient;
+use crate::core::retrieval::RetrievalIndex;
 use crate::data::Datasets;
 
 /// Shared application state handed to every handler via `State<AppState>`.
@@ -27,6 +28,8 @@ pub struct AppState {
     pub paytm: PaytmClient,
     pub ai: AiClient,
     pub datasets: Arc<Datasets>,
+    /// BM25 retrieval index over stations + trains (AI RAG layer).
+    pub retrieval: Arc<RetrievalIndex>,
     /// AskDISHA guest client, `Some` iff the module is enabled
     /// (`ASKDISHA_ENABLED`). When `None` the askdisha slice router is not
     /// merged and its endpoints answer 404 (zero network footprint).
@@ -50,6 +53,7 @@ impl AppState {
             config.ai_timeout,
         )?;
         let datasets = Arc::new(Datasets::load(&config.data_dir)?);
+        let retrieval = Arc::new(RetrievalIndex::build(datasets.retrieval_entries()));
         let metrics = Arc::new(Metrics::new());
         let askdisha = config.askdisha_enabled.then(|| {
             Arc::new(CoroverClient::new(
@@ -70,6 +74,7 @@ impl AppState {
             paytm,
             ai,
             datasets,
+            retrieval,
             askdisha,
             started_at: Instant::now(),
         })

@@ -306,3 +306,278 @@ async fn runaway_tool_loop_is_capped_after_four_rounds() {
     );
     assert_eq!(app.mock("zen").calls().len(), 4);
 }
+
+// ---------- seat_availability / station_board tools ----------
+
+const PAYTM_SEARCH_PATH: &str = "/api/trains/v5/search";
+
+/// Trimmed Paytm Travel search payload (mirrors tests/availability.rs shape):
+/// three SC→PUNE trains. The first carries no class rows so the projection
+/// must rank it last; the others exercise AVAILABLE, WL and RAC statuses.
+fn seat_paytm_payload() -> Value {
+    json!({
+        "error": null,
+        "status": {"result": "success", "message": {"title": "Successful"}},
+        "code": 200,
+        "body": {"trains": [
+            {
+                "trainNumber": "22143",
+                "trainName": "PUNE EXPRESS",
+                "source": "SC",
+                "destination": "PUNE",
+                "source_name": "Secunderabad",
+                "destination_name": "Pune Jn",
+                "departure": "2026-10-20T18:40:00+00:00",
+                "arrival": "2026-10-21T06:30:00+00:00",
+                "duration": "11:50",
+                "classes": ["SL"],
+                "train_type": "o"
+            },
+            {
+                "departure": "2026-10-20T21:35:00+00:00",
+                "arrival": "2026-10-21T09:20:00+00:00",
+                "trainName": "HUBLI EXPRESS",
+                "trainNumber": "17013",
+                "source": "SC",
+                "destination": "PUNE",
+                "source_name": "Secunderabad",
+                "destination_name": "Pune Jn",
+                "duration": "11:45",
+                "classes": ["SL", "3A"],
+                "train_type": "o",
+                "runs_on": {"text": "Runs on Mon, Tue, Wed, Thu, Fri, Sat, Sun"},
+                "availability": [
+                    {
+                        "code": "SL",
+                        "name": "Sleeper Class",
+                        "non_formatted_status": "GNWL82/WL59",
+                        "available_flag": "false",
+                        "fare": 875,
+                        "quota": "GN",
+                        "pnr_prediction": {"value": 95}
+                    },
+                    {
+                        "code": "3A",
+                        "name": "AC 3 Tier",
+                        "status": "AVAILABLE 0022",
+                        "available_flag": true,
+                        "fare": 2195
+                    }
+                ]
+            },
+            {
+                "departure": "2026-10-20T10:15:00+00:00",
+                "arrival": "2026-10-20T22:05:00+00:00",
+                "trainName": "UDYAN EXPRESS",
+                "trainNumber": "11301",
+                "source": "SC",
+                "destination": "PUNE",
+                "source_name": "Secunderabad",
+                "destination_name": "Pune Jn",
+                "duration": "11:50",
+                "classes": ["3A"],
+                "train_type": "o",
+                "runs_on": {"text": "Runs on Mon, Wed"},
+                "availability": [
+                    {"code": "3A", "name": "AC 3 Tier", "status": "RAC 12", "fare": 1890}
+                ]
+            }
+        ]},
+        "meta": {}
+    })
+}
+
+#[tokio::test]
+async fn seat_availability_tool_round_emits_projection() {
+    let app = TestApp::spawn().await;
+    app.mock("paytm")
+        .route_json(PAYTM_SEARCH_PATH, seat_paytm_payload());
+
+    let round1 = sse_tool_call_round("seat_availability", "{\"src\":\"SC\",\"dst\":\"PUNE\"}");
+    let round2 = concat!(
+        "data: {\"choices\":[{\"delta\":{\"content\":\"3A on HUBLI EXPRESS is AVAILABLE.\"}}]}\n\n",
+        "data: {\"usage\":{\"prompt_tokens\":300,\"completion_tokens\":12}}\n\n",
+        "data: [DONE]\n\n"
+    );
+    app.mock("zen").route_raw_seq(
+        "/chat/completions",
+        vec![
+            (StatusCode::OK, "text/event-stream", round1),
+            (StatusCode::OK, "text/event-stream", round2.to_string()),
+        ],
+    );
+
+    let (status, body) = app
+        .post_raw(
+            CHAT_PATH,
+            json!({"messages":[{"role":"user","content":"seats available SC to Pune?"}]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains("\"type\":\"tools\""), "chip missing: {body}");
+    assert!(body.contains("seat_availability"));
+    assert!(body.contains("\"type\":\"done\""), "no final frame: {body}");
+
+    // Two zen rounds; the second carries the projection as the tool result.
+    let zen_calls = app.mock("zen").calls();
+    assert_eq!(zen_calls.len(), 2);
+    let second = &zen_calls[1].1;
+    assert!(
+        second.contains("\"seat_availability\""),
+        "tool name not echoed in round 2: {second}"
+    );
+    assert!(
+        second.contains("\"role\":\"tool\""),
+        "tool result not fed back: {second}"
+    );
+    assert!(
+        second.contains("classes"),
+        "projection marker 'classes' missing from tool result: {second}"
+    );
+    assert!(
+        second.contains("\\\"tone\\\""),
+        "tone strings missing from tool result: {second}"
+    );
+    for tone in ["\\\"ok\\\"", "\\\"warn\\\"", "\\\"bad\\\""] {
+        assert!(second.contains(tone), "tone {tone} missing: {second}");
+    }
+
+    // Availability-rich trains outrank the bare one regardless of upstream order.
+    let rich = second.find("17013").expect("17013 in tool result");
+    let bare = second.find("22143").expect("22143 in tool result");
+    assert!(rich < bare, "trains with class status must rank first");
+
+    // The inner service really hit the Paytm search endpoint.
+    let paytm_calls = app.mock("paytm").calls();
+    assert_eq!(paytm_calls.len(), 1);
+    assert!(paytm_calls[0].0.starts_with(PAYTM_SEARCH_PATH));
+}
+
+/// Same table shape the live-station slice parses (two rows: one on time,
+/// one running late with a platform number).
+const BOARD_HTML: &str = r#"<table>
+<tr><th colspan="10">28 Trains departing from/arriving at <b>SBC- BANGALORE CITY</b> in next 2 Hrs.</th></tr>
+<tr><td nowrap style="width:20px;">1</td>
+  <td align=left nowrap><b>12951</b>&nbsp;|<b> MUMBAI RAJDHANI</b><br>
+    <span class="w3-round w3-blue w3-tiny" onclick="onTrainStatus('12951',document.getElementsByName('frmSTN')[0],'13-Aug-2026')">See Train Status >></span>
+  </td>
+  <td nowrap width="130px">
+    <font color="green">09:15</font><br>
+    <span class="w3-round w3-green w3-tiny">On Time</span><br>
+    <font size="1">&nbsp;09:15</font>
+  </td>
+  <td nowrap width="130px">
+    <font color="green">09:15</font><br>
+    <span class="w3-round w3-green w3-tiny">On Time</span><br>
+    <font size="1">&nbsp;09:15</font>
+  </td>
+  <td width="80px"><b>1</b></td>
+</tr>
+<tr><td nowrap style="width:20px;">2</td>
+  <td align=left nowrap><b>12301</b>&nbsp;|<b> RAJDHANI EXP</b><br>
+    <span class="w3-round w3-blue w3-tiny" onclick="onTrainStatus('12301',document.getElementsByName('frmSTN')[0],'13-Aug-2026')">See Train Status >></span>
+  </td>
+  <td nowrap width="130px">
+    <font color="red">10:30</font><br>
+    <span class="w3-round w3-red w3-tiny">30 Mins.</span><br>
+    <font size="1">&nbsp;10:00</font>
+  </td>
+  <td nowrap width="130px">
+    <font color="red">10:30</font><br>
+    <span class="w3-round w3-red w3-tiny">30 Mins.</span><br>
+    <font size="1">&nbsp;10:00</font>
+  </td>
+  <td width="80px"><b>2</b></td>
+</tr>
+</table>"#;
+
+#[tokio::test]
+async fn station_board_tool_returns_rows() {
+    let app = TestApp::spawn().await;
+    app.mock("ntes").ntes_web(BOARD_HTML);
+
+    let round1 = sse_tool_call_round("station_board", "{\"station\":\"SBC\"}");
+    let round2 = concat!(
+        "data: {\"choices\":[{\"delta\":{\"content\":\"MUMBAI RAJDHANI is on time at 09:15.\"}}]}\n\n",
+        "data: [DONE]\n\n"
+    );
+    app.mock("zen").route_raw_seq(
+        "/chat/completions",
+        vec![
+            (StatusCode::OK, "text/event-stream", round1),
+            (StatusCode::OK, "text/event-stream", round2.to_string()),
+        ],
+    );
+
+    let (status, body) = app
+        .post_raw(
+            CHAT_PATH,
+            json!({"messages":[{"role":"user","content":"what is arriving at SBC?"}]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains("\"type\":\"tools\""), "chip missing: {body}");
+    assert!(body.contains("station_board"));
+    assert!(body.contains("\"type\":\"done\""));
+
+    let zen_calls = app.mock("zen").calls();
+    assert_eq!(zen_calls.len(), 2);
+    let second = &zen_calls[1].1;
+    assert!(
+        second.contains("\"role\":\"tool\""),
+        "tool result not fed back: {second}"
+    );
+    for field in ["12951", "12301", "09:15", "10:30"] {
+        assert!(
+            second.contains(field),
+            "{field} missing from rows: {second}"
+        );
+    }
+    assert!(
+        !app.mock("ntes").calls().is_empty(),
+        "the NTES web flow was never exercised"
+    );
+}
+
+#[tokio::test]
+async fn seat_tool_defaults_blank_date_to_today_without_panicking() {
+    let app = TestApp::spawn().await;
+    app.mock("paytm")
+        .route_json(PAYTM_SEARCH_PATH, seat_paytm_payload());
+
+    let round1 = sse_tool_call_round(
+        "seat_availability",
+        "{\"src\":\"SC\",\"dst\":\"PUNE\",\"date\":\"\"}",
+    );
+    let round2 = concat!(
+        "data: {\"choices\":[{\"delta\":{\"content\":\"Availability shown for today.\"}}]}\n\n",
+        "data: [DONE]\n\n"
+    );
+    app.mock("zen").route_raw_seq(
+        "/chat/completions",
+        vec![
+            (StatusCode::OK, "text/event-stream", round1),
+            (StatusCode::OK, "text/event-stream", round2.to_string()),
+        ],
+    );
+
+    let offset = chrono::FixedOffset::east_opt(5 * 3600 + 30 * 60).unwrap();
+    let today = chrono::Utc::now()
+        .with_timezone(&offset)
+        .date_naive()
+        .to_string();
+
+    let (status, body) = app.post_raw(CHAT_PATH, chat_payload()).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains("\"type\":\"done\""), "body: {body}");
+
+    let zen_calls = app.mock("zen").calls();
+    assert_eq!(zen_calls.len(), 2);
+    let second = &zen_calls[1].1;
+    let expected = format!("\\\"date\\\":\\\"{today}\\\"");
+    assert!(
+        second.contains(&expected),
+        "blank date must resolve to today IST ({today}): {second}"
+    );
+    assert!(second.contains("\\\"trains\\\""), "rows missing: {second}");
+}

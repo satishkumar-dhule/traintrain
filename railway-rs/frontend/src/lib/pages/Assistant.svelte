@@ -8,6 +8,7 @@
   import * as Alert from '$lib/components/ui/alert/index.js'
   import BotMessageSquareIcon from 'lucide-svelte/icons/bot-message-square'
   import SendHorizontalIcon from 'lucide-svelte/icons/send-horizontal'
+  import { renderMarkdown } from '$lib/markdown.js'
 
   const HISTORY_KEY = 'rc-assistant-history'
   const TIMEOUT_MS = 12000
@@ -232,11 +233,15 @@
                       <p class="mt-1 whitespace-pre-wrap break-words">{t.reasoning}</p>
                     </details>
                   {/if}
-                  <p class="whitespace-pre-wrap break-words">
-                    {t.content}{#if streaming && i === turns.length - 1}<span class="animate-pulse"
-                        >▍</span
-                      >{/if}
-                  </p>
+                  {#if t.role === 'user'}
+                    <p class="whitespace-pre-wrap break-words">{t.content}</p>
+                  {:else}
+                    <div class="md text-sm leading-relaxed break-words">
+                      {@html renderMarkdown(t.content)}{#if streaming && i === turns.length - 1}<span
+                          class="animate-pulse">▍</span
+                        >{/if}
+                    </div>
+                  {/if}
                   {#if typeof t.tokens === 'number'}
                     <p class="mt-1 text-xs text-muted-foreground">{model} · {t.tokens} tokens</p>
                   {/if}

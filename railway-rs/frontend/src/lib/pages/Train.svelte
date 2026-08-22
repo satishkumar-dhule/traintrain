@@ -78,6 +78,7 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
   }
 
   const VIEW_TO_TAB = { status: 'status', schedule: 'schedule', delay: 'avg', map: 'map' }
+  const TAB_TO_VIEW = Object.fromEntries(Object.entries(VIEW_TO_TAB).map(([v, t]) => [t, v]))
   const RUN_MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
 
   function asText(v) {
@@ -171,14 +172,14 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
     const t = String(n ?? query ?? '').trim()
     if (!t) return
     committed = t
-    const want = `/train/${encodeURIComponent(t)}/${VIEW_TO_TAB[activeTab] ?? 'status'}`
+    const want = `/train/${encodeURIComponent(t)}/${TAB_TO_VIEW[activeTab] ?? 'status'}`
     if (route.path !== want) navigate(want)
     loadStatus(t)
   }
 
   function onTabChange(v) {
     if (!committed) return
-    navigate(`/train/${committed}/${VIEW_TO_TAB[v] ?? 'status'}`)
+    navigate(`/train/${committed}/${TAB_TO_VIEW[v] ?? 'status'}`)
   }
 
   $effect(() => {

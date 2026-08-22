@@ -14,10 +14,27 @@ use super::{AiStatus, InboundMessage};
 /// cannot override or duplicate it.
 pub const PERSONA: &str = "You are Train Bro, a factual Indian Railways assistant. \
 Rely only on live data supplied in the conversation; never invent trains, fares, \
-availability or delays. If data is missing say so plainly. Answer briefly.";
+availability or delays. If data is missing say so plainly. Answer briefly. \
+Format with clean Markdown: short paragraphs, bullet lists for options, tables \
+for schedules, **bold** for key facts; no headings larger than ###.";
 
 const MAX_MESSAGES: usize = 40;
 const MAX_CONTENT_CHARS: usize = 32_000;
+
+/// Server-side context cap for a conversation (chars across all turns).
+/// Newest turns win; the last two messages are never dropped so the current
+/// question always keeps its immediate predecessor.
+pub const HISTORY_MAX_CHARS: usize = 12_000;
+
+/// Drop oldest turns while over budget. Pure; unit-tested.
+pub fn trim_history(msgs: Vec<ChatMessage>, max_chars: usize) -> Vec<ChatMessage> {
+    let total = |v: &[ChatMessage]| -> usize { v.iter().map(|m| m.content.chars().count()).sum() };
+    let mut out = msgs;
+    while out.len() > 2 && total(&out) > max_chars {
+        out.remove(0);
+    }
+    out
+}
 
 /// Configuration-derived status. No upstream call: the SPA gates on this
 /// instantly and honest errors arrive per-request if the gateway is down.
@@ -98,4 +115,49 @@ pub fn done_frame(prompt_tokens: u64, completion_tokens: u64) -> Event {
 /// In-band error frame for failures after headers are committed.
 pub fn error_frame(message: &str) -> Event {
     Event::default().data(json!({"type": "error", "message": message}).to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn msg(role: &str, content: &str) -> ChatMessage {
+        ChatMessage {
+            role: role.into(),
+            content: content.into(),
+            tool_call_id: None,
+            tool_calls: None,
+        }
+    }
+
+    #[test]
+    fn trims_oldest_first_but_keeps_last_two() {
+        let msgs = vec![
+            msg("user", &"a".repeat(9_000)),
+            msg("assistant", &"b".repeat(4_000)),
+            msg("user", "recent question"),
+            msg("assistant", "recent answer"),
+        ];
+        let out = trim_history(msgs, 12_000);
+        let total: usize = out.iter().map(|m| m.content.chars().count()).sum();
+        assert!(total <= 12_000, "budget respected");
+        assert_eq!(out.last().unwrap().content, "recent answer", "newest kept");
+        assert!(
+            out.iter().all(|m| m.content != "a".repeat(9_000)),
+            "oldest oversized turn dropped"
+        );
+    }
+
+    #[test]
+    fn under_budget_is_untouched_and_min_two_kept() {
+        let msgs = vec![msg("user", "tiny"), msg("assistant", "reply")];
+        let out = trim_history(msgs.clone(), 12_000);
+        assert_eq!(out.len(), 2);
+        // Even a huge pair is never reduced below two turns.
+        let huge = vec![
+            msg("user", &"x".repeat(20_000)),
+            msg("assistant", &"y".repeat(20_000)),
+        ];
+        assert_eq!(trim_history(huge, 100).len(), 2);
+    }
 }

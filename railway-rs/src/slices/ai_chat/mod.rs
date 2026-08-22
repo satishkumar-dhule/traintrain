@@ -76,13 +76,17 @@ async fn chat_handler(
     Json(req): Json<ChatRequest>,
 ) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, AppError> {
     ensure_enabled(&state)?;
-    let mut messages = service::validate_messages(&req.messages)?;
+    let mut messages = service::trim_history(
+        service::validate_messages(&req.messages)?,
+        service::HISTORY_MAX_CHARS,
+    );
     messages.insert(0, ChatMessage::system(service::PERSONA));
 
     // Fail fast: round 1 is established here, before any headers are
     // committed, so pre-stream failures surface as honest JSON errors.
     let schemas = tools::schemas();
     let first = state.ai.chat_stream_with_tools(&messages, &schemas).await?;
+    let budget = tools::Budget::new(tools::DEFAULT_BUDGET_CHARS);
 
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(64);
     tokio::spawn(async move {
@@ -152,7 +156,7 @@ async fn chat_handler(
             }
 
             let names: Vec<&str> = calls.iter().map(|c| c.name.as_str()).collect();
-            tracing::info!(tools = ?names, round = rounds, "executing ai chat tools");
+            tracing::info!(tools = ?names, round = rounds, budget_chars = budget.remaining(), "executing ai chat tools");
             let _ = tx
                 .send(Ok(
                     Event::default().data(json!({"type": "tools", "names": names}).to_string())
@@ -162,12 +166,23 @@ async fn chat_handler(
             messages.push(ChatMessage::assistant_with_tool_calls(
                 calls.iter().map(openai_tool_call).collect(),
             ));
-            for call in &calls {
-                let payload = match tools::execute(&state, call).await {
-                    Ok(out) => out,
-                    // Tool failures are data for the model, not HTTP errors.
-                    Err(e) => json!({"error": e.message()}).to_string(),
-                };
+
+            // Parallel execution: independent tool calls resolve concurrently
+            // (join_all keeps call order for result pairing); each is bounded
+            // by its own timeout inside `call_tool`, and failures become
+            // error payloads the model can reason about — never HTTP errors.
+            let results = futures::future::join_all(calls.iter().map(|call| {
+                let state = &state;
+                let budget = &budget;
+                async move {
+                    match tools::call_tool(state, budget, &call.name, &call.arguments).await {
+                        Ok(out) => out,
+                        Err(e) => json!({"error": e.message()}).to_string(),
+                    }
+                }
+            }))
+            .await;
+            for (call, payload) in calls.iter().zip(results) {
                 messages.push(ChatMessage::tool_result(call.id.clone(), payload));
             }
         }

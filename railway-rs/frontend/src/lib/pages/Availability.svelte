@@ -4,7 +4,6 @@
   import * as Card from '$lib/components/ui/card/index.js'
   import { Button } from '$lib/components/ui/button/index.js'
   import { Input } from '$lib/components/ui/input/index.js'
-  import { Label } from '$lib/components/ui/label/index.js'
   import { Skeleton } from '$lib/components/ui/skeleton/index.js'
   import * as Alert from '$lib/components/ui/alert/index.js'
   import * as Table from '$lib/components/ui/table/index.js'
@@ -38,6 +37,39 @@ import ChevronRightIcon from 'lucide-svelte/icons/chevron-right'
   let errorMsg = $state(null)
   let data = $state(null)
   let committed = null
+
+  const TODAY = today()
+  const MAX_DAY = 364
+  const STRIP_WINDOW = 15
+  const maxDate = isoShift(TODAY, MAX_DAY)
+
+  function diffDays(a, b) {
+    return Math.round((new Date(`${b}T00:00:00`) - new Date(`${a}T00:00:00`)) / 86400000)
+  }
+  function clampDate(iso) {
+    if (!DATE_RE.test(iso)) return TODAY
+    return iso < TODAY ? TODAY : iso > maxDate ? maxDate : iso
+  }
+
+  // Windowed date strip: ~STRIP_WINDOW day-buttons centered on the selection.
+  // Bounded DOM width keeps the grid track from being blown out by min-content.
+  const stripStart = $derived.by(() => {
+    const sel = DATE_RE.test(asText(journeyDate)) ? journeyDate : TODAY
+    const idx = Math.max(0, diffDays(TODAY, sel))
+    return Math.max(0, Math.min(idx - Math.floor(STRIP_WINDOW / 2), MAX_DAY + 1 - STRIP_WINDOW))
+  })
+  const stripDates = $derived(
+    Array.from(
+      { length: Math.min(STRIP_WINDOW, MAX_DAY + 1) },
+      (_, i) => isoShift(TODAY, stripStart + i),
+    ),
+  )
+
+  function stepDay(days) {
+    const next = clampDate(isoShift(DATE_RE.test(asText(journeyDate)) ? journeyDate : TODAY, days))
+    if (next === journeyDate) return
+    pickDate(next)
+  }
 
   const RECENT_KEY = 'rc-availability-recent'
   const PREFS_KEY = 'rc-availability-prefs'
@@ -104,6 +136,17 @@ import ChevronRightIcon from 'lucide-svelte/icons/chevron-right'
   function weekdayShort(iso) {
     const d = new Date(`${iso}T00:00:00`)
     return isNaN(d.getTime()) ? '' : d.toLocaleDateString('en-IN', { weekday: 'short' })
+  }
+
+  function monthShort(iso) {
+    const d = new Date(`${iso}T00:00:00`)
+    return isNaN(d.getTime()) ? '' : d.toLocaleDateString('en-IN', { month: 'short' })
+  }
+
+  function pickDate(iso) {
+    if (!DATE_RE.test(iso)) return
+    journeyDate = iso
+    if (asText(from) && asText(to)) search()
   }
 
   function asText(v) {
@@ -239,13 +282,6 @@ import ChevronRightIcon from 'lucide-svelte/icons/chevron-right'
       : [...hiddenClasses, c]
   }
 
-  function stepDate(days) {
-    const target = isoShift(DATE_RE.test(asText(journeyDate)) ? journeyDate : today(), days)
-    if (target < today()) return
-    journeyDate = target
-    if (asText(from) && asText(to)) search()
-  }
-
   async function runSearch(s, d, dt, key) {
     committed = key
     phase = 'loading'
@@ -328,120 +364,142 @@ import ChevronRightIcon from 'lucide-svelte/icons/chevron-right'
           ? 'border-red-600/30 bg-red-500/10 text-red-700 dark:border-red-500/35 dark:bg-red-400/10 dark:text-red-400'
           : 'border-border bg-muted/50 text-muted-foreground'}
   {@const fare = numOrNull(row?.fare)}
-  <div class={`w-40 shrink-0 rounded-md border px-2 py-1 ${tone}`}>
+  <div class={`overflow-hidden rounded-md border px-2 py-1 ${tone}`}>
     <div class="flex items-baseline justify-between gap-2">
       <span class="font-mono text-[11px] font-semibold">{fmt(classCode(row))}</span>
       <span class="font-mono text-[11px] tabular-nums">{fare != null ? `₹${fare.toLocaleString('en-IN')}` : ''}</span>
     </div>
-    <div class="flex items-center gap-1 text-[10px]">
+    <div class="flex min-w-0 items-center gap-1 text-[10px]">
       <span class="size-1.5 shrink-0 rounded-full bg-current opacity-80"></span>
-      <span class="truncate font-medium" title={asText(row?.status)}>{asText(row?.status) || '—'}</span>
+      <span class="min-w-0 truncate font-medium" title={asText(row?.status)}>{asText(row?.status) || '—'}</span>
     </div>
     {@render chanceBar(row)}
   </div>
 {/snippet}
 
-<section class="grid gap-4">
-  <div class="grid gap-1">
-    <h1 class="text-2xl font-semibold tracking-tight">Availability</h1>
-    <p class="text-sm text-muted-foreground">
-      Dense class-wise availability with fares and confirm chances across every train.
+<section class="grid grid-cols-[minmax(0,1fr)] gap-3">
+  <div class="flex flex-wrap items-baseline gap-x-3 gap-y-0">
+    <h1 class="text-xl font-semibold tracking-tight">Availability</h1>
+    <p class="text-xs text-muted-foreground">
+      Class-wise availability, fares and confirm chances across every train.
     </p>
   </div>
 
-  <Card.Root>
-    <Card.Content
-      class="grid gap-3"
-      onkeydown={(e) => {
-        if (e.key === 'Enter' && !e.defaultPrevented) search()
+  <div
+    class="flex flex-wrap items-center gap-2 rounded-lg border bg-card p-2"
+    onkeydown={(e) => {
+      if (e.key === 'Enter' && !e.defaultPrevented) search()
+    }}
+  >
+    <AutoCompleteInput
+      id="av-from"
+      bind:value={from}
+      kind="station"
+      placeholder="From station…"
+      class="min-w-44 flex-1"
+      inputClass="h-8"
+      onpick={(item) => {
+        if (asText(item?.code)) from = asText(item.code).toUpperCase()
       }}
+    />
+    <Button
+      type="button"
+      variant="outline"
+      size="icon"
+      class="size-8 shrink-0"
+      onclick={swap}
+      aria-label="Swap From and To stations"
+      title="Swap stations"
     >
-      <div class="flex flex-wrap items-end gap-3">
-        <div class="grid min-w-44 flex-1 gap-2">
-          <Label for="av-from">From</Label>
-          <AutoCompleteInput
-            id="av-from"
-            bind:value={from}
-            kind="station"
-            placeholder="From station…"
-            onpick={(item) => {
-              if (asText(item?.code)) from = asText(item.code).toUpperCase()
-            }}
-          />
-        </div>
-        <Button
-          type="button"
-          variant="outline"
-          size="icon"
-          onclick={swap}
-          aria-label="Swap From and To stations"
-          title="Swap stations"
-        >
-          <ArrowDownUpIcon />
-        </Button>
-        <div class="grid min-w-44 flex-1 gap-2">
-          <Label for="av-to">To</Label>
-          <AutoCompleteInput
-            id="av-to"
-            bind:value={to}
-            kind="station"
-            placeholder="To station…"
-            onpick={(item) => {
-              if (asText(item?.code)) to = asText(item.code).toUpperCase()
-            }}
-          />
-        </div>
-        <div class="grid gap-2">
-          <Label for="av-date">Date</Label>
-          <div class="flex items-center gap-1">
-            <Button
-              type="button"
-              variant="outline"
-              size="icon"
-              class="size-9 shrink-0"
-              disabled={journeyDate <= today()}
-              onclick={() => stepDate(-1)}
-              aria-label="Previous day"
-              title="Previous day"
-            >
-              <ChevronLeftIcon />
-            </Button>
-            <Input id="av-date" type="date" bind:value={journeyDate} min={today()} class="w-36" />
-            <Button
-              type="button"
-              variant="outline"
-              size="icon"
-              class="size-9 shrink-0"
-              onclick={() => stepDate(1)}
-              aria-label="Next day"
-              title="Next day"
-            >
-              <ChevronRightIcon />
-            </Button>
-          </div>
-        </div>
-        <Button type="button" onclick={search} disabled={!canSearch}>Search</Button>
-      </div>
-      <div class="flex flex-wrap items-center gap-1.5" role="group" aria-label="Quick dates">
-        {#each [0, 1, 2] as off (off)}
-          {@const iso = isoShift(today(), off)}
-          <Button
+      <ArrowDownUpIcon />
+    </Button>
+    <AutoCompleteInput
+      id="av-to"
+      bind:value={to}
+      kind="station"
+      placeholder="To station…"
+      class="min-w-44 flex-1"
+      inputClass="h-8"
+      onpick={(item) => {
+        if (asText(item?.code)) to = asText(item.code).toUpperCase()
+      }}
+    />
+    <Button type="button" class="ml-auto h-8" onclick={search} disabled={!canSearch}>
+      Search
+    </Button>
+  </div>
+
+  <div
+    class="sticky top-14 z-20 flex items-center gap-1 rounded-lg border bg-card p-1 shadow-sm lg:top-0"
+    role="group"
+    aria-label="Journey date"
+  >
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon"
+      class="size-7 shrink-0"
+      onclick={() => stepDay(-1)}
+      aria-label="Previous day"
+      title="Previous day"
+    >
+      <ChevronLeftIcon />
+    </Button>
+    <div class="min-w-0 flex-1">
+      <div
+        class="flex items-center gap-1 overflow-x-auto px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      >
+        {#each stripDates as iso (iso)}
+          {@const active = iso === journeyDate}
+          <button
             type="button"
-            variant={journeyDate === iso ? 'secondary' : 'ghost'}
-            size="xs"
-            class="h-6 px-2 text-xs"
-            aria-pressed={journeyDate === iso}
-            onclick={() => {
-              journeyDate = iso
-              if (asText(from) && asText(to)) search()
-            }}
+            data-active={active}
+            aria-current={active ? 'date' : undefined}
+            aria-label={`Journey on ${iso}`}
+            onclick={() => pickDate(iso)}
+            class={`flex w-[3.4rem] shrink-0 cursor-pointer flex-col items-center rounded-md border px-1 py-1 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+              active
+                ? 'border-transparent bg-primary text-primary-foreground shadow-sm'
+                : 'border-transparent hover:bg-muted'
+            }`}
           >
-            {off === 0 ? 'Today' : off === 1 ? 'Tomorrow' : `${isoShift(today(), off).slice(8)} ${weekdayShort(iso)}`}
-          </Button>
+            <span
+              class={`text-[9px] font-medium uppercase tracking-wide ${active ? 'opacity-80' : 'text-muted-foreground'}`}
+            >
+              {iso === TODAY ? 'Today' : weekdayShort(iso)}
+            </span>
+            <span class="font-mono text-xs font-semibold tabular-nums">
+              {iso.slice(8)}&thinsp;{monthShort(iso)}
+            </span>
+          </button>
         {/each}
       </div>
-    </Card.Content>
-  </Card.Root>
+    </div>
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon"
+      class="size-7 shrink-0"
+      onclick={() => stepDay(1)}
+      aria-label="Next day"
+      title="Next day"
+    >
+      <ChevronRightIcon />
+    </Button>
+    <Input
+      id="av-date"
+      type="date"
+      bind:value={journeyDate}
+      min={TODAY}
+      max={maxDate}
+      onchange={() => {
+        if (canSearch) search()
+      }}
+      aria-label="Pick journey date (calendar)"
+      title="Calendar"
+      class="h-8 w-36 shrink-0"
+    />
+  </div>
 
   {#if phase === 'idle' && recent.length > 0}
     <RecentSearches
@@ -455,16 +513,17 @@ import ChevronRightIcon from 'lucide-svelte/icons/chevron-right'
   {/if}
 
   {#if phase === 'loading'}
-    <div class="grid gap-3" aria-busy="true">
+    <div class="grid gap-2" aria-busy="true">
       <Skeleton class="h-10 w-full rounded-lg" />
       {#each [0, 1, 2, 3] as i (i)}
         <Card.Root>
-          <Card.Content class="grid gap-2 py-3">
-            <Skeleton class="h-4 w-72" />
-            <div class="flex gap-2">
-              <Skeleton class="h-12 w-40" />
-              <Skeleton class="h-12 w-40" />
-              <Skeleton class="h-12 w-40" />
+          <Card.Content class="grid gap-2 py-2.5">
+            <Skeleton class="h-4 w-72 max-w-full" />
+            <div class="grid grid-cols-[repeat(auto-fill,minmax(9.5rem,1fr))] gap-1.5">
+              <Skeleton class="h-12" />
+              <Skeleton class="h-12" />
+              <Skeleton class="h-12" />
+              <Skeleton class="h-12" />
             </div>
           </Card.Content>
         </Card.Root>
@@ -483,115 +542,113 @@ import ChevronRightIcon from 'lucide-svelte/icons/chevron-right'
         hint="No availability data returned for this route and date."
       />
     {:else}
-      <div
-        class="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border bg-card px-3 py-2"
-        role="status"
-      >
-        <span class="font-mono text-xs font-semibold tabular-nums">{trains.length}</span>
-        <span class="text-xs text-muted-foreground">trains</span>
-        <span class="inline-flex items-center gap-1 text-xs">
-          <span class="size-1.5 rounded-full {stats.availRows > 0 ? 'bg-emerald-500' : 'bg-red-500'}"></span>
-          <span class="font-medium tabular-nums">{stats.availRows}</span>
-          <span class="text-muted-foreground">classes open now</span>
-        </span>
-        {#if stats.cheapest}
-          <span class="text-xs">
-            <span class="text-muted-foreground">Cheapest</span>
-            <span class="font-mono font-medium">₹{stats.cheapest.fare.toLocaleString('en-IN')}</span>
-            <span class="text-muted-foreground">· {stats.cheapest.cls}{stats.cheapest.number ? ` · ${stats.cheapest.number}` : ''}</span>
-          </span>
-        {/if}
-        {#if stats.bestChance}
-          <span class="text-xs">
-            <span class="text-muted-foreground">Best chance</span>
-            <span class="font-mono font-medium tabular-nums">{stats.bestChance.pct}%</span>
-            <span class="text-muted-foreground">· {stats.bestChance.cls}{stats.bestChance.number ? ` · ${stats.bestChance.number}` : ''}</span>
-          </span>
-        {/if}
-        <DataSourceBadge source={data?.data_source} class="ml-auto" />
-        {#if notice}
-          <p class="w-full truncate text-[11px] text-muted-foreground" title={notice}>{notice}</p>
-        {/if}
-      </div>
-
-      <div class="flex flex-wrap items-center gap-2">
-        <Button
-          type="button"
-          variant={availableOnly ? 'default' : 'outline'}
-          size="sm"
-          class="h-7 text-xs"
-          aria-pressed={availableOnly}
-          onclick={() => (availableOnly = !availableOnly)}
+      <div class="rounded-lg border bg-card px-3 py-1.5">
+        <div
+          class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs"
+          role="status"
         >
-          Available only
-        </Button>
-        {#if allClasses.length > 1}
-          <div class="flex flex-wrap items-center gap-1" role="group" aria-label="Filter classes">
-            {#each allClasses as c (c)}
-              <button
-                type="button"
-                aria-pressed={!hiddenClasses.includes(c)}
-                title={hiddenClasses.includes(c) ? `Show ${c}` : `Hide ${c}`}
-                onclick={() => toggleClass(c)}
-                class={`inline-flex h-6 cursor-pointer items-center rounded-md border px-2 font-mono text-[11px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
-                  hiddenClasses.includes(c)
-                    ? 'border-border text-muted-foreground opacity-50 hover:opacity-100'
-                    : 'border-transparent bg-secondary text-secondary-foreground hover:bg-secondary/80'
-                }`}
-              >
-                {c}
-              </button>
-            {/each}
-          </div>
-        {/if}
-        <div class="ml-auto flex items-center gap-2">
-          <Select.Root type="single" bind:value={sortKey}>
-            <Select.Trigger class="h-7 w-32 text-xs" aria-label="Sort trains by">
-              {SORTS.find(([k]) => k === sortKey)?.[1] ?? 'Departure'}
-            </Select.Trigger>
-            <Select.Content>
-              {#each SORTS as [k, label] (k)}
-                <Select.Item value={k} {label} />
-              {/each}
-            </Select.Content>
-          </Select.Root>
-          <div
-            class="flex overflow-hidden rounded-md border"
-            role="group"
-            aria-label="Result layout"
-          >
-            <button
-              type="button"
-              aria-pressed={view === 'cards'}
-              title="Card view"
-              onclick={() => (view = 'cards')}
-              class={`cursor-pointer px-2.5 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${view === 'cards' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}
-            >
-              Cards
-            </button>
-            <button
-              type="button"
-              aria-pressed={view === 'matrix'}
-              title="Matrix view"
-              onclick={() => (view = 'matrix')}
-              class={`cursor-pointer px-2.5 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${view === 'matrix' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}
-            >
-              Matrix
-            </button>
-          </div>
+          <span><span class="font-mono font-semibold tabular-nums">{trains.length}</span> <span class="text-muted-foreground">trains</span></span>
+          <span class="inline-flex items-center gap-1">
+            <span class="size-1.5 rounded-full {stats.availRows > 0 ? 'bg-emerald-500' : 'bg-red-500'}"></span>
+            <span class="font-medium tabular-nums">{stats.availRows}</span>
+            <span class="text-muted-foreground">classes open now</span>
+          </span>
+          {#if stats.cheapest}
+            <span>
+              <span class="text-muted-foreground">Cheapest</span>
+              <span class="font-mono font-medium">₹{stats.cheapest.fare.toLocaleString('en-IN')}</span>
+              <span class="text-muted-foreground">· {stats.cheapest.cls}{stats.cheapest.number ? ` · ${stats.cheapest.number}` : ''}</span>
+            </span>
+          {/if}
+          {#if stats.bestChance}
+            <span>
+              <span class="text-muted-foreground">Best chance</span>
+              <span class="font-mono font-medium tabular-nums">{stats.bestChance.pct}%</span>
+              <span class="text-muted-foreground">· {stats.bestChance.cls}{stats.bestChance.number ? ` · ${stats.bestChance.number}` : ''}</span>
+            </span>
+          {/if}
+          <DataSourceBadge source={data?.data_source} class="ml-auto" />
+          {#if notice}
+            <p class="w-full truncate text-[11px] text-muted-foreground" title={notice}>{notice}</p>
+          {/if}
         </div>
-        {#if filtersActive || sortKey !== 'departure'}
-          <p class="w-full text-xs text-muted-foreground">
-            Showing {filteredTrains.length} of {trains.length} trains
+
+        <div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 border-t pt-1.5">
+          <Button
+            type="button"
+            variant={availableOnly ? 'default' : 'outline'}
+            size="sm"
+            class="h-6 text-xs"
+            aria-pressed={availableOnly}
+            onclick={() => (availableOnly = !availableOnly)}
+          >
+            Available only
+          </Button>
+          {#if allClasses.length > 1}
+            <div class="flex flex-wrap items-center gap-1" role="group" aria-label="Filter classes">
+              {#each allClasses as c (c)}
+                <button
+                  type="button"
+                  aria-pressed={!hiddenClasses.includes(c)}
+                  title={hiddenClasses.includes(c) ? `Show ${c}` : `Hide ${c}`}
+                  onclick={() => toggleClass(c)}
+                  class={`inline-flex h-6 cursor-pointer items-center rounded-md border px-2 font-mono text-[11px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                    hiddenClasses.includes(c)
+                      ? 'border-border text-muted-foreground opacity-50 hover:opacity-100'
+                      : 'border-transparent bg-secondary text-secondary-foreground hover:bg-secondary/80'
+                  }`}
+                >
+                  {c}
+                </button>
+              {/each}
+            </div>
+          {/if}
+          {#if filtersActive || sortKey !== 'departure'}
             <button
               type="button"
-              class="ml-2 underline underline-offset-2 hover:text-foreground"
+              class="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
               onclick={resetFilters}
             >
-              Reset
+              Reset ({filteredTrains.length}/{trains.length})
             </button>
-          </p>
-        {/if}
+          {/if}
+          <div class="ml-auto flex items-center gap-2">
+            <Select.Root type="single" bind:value={sortKey}>
+              <Select.Trigger class="h-7 w-32 text-xs" aria-label="Sort trains by">
+                {SORTS.find(([k]) => k === sortKey)?.[1] ?? 'Departure'}
+              </Select.Trigger>
+              <Select.Content>
+                {#each SORTS as [k, label] (k)}
+                  <Select.Item value={k} {label} />
+                {/each}
+              </Select.Content>
+            </Select.Root>
+            <div
+              class="flex overflow-hidden rounded-md border"
+              role="group"
+              aria-label="Result layout"
+            >
+              <button
+                type="button"
+                aria-pressed={view === 'cards'}
+                title="Card view"
+                onclick={() => (view = 'cards')}
+                class={`cursor-pointer px-2.5 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${view === 'cards' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}
+              >
+                Cards
+              </button>
+              <button
+                type="button"
+                aria-pressed={view === 'matrix'}
+                title="Matrix view"
+                onclick={() => (view = 'matrix')}
+                class={`cursor-pointer px-2.5 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${view === 'matrix' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}
+              >
+                Matrix
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
 
       {#if filteredTrains.length === 0}
@@ -606,7 +663,7 @@ import ChevronRightIcon from 'lucide-svelte/icons/chevron-right'
             <Table.Header>
               <Table.Row>
                 <Table.Head
-                  class="sticky left-0 z-10 min-w-52 border-r bg-background"
+                  class="sticky left-0 z-10 min-w-48 border-r bg-background"
                   scope="col"
                 >
                   Train
@@ -630,9 +687,11 @@ import ChevronRightIcon from 'lucide-svelte/icons/chevron-right'
                   </Table.Cell>
                   {#each matrixClasses as c (c)}
                     {@const row = visibleRows(tr).find((r) => classCode(r) === c)}
-                    <Table.Cell class="align-top">
+                    <Table.Cell class="min-w-24 text-center align-top">
                       {#if row}
-                        <AvailabilityStatusBadge status={row?.status} size="xs" class="max-w-28" />
+                        <div class="flex justify-center">
+                          <AvailabilityStatusBadge status={row?.status} size="xs" class="max-w-28 truncate" />
+                        </div>
                         {#if numOrNull(row?.fare) != null}
                           <div class="mt-0.5 font-mono text-[10px] tabular-nums text-muted-foreground">
                             ₹{numOrNull(row?.fare).toLocaleString('en-IN')}
@@ -667,7 +726,7 @@ import ChevronRightIcon from 'lucide-svelte/icons/chevron-right'
                   </span>
                 </div>
               </div>
-              <div class="flex flex-wrap gap-1.5 border-t px-3 py-2">
+              <div class="grid grid-cols-[repeat(auto-fill,minmax(9.5rem,1fr))] gap-1.5 border-t px-3 py-2">
                 {#each visibleRows(tr) as r, j (j)}
                   {@render avlChip(r)}
                 {:else}

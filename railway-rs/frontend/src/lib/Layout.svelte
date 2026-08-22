@@ -113,7 +113,7 @@
       type="button"
       class="ml-auto flex items-center gap-1 rounded-md p-2 text-muted-foreground hover:bg-accent"
       onclick={() => togglePalette()}
-      aria-label="Search"
+      aria-label="Open search"
     >
       <Search class="size-4" />
     </button>

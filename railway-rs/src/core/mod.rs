@@ -10,6 +10,7 @@ pub mod ntes;
 pub mod obs;
 pub mod paytm;
 pub mod railyatri;
+pub mod retrieval;
 pub mod source;
 
 pub use aggregator::AgentAggregator;

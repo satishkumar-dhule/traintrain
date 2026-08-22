@@ -14,6 +14,9 @@
   import RouteIcon from 'lucide-svelte/icons/route'
   import Ticket from 'lucide-svelte/icons/ticket'
   import SearchIcon from 'lucide-svelte/icons/search'
+  import MapPinIcon from 'lucide-svelte/icons/map-pin'
+  import LocateFixedIcon from 'lucide-svelte/icons/locate-fixed'
+  import XIcon from 'lucide-svelte/icons/x'
 
   const popularTrains = [12951, 12309, 12002]
 
@@ -27,6 +30,116 @@
   let stationErr = $state('')
   let journeyErr = $state('')
   let pnrErr = $state('')
+
+  // ---- Plan from where you are -------------------------------------------
+  // Step 1: locate -> list every nearby station and let the user pick one.
+  // Step 2: pick a destination (+ date) -> jump straight to the availability
+  // page for that trip instead of mutating the home page.
+  function todayISO() {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  }
+  const TODAY = todayISO()
+  const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+  const NEARBY_CAP = 8
+
+  let nearPhase = $state('idle') // idle | locating | loading | msg | ok
+  let nearMsg = $state('')
+  let nearbyStations = $state([])
+  let originCode = $state('')
+
+  let destQuery = $state('')
+  let journeyDate = $state(TODAY)
+  let planError = $state('')
+
+  const destCode = $derived(norm(destQuery))
+  const canPlan = $derived(Boolean(originCode) && destCode.length > 0)
+
+  function findNearby() {
+    if (!('geolocation' in navigator)) {
+      nearPhase = 'msg'
+      nearMsg = 'Geolocation is not available in this browser.'
+      return
+    }
+    nearPhase = 'locating'
+    navigator.geolocation.getCurrentPosition(
+      async ({ coords }) => {
+        nearPhase = 'loading'
+        const res = await api(
+          `/rail-api/askdisha/nearby?lat=${encodeURIComponent(coords.latitude)}&lng=${encodeURIComponent(coords.longitude)}`
+        )
+        const list =
+          res.ok && Array.isArray(res.data?.stations)
+            ? res.data.stations.slice(0, NEARBY_CAP)
+            : null
+        if (!list) {
+          nearPhase = 'msg'
+          nearMsg = res.error
+            ? `Nearby lookup unavailable — ${res.error}`
+            : 'Nearby station lookup is unavailable right now.'
+          return
+        }
+        if (list.length === 0) {
+          nearPhase = 'msg'
+          nearMsg = 'No stations found around your location.'
+          return
+        }
+        nearbyStations = list
+        if (!list.some((s) => s.code === originCode)) originCode = list[0].code
+        nearPhase = 'ok'
+      },
+      (err) => {
+        nearPhase = 'msg'
+        nearMsg =
+          err && err.code === 1
+            ? 'Location permission denied — allow location access to find nearby stations.'
+            : (err && err.message) || 'Could not determine your location.'
+      },
+      { timeout: 10000, maximumAge: 60000 },
+    )
+  }
+
+  function clearOrigin() {
+    originCode = ''
+  }
+
+  function chooseOrigin(code) {
+    originCode = code
+  }
+
+  function nearbyDistance(km) {
+    const n = Number(km)
+    return Number.isFinite(n) ? `${n.toFixed(1)} km` : null
+  }
+
+  function onDestPick(item) {
+    if (item && norm(item.code)) destQuery = norm(item.code)
+    if (canPlan && DATE_RE.test(journeyDate)) submitPlan()
+  }
+
+  function submitPlan(e) {
+    e?.preventDefault?.()
+    if (!originCode) {
+      planError = 'Pick one of your nearby stations first.'
+      return
+    }
+    if (!destCode) {
+      planError = 'Enter a destination station code or name.'
+      return
+    }
+    if (destCode === norm(originCode)) {
+      planError = 'Destination must differ from your starting station.'
+      return
+    }
+    if (!DATE_RE.test(journeyDate)) {
+      planError = 'Pick a valid journey date.'
+      return
+    }
+    planError = ''
+    navigate(
+      `/availability/${encodeURIComponent(originCode)}/${encodeURIComponent(destCode)}/${encodeURIComponent(journeyDate)}`
+    )
+  }
 
   function norm(v) {
     return String(v ?? '').trim().toUpperCase()
@@ -224,6 +337,120 @@
       {/each}
     </div>
   </div>
+
+  <Card.Root class="border-primary/30 transition-colors hover:border-primary/60">
+    <form class="grid gap-4 p-6" onsubmit={submitPlan}>
+      <div class="flex items-start gap-3">
+        <span class="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+          <MapPinIcon class="size-5" />
+        </span>
+        <div class="grid gap-0.5">
+          <h2 class="text-base font-semibold">Plan from where you are</h2>
+          <p class="text-sm text-muted-foreground">
+            Find stations around you, pick one as your start, then jump straight to trains and live seat availability.
+          </p>
+        </div>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          onclick={findNearby}
+          disabled={nearPhase === 'locating' || nearPhase === 'loading'}
+        >
+          {#if nearPhase === 'locating' || nearPhase === 'loading'}
+            <LocateFixedIcon />
+          {:else}
+            <MapPinIcon />
+          {/if}
+          {nearPhase === 'locating'
+            ? 'Locating…'
+            : nearPhase === 'loading'
+              ? 'Searching…'
+              : nearbyStations.length
+                ? 'Refresh nearby'
+                : 'Stations near me'}
+        </Button>
+        {#if originCode && nearbyStations.some((s) => s.code === originCode)}
+          {@const picked = nearbyStations.find((s) => s.code === originCode)}
+          <span
+            class="inline-flex items-center gap-1.5 rounded-full border border-primary/40 bg-primary/10 px-2.5 py-1 text-xs font-medium"
+          >
+            From
+            <StationCodeBadge code={picked.code} name={picked.name} link={false} size="xs" />
+            <span class="max-w-40 truncate">{picked.name}</span>
+            <button type="button" aria-label="Clear chosen station" onclick={clearOrigin}>
+              <XIcon class="size-3 opacity-70 hover:opacity-100" />
+            </button>
+          </span>
+        {/if}
+      </div>
+
+      {#if nearPhase === 'msg'}
+        <p class="text-xs text-muted-foreground" role="status">{nearMsg}</p>
+      {:else if nearPhase === 'loading'}
+        <div class="flex flex-wrap gap-1.5" aria-busy="true">
+          {#each [0, 1, 2, 3] as i (i)}
+            <Skeleton class="h-8 w-44" />
+          {/each}
+        </div>
+      {:else if nearPhase === 'ok'}
+        <div class="grid gap-1">
+          <p class="text-xs text-muted-foreground">
+            {nearbyStations.length} station{nearbyStations.length === 1 ? '' : 's'} around you, closest first — pick one to start from:
+          </p>
+          <div class="flex flex-wrap gap-1.5" role="group" aria-label="Choose your starting station">
+            {#each nearbyStations as s (s.code)}
+              {@const active = s.code === originCode}
+              <button
+                type="button"
+                aria-pressed={active}
+                onclick={() => chooseOrigin(s.code)}
+                class={`inline-flex max-w-full cursor-pointer items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                  active
+                    ? 'border-primary bg-primary text-primary-foreground shadow-sm'
+                    : 'hover:border-primary/50 hover:bg-muted/50'
+                }`}
+              >
+                <span class="font-mono font-semibold tabular-nums">{s.code}</span>
+                <span class="min-w-0 max-w-36 truncate font-medium">{s.name}</span>
+                {#if nearbyDistance(s.distance_km)}
+                  <span class={`tabular-nums ${active ? 'opacity-80' : 'text-muted-foreground'}`}>
+                    {nearbyDistance(s.distance_km)}
+                  </span>
+                {/if}
+              </button>
+            {/each}
+          </div>
+        </div>
+      {/if}
+
+      <div class="flex flex-wrap items-end gap-2">
+        <div class="grid min-w-44 flex-1 gap-1.5">
+          <Label for="home-plan-to">Destination</Label>
+          <AutoCompleteInput
+            id="home-plan-to"
+            kind="station"
+            placeholder="Where to? e.g. PUNE"
+            bind:value={destQuery}
+            onpick={onDestPick}
+          />
+        </div>
+        <div class="grid gap-1.5">
+          <Label for="home-plan-date">Journey date</Label>
+          <Input id="home-plan-date" type="date" bind:value={journeyDate} min={TODAY} class="w-40" />
+        </div>
+        <Button type="submit" disabled={!canPlan}>
+          <SearchIcon data-icon="inline-start" />
+          Find trains &amp; availability
+        </Button>
+      </div>
+      {#if planError}
+        <p class="text-xs text-destructive">{planError}</p>
+      {/if}
+    </form>
+  </Card.Root>
 
   <div class="grid gap-4 sm:grid-cols-2">
     <Card.Root class="transition-colors hover:border-primary/50">
