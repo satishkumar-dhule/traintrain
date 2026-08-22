@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: train-bro
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./railway-rs/Dockerfile
+    dockerContext: ./railway-rs
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: RAILWAY_LOG_FORMAT
+        value: json
+      - key: RAILWAY_CACHE_TTL
+        value: "120"

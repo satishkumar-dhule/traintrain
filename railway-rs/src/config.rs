@@ -23,8 +23,9 @@ use std::time::Duration;
 /// - `RAILWAY_AI_API_KEY`    (optional) — sent as `Authorization: Bearer` when set;
 ///   the free tier works without any key (no login required)
 /// - `RAILWAY_AI_TIMEOUT_SECS` (default `120`) — total timeout for LLM completions
-/// - `ASKDISHA_ENABLED`    (default `false`) — feature gate for the AskDISHA
-///   module; truthy values are `1`/`true`/`yes` (case-insensitive)
+/// - `ASKDISHA_ENABLED`    (default `true`) — feature gate for the AskDISHA
+///   module; set `0`/`false`/`no`/`off` (case-insensitive) to hard-disable every
+///   outbound CoRover call
 /// - `COROVER_BASE`        (default `https://api.disha.corover.ai`) — AskDISHA
 ///   guest API origin
 /// - `COROVER_CDN_BASE`    (default `https://cdn.corover.ai`) — AskDISHA CDN
@@ -51,7 +52,7 @@ pub struct Config {
     pub ai_model: String,
     pub ai_api_key: Option<String>,
     pub ai_timeout: Duration,
-    /// AskDISHA module feature gate (`ASKDISHA_ENABLED`, default `false`).
+    /// AskDISHA module feature gate (`ASKDISHA_ENABLED`, default `true`).
     pub askdisha_enabled: bool,
     /// AskDISHA guest API origin (`COROVER_BASE`).
     pub corover_base: String,
@@ -79,7 +80,7 @@ impl Default for Config {
             ai_model: "x-preview-f-free".to_string(),
             ai_api_key: None,
             ai_timeout: Duration::from_secs(120),
-            askdisha_enabled: false,
+            askdisha_enabled: true,
             corover_base: "https://api.disha.corover.ai".to_string(),
             corover_cdn_base: "https://cdn.corover.ai".to_string(),
         }
@@ -90,7 +91,7 @@ impl Config {
     pub fn from_env() -> Self {
         let d = Self::default();
         Self {
-            port: env_u16("RAILWAY_PORT", d.port),
+            port: port_from_env(d.port),
             data_dir: PathBuf::from(
                 std::env::var("RAILWAY_DATA_DIR").unwrap_or_else(|_| "data".into()),
             ),
@@ -142,8 +143,11 @@ impl Config {
     }
 }
 
-fn env_u16(key: &str, default: u16) -> u16 {
-    std::env::var(key)
+/// `RAILWAY_PORT` wins, then the PaaS-standard `PORT` (Render injects it),
+/// then the built-in default.
+fn port_from_env(default: u16) -> u16 {
+    std::env::var("RAILWAY_PORT")
+        .or_else(|_| std::env::var("PORT"))
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(default)
@@ -195,9 +199,9 @@ mod tests {
     }
 
     #[test]
-    fn default_config_keeps_askdisha_disabled_with_real_origins() {
+    fn default_config_ships_askdisha_enabled_with_real_origins() {
         let d = Config::default();
-        assert!(!d.askdisha_enabled);
+        assert!(d.askdisha_enabled);
         assert_eq!(d.corover_base, "https://api.disha.corover.ai");
         assert_eq!(d.corover_cdn_base, "https://cdn.corover.ai");
     }

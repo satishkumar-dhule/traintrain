@@ -21,8 +21,8 @@ COPY data/ /app/data/
 
 USER railway
 EXPOSE 3000
-ENV RAILWAY_PORT=3000 \
+ENV PORT=3000 \
     RAILWAY_LOG_DIR=/tmp/railway-logs
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD curl -f http://127.0.0.1:3000/healthz || exit 1
+  CMD curl -f http://127.0.0.1:${PORT:-3000}/healthz || exit 1
 ENTRYPOINT ["/app/railway-rs"]
