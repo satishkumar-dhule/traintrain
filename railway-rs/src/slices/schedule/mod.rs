@@ -2,16 +2,19 @@
 //!
 //! Endpoint: `GET /rail-api/schedule?train=<number>`
 //!
-//! Primary source: NTES `GetTrainSchedule` (`enquiry.indianrail.gov.in`).
-//! Fallback: Railyatri `GET {base}/time-table/{train}` (SSR
+//! Primary source: Ask DISHA `trnscheduleEnq` (CoRover guest API,
+//! `api.disha.corover.ai`) - it answers from non-India IPs, unlike NTES.
+//! First fallback: NTES `GetTrainSchedule` (`enquiry.indianrail.gov.in`).
+//! Final fallback: Railyatri `GET {base}/time-table/{train}` (SSR
 //! `__NEXT_DATA__` -> `props.pageProps.trainTimeTable`:
 //! `train_number`, `train_name`, `routeGroup[]` (per running day) with
 //! `routesummary[]` stops (`station_code`, `station_name`, `sta_min`,
 //! `std_min`, `day`); `run_days` is an array like `["MON","TUE",...]`).
 //!
-//! The winning source is reported in `data_source`. NTES data is fetched
-//! first; any NTES failure (unreachable, empty, malformed) falls back to
-//! Railyatri so a dead gov endpoint never hides a working public mirror.
+//! The winning source is reported in `data_source`. CoRover is tried first
+//! (a disabled `ASKDISHA_ENABLED` degrades with zero network footprint);
+//! any failure falls through to NTES and then Railyatri so a dead gov
+//! endpoint never hides a working public mirror.
 //!
 //! Success model: `crate::models::ScheduleResponse`.
 

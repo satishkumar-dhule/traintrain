@@ -13,12 +13,28 @@ pub struct Service;
 impl Service {
     /// Resolve the full schedule (route + running days) for a train number.
     ///
-    /// NTES (`enquiry.indianrail.gov.in`) is the primary source; Railyatri's
-    /// SSR page is the fallback when NTES is unreachable or malformed; Ask
-    /// DISHA (`trnscheduleEnq` via the CoRover guest API) is the final
-    /// fallback. The winning source is reported honestly in `data_source`.
+    /// Ask DISHA (`trnscheduleEnq` via the CoRover guest API,
+    /// `api.disha.corover.ai`) is the primary source - unlike NTES it answers
+    /// from non-India IPs too. NTES (`enquiry.indianrail.gov.in`) is the
+    /// first fallback and Railyatri's SSR page the final one; the winning
+    /// source is reported honestly in `data_source`.
     pub async fn get_schedule(state: &AppState, train: &str) -> Result<ScheduleResponse, AppError> {
         let key = format!("schedule:{train}");
+
+        // Ask DISHA / CoRover primary (works worldwide): a disabled module or
+        // any failure degrades to the NTES branch without extra latency cost.
+        let corover_failure = match corover_schedule(state, train).await {
+            Ok(resp) => {
+                tracing::info!(
+                    %train,
+                    source = "CoRover",
+                    "schedule resolved from CoRover"
+                );
+                state.cache.set(&key, serde_json::to_value(&resp)?);
+                return Ok(resp);
+            }
+            Err(e) => e.message(),
+        };
 
         let ntes_started = Instant::now();
         let ntes_failure = match state.ntes.schedule(train, "").await {
@@ -32,7 +48,8 @@ impl Service {
                             %train,
                             source = "NTES",
                             latency_ms = ntes_started.elapsed().as_millis(),
-                            "schedule resolved from NTES"
+                            %corover_failure,
+                            "schedule resolved from NTES after CoRover failure"
                         );
                         state.cache.set(&key, serde_json::to_value(&resp)?);
                         return Ok(resp);
@@ -48,34 +65,21 @@ impl Service {
                 tracing::warn!(
                     %train,
                     source = "Railyatri",
+                    %corover_failure,
                     %ntes_failure,
-                    "schedule resolved from Railyatri after NTES failure"
+                    "schedule resolved from Railyatri after CoRover and NTES failures"
                 );
                 state.cache.set(&key, serde_json::to_value(&resp)?);
                 Ok(resp)
             }
             Err(AppError::NotFound(msg)) => Err(AppError::not_found(msg)),
-            Err(ry_err) => match corover_schedule(state, train).await {
-                Ok(resp) => {
-                    tracing::warn!(
-                        %train,
-                        source = "CoRover",
-                        %ntes_failure,
-                        railyatri_failure = %ry_err.message(),
-                        "schedule resolved from CoRover after NTES and Railyatri failures"
-                    );
-                    state.cache.set(&key, serde_json::to_value(&resp)?);
-                    Ok(resp)
-                }
-                Err(cov_err) => Err(AppError::source_unavailable(
-                    "all-sources",
-                    format!(
-                        "schedule for {train} failed: NTES: {ntes_failure} | Railyatri: {} | CoRover: {}",
-                        ry_err.message(),
-                        cov_err.message()
-                    ),
-                )),
-            },
+            Err(ry_err) => Err(AppError::source_unavailable(
+                "all-sources",
+                format!(
+                    "schedule for {train} failed: CoRover: {corover_failure} | NTES: {ntes_failure} | Railyatri: {}",
+                    ry_err.message()
+                ),
+            )),
         }
     }
 }
@@ -217,9 +221,10 @@ fn non_empty(v: &Value) -> Option<String> {
     v.as_str().filter(|s| !s.is_empty()).map(String::from)
 }
 
-/// Fetch and normalize the Ask DISHA `trnscheduleEnq` schedule (final
-/// fallback of the chain). No-op when the module is disabled (`state.askdisha`
-/// is `None`) - reports a source-unavailable error without any outbound call.
+/// Fetch and normalize the Ask DISHA `trnscheduleEnq` schedule (primary
+/// source of the chain). No-op when the module is disabled (`state.askdisha`
+/// is `None`) - reports a source-unavailable error without any outbound call,
+/// so a disabled deployment silently keeps the NTES -> Railyatri behaviour.
 async fn corover_schedule(state: &AppState, train: &str) -> Result<ScheduleResponse, AppError> {
     let client = state
         .askdisha
@@ -264,6 +269,22 @@ fn corover_schedule_response(
         })
         .collect();
 
+    // Run-day "Y"/"N" flags map onto the same ["MON", ...] spelling the
+    // Railyatri branch emits, so the primary source keeps wire parity.
+    let running_days: Vec<String> = [
+        (data.runs_mon, "MON"),
+        (data.runs_tue, "TUE"),
+        (data.runs_wed, "WED"),
+        (data.runs_thu, "THU"),
+        (data.runs_fri, "FRI"),
+        (data.runs_sat, "SAT"),
+        (data.runs_sun, "SUN"),
+    ]
+    .iter()
+    .filter(|(runs, _)| *runs)
+    .map(|(_, day)| day.to_string())
+    .collect();
+
     Ok(ScheduleResponse {
         train_number: Some(if data.train_number.is_empty() {
             train.to_string()
@@ -272,7 +293,7 @@ fn corover_schedule_response(
         }),
         train_name: data.train_name.clone().filter(|n| !n.is_empty()),
         route_description: None,
-        running_days: None,
+        running_days: Some(running_days),
         stops: Some(stops),
         source: Some("CoRover".to_string()),
         cache_ttl: Some(cache_ttl),
@@ -342,6 +363,16 @@ mod tests {
         assert_eq!(resp.source.as_deref(), Some("CoRover"));
         assert_eq!(resp.train_number.as_deref(), Some("12951"));
         assert_eq!(resp.cache_ttl, Some(120));
+        // The fixture train runs daily; flags map onto the Railyatri spelling.
+        assert_eq!(
+            resp.running_days,
+            Some(
+                vec!["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"]
+                    .into_iter()
+                    .map(str::to_string)
+                    .collect(),
+            )
+        );
 
         let stops = resp.stops.expect("stops present");
         assert_eq!(stops.len(), 8);

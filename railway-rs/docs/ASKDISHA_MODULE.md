@@ -17,7 +17,7 @@ capabilities.
 |---|---|---|
 | `GET /bot/searchStation/{q}` | 200 headerless | F2 enrichment source |
 | `GET /bot/stationsByLocation/{lat}/{lng}` | 200 headerless, rows carry `distance` km | F3 nearby feature |
-| `GET /bot/trnscheduleEnq/{train}?journeyDate=&startingStationCode=` | 200 headerless | F4 schedule 3rd fallback |
+| `GET /bot/trnscheduleEnq/{train}?journeyDate=&startingStationCode=` | 200 headerless | F4 schedule **primary** source (works from non-India IPs; NTES -> Railyatri follow as fallbacks) |
 | `GET /bot/pin/{pincode}` | 200 → `{state,stateList,cityList,serverId,timeStamp}` | F6 hidden utility |
 | CDN `stationupdated.json` | open, 8,491 rows w/ hi·gu·geo·district·address·trainCount | F1 offline hydration |
 | CDN `{en\|hi\|gu}.json`, `getSettings.json` | open | kept-but-hidden endpoints (D4) |

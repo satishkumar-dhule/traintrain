@@ -5,20 +5,26 @@
   import { Button } from '$lib/components/ui/button/index.js'
   import { Input } from '$lib/components/ui/input/index.js'
   import { Label } from '$lib/components/ui/label/index.js'
-  import DataTable from '$lib/components/DataTable.svelte'
   import { Skeleton } from '$lib/components/ui/skeleton/index.js'
   import * as Alert from '$lib/components/ui/alert/index.js'
-import AutoCompleteInput from '$lib/components/AutoCompleteInput.svelte'
-import EmptyState from '$lib/components/EmptyState.svelte'
-import RecentSearches from '$lib/components/RecentSearches.svelte'
-import { loadRecent, rememberRecent, clearStored } from '$lib/recent.js'
-import {
-  TrainNumberBadge,
-  RunsOnBadges,
-  AvailabilityStatusBadge
-} from '$lib/components/badges/index.js'
+  import * as Table from '$lib/components/ui/table/index.js'
+  import * as Select from '$lib/components/ui/select/index.js'
+  import AutoCompleteInput from '$lib/components/AutoCompleteInput.svelte'
+  import EmptyState from '$lib/components/EmptyState.svelte'
+  import RecentSearches from '$lib/components/RecentSearches.svelte'
+  import { loadRecent, rememberRecent, clearStored } from '$lib/recent.js'
+  import {
+    TrainNumberBadge,
+    RunsOnBadges,
+    AvailabilityStatusBadge,
+    DataSourceBadge,
+    availabilityStatusKind,
+    dayFlags
+  } from '$lib/components/badges/index.js'
 import ArrowDownUpIcon from 'lucide-svelte/icons/arrow-down-up'
 import CalendarDaysIcon from 'lucide-svelte/icons/calendar-days'
+import ChevronLeftIcon from 'lucide-svelte/icons/chevron-left'
+import ChevronRightIcon from 'lucide-svelte/icons/chevron-right'
 
   let { src = '', dst = '', date = '' } = $props()
 
@@ -34,8 +40,37 @@ import CalendarDaysIcon from 'lucide-svelte/icons/calendar-days'
   let committed = null
 
   const RECENT_KEY = 'rc-availability-recent'
+  const PREFS_KEY = 'rc-availability-prefs'
   const recentValid = (r) => r && typeof r?.id === 'string' && DATE_RE.test(String(r?.date ?? ''))
   let recent = $state(loadRecent(RECENT_KEY, recentValid))
+
+  const SORTS = [
+    ['departure', 'Departure'],
+    ['duration', 'Duration'],
+    ['fare', 'Lowest fare'],
+    ['chance', 'Confirm chance']
+  ]
+  const CLASS_ORDER = ['1A', 'EA', 'EC', '2A', '3A', '3E', 'FC', 'CC', 'SL', '2S', 'UR']
+
+  function loadPrefs() {
+    try {
+      const p = JSON.parse(localStorage.getItem(PREFS_KEY) || '{}')
+      return p && typeof p === 'object' ? p : {}
+    } catch {
+      return {}
+    }
+  }
+  const prefs = loadPrefs()
+  let view = $state(prefs.view === 'matrix' ? 'matrix' : 'cards')
+  let sortKey = $state(SORTS.some(([k]) => k === prefs.sortKey) ? prefs.sortKey : 'departure')
+  let availableOnly = $state(prefs.availableOnly === true)
+  let hiddenClasses = $state([])
+
+  $effect(() => {
+    try {
+      localStorage.setItem(PREFS_KEY, JSON.stringify({ view, sortKey, availableOnly }))
+    } catch {}
+  })
 
   function rememberRoute(s, d, dt) {
     recent = rememberRecent(
@@ -60,6 +95,17 @@ import CalendarDaysIcon from 'lucide-svelte/icons/calendar-days'
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
   }
 
+  function isoShift(iso, days) {
+    const d = new Date(`${iso}T00:00:00`)
+    d.setDate(d.getDate() + days)
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  }
+
+  function weekdayShort(iso) {
+    const d = new Date(`${iso}T00:00:00`)
+    return isNaN(d.getTime()) ? '' : d.toLocaleDateString('en-IN', { weekday: 'short' })
+  }
+
   function asText(v) {
     return String(v ?? '').trim()
   }
@@ -69,17 +115,135 @@ import CalendarDaysIcon from 'lucide-svelte/icons/calendar-days'
     return t && t !== '-' && t !== '--' ? t : '—'
   }
 
+  function numOrNull(v) {
+    if (v == null || String(v).trim() === '') return null
+    const n = Number(v)
+    return Number.isFinite(n) ? n : null
+  }
+
+  function hmMin(v) {
+    const m = /^(\d{1,3}):(\d{2})/.exec(asText(v))
+    return m ? +m[1] * 60 + +m[2] : null
+  }
+
+  function durationMin(tr) {
+    const d = hmMin(tr?.duration)
+    if (d != null) return d
+    const dep = hmMin(tr?.departure_time)
+    const arr = hmMin(tr?.arrival_time)
+    if (dep == null || arr == null) return null
+    return arr >= dep ? arr - dep : arr + 1440 - dep
+  }
+
+  function durationLabel(tr) {
+    const m = durationMin(tr)
+    if (m == null) return fmt(tr?.duration)
+    const h = Math.floor(m / 60)
+    const mm = m % 60
+    return h ? `${h}h ${mm ? mm + 'm' : ''}`.trim() : `${mm}m`
+  }
+
   const canSearch = $derived(
     Boolean(asText(from)) && Boolean(asText(to)) && DATE_RE.test(asText(journeyDate))
   )
   const trains = $derived(Array.isArray(data?.trains) ? data.trains : [])
   const notice = $derived(asText(data?.notice))
 
-  function runDays(runsOn) {
-    if (Array.isArray(runsOn)) return runsOn.map((d) => asText(d)).filter(Boolean)
-    const t = asText(runsOn)
-    if (!t) return []
-    return t.split(/[\s,|/]+/).filter(Boolean)
+  const rowsOf = (tr) => (Array.isArray(tr?.availability) ? tr.availability : [])
+  const classCode = (row) => asText(row?.class).toUpperCase()
+
+  const allClasses = $derived.by(() => {
+    const seen = []
+    for (const t of trains) {
+      for (const r of rowsOf(t)) {
+        const c = classCode(r)
+        if (c && !seen.includes(c)) seen.push(c)
+      }
+    }
+    return seen.sort(
+      (a, b) =>
+        (CLASS_ORDER.indexOf(a) === -1 ? 99 : CLASS_ORDER.indexOf(a)) -
+          (CLASS_ORDER.indexOf(b) === -1 ? 99 : CLASS_ORDER.indexOf(b)) ||
+        a.localeCompare(b),
+    )
+  })
+
+  const visibleRows = (tr) => rowsOf(tr).filter((r) => !hiddenClasses.includes(classCode(r)))
+  const hasAvailable = (tr) => visibleRows(tr).some((r) => availabilityStatusKind(r?.status) === 'available')
+
+  const matrixClasses = $derived(allClasses.filter((c) => !hiddenClasses.includes(c)))
+
+  const filteredTrains = $derived.by(() => {
+    let list = trains.filter((t) => visibleRows(t).length > 0)
+    if (availableOnly) list = list.filter(hasAvailable)
+    const dir = sortKey === 'chance' ? -1 : 1
+    return list.slice().sort((a, b) => {
+      let va, vb
+      if (sortKey === 'departure') {
+        va = hmMin(a?.departure_time)
+        vb = hmMin(b?.departure_time)
+      } else if (sortKey === 'duration') {
+        va = durationMin(a)
+        vb = durationMin(b)
+      } else if (sortKey === 'fare') {
+        const fa = visibleRows(a).map((r) => numOrNull(r?.fare)).filter((n) => n != null)
+        const fb = visibleRows(b).map((r) => numOrNull(r?.fare)).filter((n) => n != null)
+        va = fa.length ? Math.min(...fa) : null
+        vb = fb.length ? Math.min(...fb) : null
+      } else {
+        const pa = visibleRows(a).map((r) => numOrNull(r?.prediction)).filter((n) => n != null)
+        const pb = visibleRows(b).map((r) => numOrNull(r?.prediction)).filter((n) => n != null)
+        va = pa.length ? Math.max(...pa) : null
+        vb = pb.length ? Math.max(...pb) : null
+      }
+      if (va == null && vb == null) return 0
+      if (va == null) return 1
+      if (vb == null) return -1
+      return (va - vb) * dir
+    })
+  })
+
+  const stats = $derived.by(() => {
+    let totalRows = 0
+    let availRows = 0
+    let cheapest = null
+    let bestChance = null
+    for (const t of trains) {
+      for (const r of rowsOf(t)) {
+        totalRows++
+        if (availabilityStatusKind(r?.status) === 'available') {
+          availRows++
+          const f = numOrNull(r?.fare)
+          if (f != null && (!cheapest || f < cheapest.fare))
+            cheapest = { fare: f, cls: classCode(r), number: asText(t?.number) }
+        }
+        const p = numOrNull(r?.prediction)
+        if (p != null && (!bestChance || p > bestChance.pct))
+          bestChance = { pct: Math.round(p), cls: classCode(r), number: asText(t?.number) }
+      }
+    }
+    return { totalRows, availRows, cheapest, bestChance }
+  })
+
+  const filtersActive = $derived(availableOnly || hiddenClasses.length > 0)
+
+  function resetFilters() {
+    availableOnly = false
+    hiddenClasses = []
+    sortKey = 'departure'
+  }
+
+  function toggleClass(c) {
+    hiddenClasses = hiddenClasses.includes(c)
+      ? hiddenClasses.filter((x) => x !== c)
+      : [...hiddenClasses, c]
+  }
+
+  function stepDate(days) {
+    const target = isoShift(DATE_RE.test(asText(journeyDate)) ? journeyDate : today(), days)
+    if (target < today()) return
+    journeyDate = target
+    if (asText(from) && asText(to)) search()
   }
 
   async function runSearch(s, d, dt, key) {
@@ -132,72 +296,150 @@ import CalendarDaysIcon from 'lucide-svelte/icons/calendar-days'
     }
     runSearch(s, d, dt, key)
   })
-
-  const cols = [
-    { key: 'class', label: 'Class', cellClass: 'font-mono font-medium', value: (r) => fmt(r?.class) },
-    { key: 'status', label: 'Status', value: (r) => asText(r?.status) || '—' },
-    { key: 'fare', label: 'Fare', cellClass: 'font-mono text-xs', value: (r) => fmt(r?.fare) },
-    { key: 'quota', label: 'Quota', cellClass: 'text-xs', value: (r) => fmt(r?.quota) },
-    { key: 'prediction', label: 'Prediction', cellClass: 'text-xs', value: (r) => fmt(r?.prediction) },
-  ]
 </script>
 
-{#snippet statusCell(row)}
-  <AvailabilityStatusBadge status={row?.status} />
+{#snippet chanceBar(row)}
+  {@const pct = numOrNull(row?.prediction)}
+  {#if pct != null}
+    {@const w = Math.min(100, Math.max(0, pct))}
+    <div
+      class="mt-1 h-0.5 w-full rounded-full bg-muted"
+      title={`Confirmation chance ${Math.round(pct)}%`}
+    >
+      <div
+        class={`h-full rounded-full ${pct >= 90 ? 'bg-emerald-500' : pct >= 60 ? 'bg-amber-500' : 'bg-red-500'}`}
+        style={`width:${w}%`}
+      ></div>
+    </div>
+    <div class="mt-0.5 text-right text-[9px] leading-none tabular-nums text-muted-foreground">
+      {Math.round(pct)}% confirm
+    </div>
+  {/if}
 {/snippet}
 
-<section class="grid gap-6" class:idle-center={phase === 'idle'}>
+{#snippet avlChip(row)}
+  {@const kind = availabilityStatusKind(row?.status)}
+  {@const tone =
+    kind === 'available'
+      ? 'border-emerald-600/25 bg-emerald-500/10 text-emerald-700 dark:border-emerald-500/35 dark:bg-emerald-400/10 dark:text-emerald-400'
+      : kind === 'rac'
+        ? 'border-amber-600/30 bg-amber-500/10 text-amber-700 dark:border-amber-500/35 dark:bg-amber-400/10 dark:text-amber-400'
+        : kind === 'waitlist' || kind === 'closed'
+          ? 'border-red-600/30 bg-red-500/10 text-red-700 dark:border-red-500/35 dark:bg-red-400/10 dark:text-red-400'
+          : 'border-border bg-muted/50 text-muted-foreground'}
+  {@const fare = numOrNull(row?.fare)}
+  <div class={`w-40 shrink-0 rounded-md border px-2 py-1 ${tone}`}>
+    <div class="flex items-baseline justify-between gap-2">
+      <span class="font-mono text-[11px] font-semibold">{fmt(classCode(row))}</span>
+      <span class="font-mono text-[11px] tabular-nums">{fare != null ? `₹${fare.toLocaleString('en-IN')}` : ''}</span>
+    </div>
+    <div class="flex items-center gap-1 text-[10px]">
+      <span class="size-1.5 shrink-0 rounded-full bg-current opacity-80"></span>
+      <span class="truncate font-medium" title={asText(row?.status)}>{asText(row?.status) || '—'}</span>
+    </div>
+    {@render chanceBar(row)}
+  </div>
+{/snippet}
+
+<section class="grid gap-4">
   <div class="grid gap-1">
     <h1 class="text-2xl font-semibold tracking-tight">Availability</h1>
-    <p class="text-sm text-muted-foreground">Class-wise availability for a route and date.</p>
+    <p class="text-sm text-muted-foreground">
+      Dense class-wise availability with fares and confirm chances across every train.
+    </p>
   </div>
 
   <Card.Root>
     <Card.Content
-      class="flex flex-wrap items-end gap-3"
+      class="grid gap-3"
       onkeydown={(e) => {
         if (e.key === 'Enter' && !e.defaultPrevented) search()
       }}
     >
-      <div class="grid min-w-48 flex-1 gap-2">
-        <Label for="av-from">From</Label>
-        <AutoCompleteInput
-          id="av-from"
-          bind:value={from}
-          kind="station"
-          placeholder="From station…"
-          onpick={(item) => {
-            if (asText(item?.code)) from = asText(item.code).toUpperCase()
-          }}
-        />
+      <div class="flex flex-wrap items-end gap-3">
+        <div class="grid min-w-44 flex-1 gap-2">
+          <Label for="av-from">From</Label>
+          <AutoCompleteInput
+            id="av-from"
+            bind:value={from}
+            kind="station"
+            placeholder="From station…"
+            onpick={(item) => {
+              if (asText(item?.code)) from = asText(item.code).toUpperCase()
+            }}
+          />
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          onclick={swap}
+          aria-label="Swap From and To stations"
+          title="Swap stations"
+        >
+          <ArrowDownUpIcon />
+        </Button>
+        <div class="grid min-w-44 flex-1 gap-2">
+          <Label for="av-to">To</Label>
+          <AutoCompleteInput
+            id="av-to"
+            bind:value={to}
+            kind="station"
+            placeholder="To station…"
+            onpick={(item) => {
+              if (asText(item?.code)) to = asText(item.code).toUpperCase()
+            }}
+          />
+        </div>
+        <div class="grid gap-2">
+          <Label for="av-date">Date</Label>
+          <div class="flex items-center gap-1">
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              class="size-9 shrink-0"
+              disabled={journeyDate <= today()}
+              onclick={() => stepDate(-1)}
+              aria-label="Previous day"
+              title="Previous day"
+            >
+              <ChevronLeftIcon />
+            </Button>
+            <Input id="av-date" type="date" bind:value={journeyDate} min={today()} class="w-36" />
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              class="size-9 shrink-0"
+              onclick={() => stepDate(1)}
+              aria-label="Next day"
+              title="Next day"
+            >
+              <ChevronRightIcon />
+            </Button>
+          </div>
+        </div>
+        <Button type="button" onclick={search} disabled={!canSearch}>Search</Button>
       </div>
-      <Button
-        type="button"
-        variant="outline"
-        size="icon"
-        onclick={swap}
-        aria-label="Swap From and To stations"
-        title="Swap stations"
-      >
-        <ArrowDownUpIcon />
-      </Button>
-      <div class="grid min-w-48 flex-1 gap-2">
-        <Label for="av-to">To</Label>
-        <AutoCompleteInput
-          id="av-to"
-          bind:value={to}
-          kind="station"
-          placeholder="To station…"
-          onpick={(item) => {
-            if (asText(item?.code)) to = asText(item.code).toUpperCase()
-          }}
-        />
+      <div class="flex flex-wrap items-center gap-1.5" role="group" aria-label="Quick dates">
+        {#each [0, 1, 2] as off (off)}
+          {@const iso = isoShift(today(), off)}
+          <Button
+            type="button"
+            variant={journeyDate === iso ? 'secondary' : 'ghost'}
+            size="xs"
+            class="h-6 px-2 text-xs"
+            aria-pressed={journeyDate === iso}
+            onclick={() => {
+              journeyDate = iso
+              if (asText(from) && asText(to)) search()
+            }}
+          >
+            {off === 0 ? 'Today' : off === 1 ? 'Tomorrow' : `${isoShift(today(), off).slice(8)} ${weekdayShort(iso)}`}
+          </Button>
+        {/each}
       </div>
-      <div class="grid gap-2">
-        <Label for="av-date">Date</Label>
-        <Input id="av-date" type="date" bind:value={journeyDate} min={today()} />
-      </div>
-      <Button type="button" onclick={search} disabled={!canSearch}>Search</Button>
     </Card.Content>
   </Card.Root>
 
@@ -213,17 +455,17 @@ import CalendarDaysIcon from 'lucide-svelte/icons/calendar-days'
   {/if}
 
   {#if phase === 'loading'}
-    <div class="grid gap-4" aria-busy="true">
-      {#each [0, 1, 2] as i (i)}
+    <div class="grid gap-3" aria-busy="true">
+      <Skeleton class="h-10 w-full rounded-lg" />
+      {#each [0, 1, 2, 3] as i (i)}
         <Card.Root>
-          <Card.Header>
-            <Skeleton class="h-5 w-64" />
-            <Skeleton class="h-4 w-44" />
-          </Card.Header>
-          <Card.Content class="grid gap-2">
-            <Skeleton class="h-8 w-full" />
-            <Skeleton class="h-8 w-full" />
-            <Skeleton class="h-8 w-full" />
+          <Card.Content class="grid gap-2 py-3">
+            <Skeleton class="h-4 w-72" />
+            <div class="flex gap-2">
+              <Skeleton class="h-12 w-40" />
+              <Skeleton class="h-12 w-40" />
+              <Skeleton class="h-12 w-40" />
+            </div>
           </Card.Content>
         </Card.Root>
       {/each}
@@ -234,49 +476,208 @@ import CalendarDaysIcon from 'lucide-svelte/icons/calendar-days'
       <Alert.Description>{errorMsg}</Alert.Description>
     </Alert.Root>
   {:else if phase === 'ok'}
-    {#if notice}
-      <Alert.Root>
-        <Alert.Title>Notice</Alert.Title>
-        <Alert.Description>{notice}</Alert.Description>
-      </Alert.Root>
-    {/if}
     {#if trains.length === 0}
-      <Card.Root>
-        <Card.Content class="py-10 text-center text-sm text-muted-foreground">
-          No trains found for this route/date.
-        </Card.Content>
-      </Card.Root>
+      <EmptyState
+        icon={CalendarDaysIcon}
+        title="No trains found"
+        hint="No availability data returned for this route and date."
+      />
     {:else}
-      <div class="grid gap-4">
-        {#each trains as tr, i ((asText(tr?.number) || `t-${i}`))}
-          {@const days = runDays(tr?.runs_on)}
-          <Card.Root>
-            <Card.Header class="gap-2">
-              <div class="flex flex-wrap items-center justify-between gap-2">
-                <Card.Title class="flex flex-wrap items-center gap-2">
-                  <TrainNumberBadge number={tr?.number} name={tr?.name} />
-                  <span>{asText(tr?.name) || 'Unknown train'}</span>
-                </Card.Title>
-                {#if days.length > 0}
-                  <RunsOnBadges days={days} format="short" />
-                {/if}
-              </div>
-              <Card.Description>
-                Dep {fmt(tr?.departure_time)} · Arr {fmt(tr?.arrival_time)}
-              </Card.Description>
-            </Card.Header>
-            <Card.Content>
-              <DataTable
-                columns={cols}
-                rows={Array.isArray(tr?.availability) ? tr.availability : []}
-                rowKey={(r, j) => j}
-                cells={{ status: statusCell }}
-                empty="No availability rows returned."
-              />
-            </Card.Content>
-          </Card.Root>
-        {/each}
+      <div
+        class="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border bg-card px-3 py-2"
+        role="status"
+      >
+        <span class="font-mono text-xs font-semibold tabular-nums">{trains.length}</span>
+        <span class="text-xs text-muted-foreground">trains</span>
+        <span class="inline-flex items-center gap-1 text-xs">
+          <span class="size-1.5 rounded-full {stats.availRows > 0 ? 'bg-emerald-500' : 'bg-red-500'}"></span>
+          <span class="font-medium tabular-nums">{stats.availRows}</span>
+          <span class="text-muted-foreground">classes open now</span>
+        </span>
+        {#if stats.cheapest}
+          <span class="text-xs">
+            <span class="text-muted-foreground">Cheapest</span>
+            <span class="font-mono font-medium">₹{stats.cheapest.fare.toLocaleString('en-IN')}</span>
+            <span class="text-muted-foreground">· {stats.cheapest.cls}{stats.cheapest.number ? ` · ${stats.cheapest.number}` : ''}</span>
+          </span>
+        {/if}
+        {#if stats.bestChance}
+          <span class="text-xs">
+            <span class="text-muted-foreground">Best chance</span>
+            <span class="font-mono font-medium tabular-nums">{stats.bestChance.pct}%</span>
+            <span class="text-muted-foreground">· {stats.bestChance.cls}{stats.bestChance.number ? ` · ${stats.bestChance.number}` : ''}</span>
+          </span>
+        {/if}
+        <DataSourceBadge source={data?.data_source} class="ml-auto" />
+        {#if notice}
+          <p class="w-full truncate text-[11px] text-muted-foreground" title={notice}>{notice}</p>
+        {/if}
       </div>
+
+      <div class="flex flex-wrap items-center gap-2">
+        <Button
+          type="button"
+          variant={availableOnly ? 'default' : 'outline'}
+          size="sm"
+          class="h-7 text-xs"
+          aria-pressed={availableOnly}
+          onclick={() => (availableOnly = !availableOnly)}
+        >
+          Available only
+        </Button>
+        {#if allClasses.length > 1}
+          <div class="flex flex-wrap items-center gap-1" role="group" aria-label="Filter classes">
+            {#each allClasses as c (c)}
+              <button
+                type="button"
+                aria-pressed={!hiddenClasses.includes(c)}
+                title={hiddenClasses.includes(c) ? `Show ${c}` : `Hide ${c}`}
+                onclick={() => toggleClass(c)}
+                class={`inline-flex h-6 cursor-pointer items-center rounded-md border px-2 font-mono text-[11px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                  hiddenClasses.includes(c)
+                    ? 'border-border text-muted-foreground opacity-50 hover:opacity-100'
+                    : 'border-transparent bg-secondary text-secondary-foreground hover:bg-secondary/80'
+                }`}
+              >
+                {c}
+              </button>
+            {/each}
+          </div>
+        {/if}
+        <div class="ml-auto flex items-center gap-2">
+          <Select.Root type="single" bind:value={sortKey}>
+            <Select.Trigger class="h-7 w-32 text-xs" aria-label="Sort trains by">
+              {SORTS.find(([k]) => k === sortKey)?.[1] ?? 'Departure'}
+            </Select.Trigger>
+            <Select.Content>
+              {#each SORTS as [k, label] (k)}
+                <Select.Item value={k} {label} />
+              {/each}
+            </Select.Content>
+          </Select.Root>
+          <div
+            class="flex overflow-hidden rounded-md border"
+            role="group"
+            aria-label="Result layout"
+          >
+            <button
+              type="button"
+              aria-pressed={view === 'cards'}
+              title="Card view"
+              onclick={() => (view = 'cards')}
+              class={`cursor-pointer px-2.5 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${view === 'cards' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}
+            >
+              Cards
+            </button>
+            <button
+              type="button"
+              aria-pressed={view === 'matrix'}
+              title="Matrix view"
+              onclick={() => (view = 'matrix')}
+              class={`cursor-pointer px-2.5 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${view === 'matrix' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}
+            >
+              Matrix
+            </button>
+          </div>
+        </div>
+        {#if filtersActive || sortKey !== 'departure'}
+          <p class="w-full text-xs text-muted-foreground">
+            Showing {filteredTrains.length} of {trains.length} trains
+            <button
+              type="button"
+              class="ml-2 underline underline-offset-2 hover:text-foreground"
+              onclick={resetFilters}
+            >
+              Reset
+            </button>
+          </p>
+        {/if}
+      </div>
+
+      {#if filteredTrains.length === 0}
+        <Card.Root>
+          <Card.Content class="py-8 text-center text-sm text-muted-foreground">
+            No trains match the current filters.
+          </Card.Content>
+        </Card.Root>
+      {:else if view === 'matrix'}
+        <div class="rounded-lg border">
+          <Table.Root class="text-xs">
+            <Table.Header>
+              <Table.Row>
+                <Table.Head
+                  class="sticky left-0 z-10 min-w-52 border-r bg-background"
+                  scope="col"
+                >
+                  Train
+                </Table.Head>
+                {#each matrixClasses as c (c)}
+                  <Table.Head class="text-center font-mono" scope="col">{c}</Table.Head>
+                {/each}
+              </Table.Row>
+            </Table.Header>
+            <Table.Body>
+              {#each filteredTrains as tr, i (asText(tr?.number) || `m-${i}`)}
+                <Table.Row>
+                  <Table.Cell class="sticky left-0 z-10 border-r bg-background">
+                    <div class="flex items-center gap-1.5">
+                      <TrainNumberBadge number={tr?.number} name={tr?.name} />
+                      <span class="max-w-36 truncate font-medium">{asText(tr?.name)}</span>
+                    </div>
+                    <div class="mt-0.5 font-mono text-[10px] tabular-nums text-muted-foreground">
+                      {fmt(tr?.departure_time)} → {fmt(tr?.arrival_time)} · {durationLabel(tr)}
+                    </div>
+                  </Table.Cell>
+                  {#each matrixClasses as c (c)}
+                    {@const row = visibleRows(tr).find((r) => classCode(r) === c)}
+                    <Table.Cell class="align-top">
+                      {#if row}
+                        <AvailabilityStatusBadge status={row?.status} size="xs" class="max-w-28" />
+                        {#if numOrNull(row?.fare) != null}
+                          <div class="mt-0.5 font-mono text-[10px] tabular-nums text-muted-foreground">
+                            ₹{numOrNull(row?.fare).toLocaleString('en-IN')}
+                          </div>
+                        {/if}
+                      {:else}
+                        <span class="text-muted-foreground">—</span>
+                      {/if}
+                    </Table.Cell>
+                  {/each}
+                </Table.Row>
+              {/each}
+            </Table.Body>
+          </Table.Root>
+        </div>
+      {:else}
+        <div class="grid gap-2.5">
+          {#each filteredTrains as tr, i (asText(tr?.number) || `c-${i}`)}
+            {@const flags = dayFlags(tr?.runs_on)}
+            <article class="rounded-lg border bg-card">
+              <div class="flex flex-wrap items-center gap-x-2.5 gap-y-1 px-3 py-2">
+                <div class="flex min-w-0 items-center gap-2">
+                  <TrainNumberBadge number={tr?.number} name={tr?.name} />
+                  <span class="truncate text-sm font-medium">{asText(tr?.name) || 'Unknown train'}</span>
+                </div>
+                <div class="ml-auto flex flex-wrap items-center gap-2">
+                  {#if flags}
+                    <RunsOnBadges {flags} format="letter" />
+                  {/if}
+                  <span class="font-mono text-xs tabular-nums text-muted-foreground">
+                    {fmt(tr?.departure_time)} → {fmt(tr?.arrival_time)} · {durationLabel(tr)}
+                  </span>
+                </div>
+              </div>
+              <div class="flex flex-wrap gap-1.5 border-t px-3 py-2">
+                {#each visibleRows(tr) as r, j (j)}
+                  {@render avlChip(r)}
+                {:else}
+                  <span class="text-xs text-muted-foreground">No class-level status returned.</span>
+                {/each}
+              </div>
+            </article>
+          {/each}
+        </div>
+      {/if}
     {/if}
   {:else}
     <EmptyState
