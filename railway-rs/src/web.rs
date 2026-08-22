@@ -67,7 +67,7 @@ pub fn router(state: AppState, static_dir: PathBuf) -> Router {
                             Ok(bytes) => ([(axum::http::header::CONTENT_TYPE, "text/html")], bytes),
                             Err(_) => (
                                 [(axum::http::header::CONTENT_TYPE, "text/html")],
-                                b"<!doctype html><title>RailCompanion</title><p>UI bundle missing"
+                                b"<!doctype html><title>Train Bro</title><p>UI bundle missing"
                                     .to_vec(),
                             ),
                         }

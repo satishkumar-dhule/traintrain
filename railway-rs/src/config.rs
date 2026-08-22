@@ -16,6 +16,13 @@ use std::time::Duration;
 /// - `RAILWAY_SOURCE_IR_BASE`        (default `https://www.indianrail.gov.in`)
 /// - `RAILWAY_SOURCE_IRCTC_BASE`     (default `https://www.irctc.co.in`)
 /// - `RAILWAY_SOURCE_PAYTM_BASE`     (default `https://travel.paytm.com`)
+/// - `RAILWAY_AI_ENABLED`    (default `true`) — master switch for AI endpoints
+/// - `RAILWAY_AI_BASE`       (default `https://opencode.ai/zen/v1`) — OpenAI-compatible
+///                           inference gateway; override to point at any compatible server
+/// - `RAILWAY_AI_MODEL`      (default `x-preview-f-free` — keyless free Zen model)
+/// - `RAILWAY_AI_API_KEY`    (optional) — sent as `Authorization: Bearer` when set;
+///                           the free tier works without any key (no login required)
+/// - `RAILWAY_AI_TIMEOUT_SECS` (default `120`) — total timeout for LLM completions
 ///
 /// Every source URL is prefixed by these base URLs so tests can point them at
 /// a local mock upstream. Real deployments keep the defaults.
@@ -33,6 +40,11 @@ pub struct Config {
     pub ir_base: String,
     pub irctc_base: String,
     pub paytm_base: String,
+    pub ai_enabled: bool,
+    pub ai_base: String,
+    pub ai_model: String,
+    pub ai_api_key: Option<String>,
+    pub ai_timeout: Duration,
 }
 
 impl Default for Config {
@@ -50,6 +62,11 @@ impl Default for Config {
             ir_base: "https://www.indianrail.gov.in".to_string(),
             irctc_base: "https://www.irctc.co.in".to_string(),
             paytm_base: "https://travel.paytm.com".to_string(),
+            ai_enabled: true,
+            ai_base: "https://opencode.ai/zen/v1".to_string(),
+            ai_model: "x-preview-f-free".to_string(),
+            ai_api_key: None,
+            ai_timeout: Duration::from_secs(120),
         }
     }
 }
@@ -78,6 +95,16 @@ impl Config {
             ir_base: std::env::var("RAILWAY_SOURCE_IR_BASE").unwrap_or(d.ir_base),
             irctc_base: std::env::var("RAILWAY_SOURCE_IRCTC_BASE").unwrap_or(d.irctc_base),
             paytm_base: std::env::var("RAILWAY_SOURCE_PAYTM_BASE").unwrap_or(d.paytm_base),
+            ai_enabled: std::env::var("RAILWAY_AI_ENABLED")
+                .map(|v| !matches!(v.trim().to_ascii_lowercase().as_str(), "0" | "false" | "off" | "no"))
+                .unwrap_or(d.ai_enabled),
+            ai_base: std::env::var("RAILWAY_AI_BASE").unwrap_or(d.ai_base),
+            ai_model: std::env::var("RAILWAY_AI_MODEL").unwrap_or(d.ai_model),
+            ai_api_key: std::env::var("RAILWAY_AI_API_KEY").ok().filter(|v| !v.trim().is_empty()),
+            ai_timeout: Duration::from_secs(env_u64(
+                "RAILWAY_AI_TIMEOUT_SECS",
+                d.ai_timeout.as_secs(),
+            )),
         }
     }
 

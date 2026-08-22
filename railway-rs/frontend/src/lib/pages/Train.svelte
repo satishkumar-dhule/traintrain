@@ -1,6 +1,6 @@
 <script>
   import { api } from '$lib/api.js'
-  import { navigate } from '$lib/router.svelte.js'
+  import { navigate, route } from '$lib/router.svelte.js'
   import * as Card from '$lib/components/ui/card/index.js'
   import * as Tabs from '$lib/components/ui/tabs/index.js'
   import AutoCompleteInput from '$lib/components/AutoCompleteInput.svelte'
@@ -51,8 +51,6 @@
     if (res.ok) {
       data = res.data
       phase = 'ok'
-      const want = `/train/${t}/${VIEW_TO_TAB[activeTab] ?? 'status'}`
-      if (window.location.pathname !== want) navigate(want)
     } else {
       phase = 'error'
       errorMsg = res.error || `HTTP ${res.status}`
@@ -93,6 +91,8 @@
     const t = String(n ?? query ?? '').trim()
     if (!t) return
     committed = t
+    const want = `/train/${encodeURIComponent(t)}/${VIEW_TO_TAB[activeTab] ?? 'status'}`
+    if (route.path !== want) navigate(want)
     loadStatus(t)
   }
 

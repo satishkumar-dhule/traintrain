@@ -101,7 +101,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let addr: SocketAddr = format!("0.0.0.0:{}", config.port).parse()?;
     tracing::info!(
-        "RailCompanion (railway-rs) serving on {addr} | live sources: railyatri, etrain, NTES, IRCTC | data: {stations} stations, {trains} trains | observability: /metrics, /rail-api/observability, /rail-api/logs"
+        "Train Bro (railway-rs) serving on {addr} | live sources: railyatri, etrain, NTES, IRCTC | data: {stations} stations, {trains} trains | observability: /metrics, /rail-api/observability, /rail-api/logs"
     );
 
     let listener = tokio::net::TcpListener::bind(addr).await?;

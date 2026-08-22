@@ -1,6 +1,6 @@
 # railway-rs
 
-RailCompanion - an Indian Railways companion backend (Rust rewrite). Axum JSON API plus a vanilla-JS SPA that serves live railway data straight from public Indian Railways sources - never simulated, never fabricated.
+Train Bro - an Indian Railways companion backend (Rust rewrite). Axum JSON API plus a vanilla-JS SPA that serves live railway data straight from public Indian Railways sources - never simulated, never fabricated.
 
 ## Features
 

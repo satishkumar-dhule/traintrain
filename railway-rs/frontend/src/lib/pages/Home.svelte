@@ -147,7 +147,7 @@
 
 <section class="grid gap-8">
   <div class="grid gap-3">
-    <h1 class="text-4xl font-semibold tracking-tight">RailCompanion</h1>
+    <h1 class="text-4xl font-semibold tracking-tight">Train Bro</h1>
     <p class="max-w-xl text-muted-foreground">
       Live Indian Railways data served by a Rust backend — honest sources, no accounts,
       no fabricated numbers.

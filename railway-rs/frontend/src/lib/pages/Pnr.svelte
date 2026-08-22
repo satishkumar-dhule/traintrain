@@ -1,6 +1,6 @@
 <script>
   import { api } from '$lib/api.js'
-  import { navigate } from '$lib/router.svelte.js'
+  import { navigate, route } from '$lib/router.svelte.js'
   import * as Card from '$lib/components/ui/card/index.js'
   import { Button } from '$lib/components/ui/button/index.js'
   import { Input } from '$lib/components/ui/input/index.js'
@@ -71,6 +71,8 @@
     const t = asText(target ?? query)
     if (!/^\d{10}$/.test(t)) return
     committed = t
+    const want = `/pnr/${t}`
+    if (route.path !== want) navigate(want)
     phase = data ? 'refreshing' : 'loading'
     errorMsg = null
     let path = `/rail-api/pnr?pnr=${t}`
@@ -86,8 +88,6 @@
       captchaPnr = null
       captchaText = ''
       remember(t)
-      const want = `/pnr/${t}`
-      if (window.location.pathname !== want) navigate(want)
     } else if (res.status === 428 && res.body?.error === 'captcha_required') {
       captcha = res.body
       captchaPnr = t

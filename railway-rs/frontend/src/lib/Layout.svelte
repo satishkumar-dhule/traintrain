@@ -68,7 +68,7 @@
       <span class="flex size-8 items-center justify-center rounded-md bg-primary text-primary-foreground">
         <TrainFront class="size-4" />
       </span>
-      <span class="font-semibold tracking-tight">RailCompanion</span>
+      <span class="font-semibold tracking-tight">Train Bro</span>
     </a>
     <nav class="flex-1 space-y-1 overflow-y-auto p-3">
       {#each items as item (item.href)}
@@ -119,7 +119,7 @@
       <span class="flex size-7 items-center justify-center rounded-md bg-primary text-primary-foreground">
         <TrainFront class="size-4" />
       </span>
-      <span class="whitespace-nowrap font-semibold tracking-tight">RailCompanion</span>
+      <span class="whitespace-nowrap font-semibold tracking-tight">Train Bro</span>
     </a>
     <button
       type="button"

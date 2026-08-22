@@ -1,6 +1,6 @@
 <script>
   import { api } from '$lib/api.js'
-  import { navigate } from '$lib/router.svelte.js'
+  import { navigate, route } from '$lib/router.svelte.js'
   import * as Card from '$lib/components/ui/card/index.js'
   import { Button } from '$lib/components/ui/button/index.js'
   import { Input } from '$lib/components/ui/input/index.js'
@@ -74,10 +74,6 @@
     if (res.ok) {
       data = res.data
       phase = 'ok'
-      const want =
-        '/availability/' +
-        [s, d, dt].filter(Boolean).map((p) => encodeURIComponent(p)).join('/')
-      if (window.location.pathname !== want) navigate(want)
     } else {
       phase = 'error'
       errorMsg = res.error || `HTTP ${res.status}`
@@ -89,7 +85,11 @@
     const d = asText(to).toUpperCase()
     const dt = asText(journeyDate)
     if (!s || !d || !DATE_RE.test(dt)) return
-    runSearch(s, d, dt, `${s}/${d}/${dt}`)
+    const want =
+      '/availability/' +
+      [s, d, dt].filter(Boolean).map((p) => encodeURIComponent(p)).join('/')
+    if (route.path !== want) navigate(want)
+    else runSearch(s, d, dt, `${s}/${d}/${dt}`)
   }
 
   function swap() {

@@ -1,4 +1,4 @@
-/* app.js - application shell for RailCompanion v5 ("Transit").
+/* app.js - application shell for Train Bro v5 ("Transit").
    Responsibilities:
      - hash router over the Routes table (sections: home/train/station/plan/system)
      - section mounting with view transitions, scroll memory and focus management

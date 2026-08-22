@@ -49,7 +49,7 @@ window.RailLog = (() => {
     if (entries.length > MAX) entries.splice(0, entries.length - MAX);
     persist();
     const line = JSON.stringify({ ty: entry.ty, m: entry.m, d: entry.d });
-    const prefix = `[RailCompanion][${entry.ts}]`;
+    const prefix = `[Train Bro][${entry.ts}]`;
     if (level === 'error') console.error(prefix, line);
     else if (level === 'warn') console.warn(prefix, line);
     else console.log(prefix, line);

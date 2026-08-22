@@ -1,7 +1,7 @@
 <script>
   import { untrack } from 'svelte'
   import { api } from '$lib/api.js'
-  import { navigate } from '$lib/router.svelte.js'
+  import { navigate, route } from '$lib/router.svelte.js'
   import * as Card from '$lib/components/ui/card/index.js'
   import { Button } from '$lib/components/ui/button/index.js'
   import { Input } from '$lib/components/ui/input/index.js'
@@ -68,7 +68,6 @@
     if (res.ok) {
       live = res.data
       livePhase = 'ok'
-      if (norm(code) !== c) navigate(`/station/${c}/live`)
     } else {
       livePhase = 'error'
       liveError = res.error || `HTTP ${res.status}`
@@ -95,7 +94,6 @@
     if (res.ok) {
       timetable = res.data
       ttPhase = 'ok'
-      if (norm(code) !== c) navigate(`/station/${c}/timetable`)
     } else {
       ttPhase = 'error'
       ttError = res.error || `HTTP ${res.status}`
@@ -113,6 +111,8 @@
     const c = norm(item && item.code)
     if (!c) return
     committedCode = c
+    const want = `/station/${encodeURIComponent(c)}/${tab}`
+    if (route.path !== want) navigate(want)
     if (tab === 'live') loadLive(c)
   }
 
@@ -120,6 +120,8 @@
     const c = norm(query)
     if (!c) return
     committedCode = c
+    const want = `/station/${encodeURIComponent(c)}/${tab === 'timetable' ? 'timetable' : 'live'}`
+    if (route.path !== want) navigate(want)
     if (tab === 'timetable') loadTimetable(c)
     else loadLive(c)
   }

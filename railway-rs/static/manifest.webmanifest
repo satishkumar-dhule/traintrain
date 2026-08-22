@@ -1,6 +1,6 @@
 {
-  "name": "RailCompanion — Indian Railways live companion",
-  "short_name": "RailCompanion",
+  "name": "Train Bro — Indian Railways live companion",
+  "short_name": "Train Bro",
   "description": "Live Indian Railways data — train spot, schedules, station boards, availability and coach charts. No accounts, no keys, honest data.",
   "start_url": "/#/",
   "scope": "/",
