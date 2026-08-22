@@ -11,6 +11,14 @@
   import * as Alert from '$lib/components/ui/alert/index.js'
 import DataTable from '$lib/components/DataTable.svelte'
 import EmptyState from '$lib/components/EmptyState.svelte'
+import {
+  TrainNumberBadge,
+  StationCodeBadge,
+  DelayBadge,
+  RunsOnBadges,
+  HaltStatusBadge,
+  parseDelayMinutes
+} from '$lib/components/badges/index.js'
 import ActivityIcon from 'lucide-svelte/icons/activity'
   import CalendarClockIcon from 'lucide-svelte/icons/calendar-clock'
   import ChartColumnIcon from 'lucide-svelte/icons/chart-no-axes-column'
@@ -143,10 +151,11 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
     return () => clearInterval(timer)
   })
 
-  function delayBadge(d) {
-    if (d == null) return { variant: 'outline', text: '—' }
-    if (d > 0) return { variant: 'destructive', text: `${d}m late` }
-    return { variant: 'secondary', text: 'on time' }
+  function delayText(d) {
+    const mins = parseDelayMinutes(d)
+    if (mins == null) return '—'
+    if (mins > 0) return `${mins} min late`
+    return 'on time'
   }
 
   function fmtTime(v) {
@@ -237,8 +246,8 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
       key: 'delay',
       label: 'Delay',
       class: 'w-28',
-      value: (s) => delayBadge(s.delay_minutes).text,
-      sortValue: (s) => numOrNull(s.delay_minutes),
+      value: (s) => delayText(s.delay_minutes),
+      sortValue: (s) => parseDelayMinutes(s.delay_minutes),
     },
     {
       key: 'status',

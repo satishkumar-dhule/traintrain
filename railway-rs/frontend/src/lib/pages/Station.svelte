@@ -14,6 +14,14 @@
 import AutoCompleteInput from '$lib/components/AutoCompleteInput.svelte'
 import DataTable from '$lib/components/DataTable.svelte'
 import EmptyState from '$lib/components/EmptyState.svelte'
+import {
+  TrainNumberBadge,
+  StationCodeBadge,
+  DelayBadge,
+  RunsOnBadges,
+  StatusBadge,
+  CountBadge
+} from '$lib/components/badges/index.js'
   import ActivityIcon from 'lucide-svelte/icons/activity'
   import CalendarClockIcon from 'lucide-svelte/icons/calendar-clock'
 
@@ -195,25 +203,25 @@ import EmptyState from '$lib/components/EmptyState.svelte'
 </script>
 
 {#snippet liveTrainCell(t)}
-  <span class="font-mono text-xs text-muted-foreground">{t.number}</span>
-  <span class="ml-2 font-medium">{t.name}</span>
+  <span class="flex items-center gap-2">
+    <TrainNumberBadge number={t.number} name={t.name} />
+    <span class="font-medium">{t.name}</span>
+  </span>
 {/snippet}
 
 {#snippet liveDelayCell(t)}
-  {#if Number(t.delay_arr) > 0}
-    <Badge variant="destructive">{t.delay_arr}m</Badge>
-  {:else}
-    <Badge variant="secondary">on time</Badge>
-  {/if}
+  <DelayBadge minutes={t.delay_arr} compact />
 {/snippet}
 
 {#snippet ttTrainCell(t)}
-  <span class="font-mono text-xs text-muted-foreground">{t.number}</span>
-  <span class="ml-2 font-medium">{t.name}</span>
+  <span class="flex items-center gap-2">
+    <TrainNumberBadge number={t.number} name={t.name} />
+    <span class="font-medium">{t.name}</span>
+  </span>
 {/snippet}
 
 {#snippet ttTypeCell(t)}
-  {#if t.train_type}<Badge variant="outline">{t.train_type}</Badge>{:else}—{/if}
+  {#if t.train_type}<StatusBadge tone="outline">{t.train_type}</StatusBadge>{:else}—{/if}
 {/snippet}
 
 {#snippet ttClassesCell(t)}
@@ -222,15 +230,7 @@ import EmptyState from '$lib/components/EmptyState.svelte'
 
 {#snippet ttDaysCell(t)}
   {@const days = Array.isArray(t.days) ? t.days : []}
-  <div class="flex flex-wrap gap-1">
-    {#each DAY_LETTERS as letter, i (i)}
-      {#if days[i]}
-        <Badge variant="secondary" class="px-1.5 text-[10px]">{letter}</Badge>
-      {:else}
-        <Badge variant="outline" class="px-1.5 text-[10px] opacity-40">{letter}</Badge>
-      {/if}
-    {/each}
-  </div>
+  <RunsOnBadges days={days} />
 {/snippet}
 
 <section class="grid gap-6" class:idle-center={!committedCode}>
@@ -305,7 +305,7 @@ import EmptyState from '$lib/components/EmptyState.svelte'
               <Card.Title>{live.station ?? '—'} departures &amp; arrivals</Card.Title>
               <Card.Description>{live.trains?.length ?? 0} trains within {live.hours}h</Card.Description>
             </div>
-            <Badge variant="secondary">{live.hours}h window</Badge>
+            <StatusBadge tone="info">{live.hours}h window</StatusBadge>
           </Card.Header>
           <Card.Content>
             <DataTable
@@ -345,7 +345,7 @@ import EmptyState from '$lib/components/EmptyState.svelte'
               <Card.Title>{timetable.station_name ?? timetable.station ?? '—'} timetable</Card.Title>
               <Card.Description>{timetable.total ?? timetable.trains?.length ?? 0} trains{timetable.date ? ` · ${timetable.date}` : ''}</Card.Description>
             </div>
-            <Badge variant="secondary">{timetable.total ?? timetable.trains?.length ?? 0} total</Badge>
+            <CountBadge value={timetable.total ?? timetable.trains?.length ?? 0} label="total" />
           </Card.Header>
           <Card.Content>
             <DataTable

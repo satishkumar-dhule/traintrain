@@ -1,4 +1,5 @@
 <script>
+  import { untrack } from 'svelte'
   import { api } from './api.js'
   import { Button } from '$lib/components/ui/button/index.js'
   import * as Card from '$lib/components/ui/card/index.js'
@@ -24,7 +25,9 @@
   }
 
   $effect(() => {
-    load()
+    // load() reads and writes `inflight`/`state`; untrack keeps those writes
+    // from re-triggering this effect (which previously refetched forever).
+    untrack(() => load())
   })
 
   let sources = $derived(state.data?.sources ?? [])
