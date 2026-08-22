@@ -46,10 +46,14 @@ node .../ui-check.mjs --path /availability \
 node .../ui-check.mjs --path / --vp 1280x800 --full
 ```
 
-Step syntax: `fill:<css>=<value>` · `click:text=<text>` · `wait:<ms>` ·
-`shot:<name>` · `press:Enter`. Screenshots land in
-`/tmp/opencode/ui-harness/shots/<name>-<viewport>.png`; read them back with the
-Read tool (it renders images).
+Step syntax: `fill:<css>=<value>` · `click:<button-name>` (role=button,
+exact match, scoped to `<main>` first so header icons with the same name don't
+win) · `clicktext:<text>` · `press:<key>` · `esc` · `wait:<ms>` ·
+`shot:<name>`. Screenshots land in
+`/tmp/opencode/ui-harness/shots/<route-slug>/<name>-<viewport>.png`; read them
+back with the Read tool (it renders images). A click that needs
+`force:true` prints a NOTE — that means a sticky bar/overlay covers the
+control at that scroll position, which is itself a UX finding.
 
 ## 3. Read the output
 

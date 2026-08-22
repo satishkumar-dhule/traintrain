@@ -254,8 +254,8 @@ import {
     <p class="text-sm text-muted-foreground">Heritage trains and running parcel specials, live from NTES.</p>
   </div>
 
-  <Tabs.Root bind:value={tab} onValueChange={onTabChange}>
-    <Tabs.List class="w-full justify-start">
+  <Tabs.Root class="min-w-0" bind:value={tab} onValueChange={onTabChange}>
+    <Tabs.List class="w-full justify-start overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
       <Tabs.Trigger value="heritage"><LandmarkIcon class="mr-2 size-4" />Heritage</Tabs.Trigger>
       <Tabs.Trigger value="parcel"><PackageIcon class="mr-2 size-4" />Parcel</Tabs.Trigger>
     </Tabs.List>
@@ -292,8 +292,9 @@ import {
           <Card.Header class="flex-row items-center justify-between space-y-0">
             <div class="grid gap-1">
               <Card.Title>Heritage trains</Card.Title>
-              <Card.Description>
-                {hTotal} train{hTotal === 1 ? '' : 's'}{hCaption ? ` · ${hCaption}` : ''}
+              <Card.Description class="flex flex-wrap items-center gap-x-1">
+                <span>{hTotal} train{hTotal === 1 ? '' : 's'}</span>
+                {#if hCaption}<span>· {hCaption}</span>{/if}
               </Card.Description>
             </div>
             <div class="flex flex-wrap items-center justify-end gap-2">

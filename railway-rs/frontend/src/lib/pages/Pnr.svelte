@@ -238,7 +238,7 @@ import {
           </Card.Title>
           <DataSourceBadge source={data.data_source} freshness={data.freshness} />
         </div>
-        <div class="flex flex-wrap items-center gap-x-5 gap-y-3 rounded-lg border bg-muted/40 px-4 py-3">
+        <div class="flex flex-wrap items-center gap-x-6 gap-y-3 rounded-lg border bg-muted/40 px-5 py-3.5">
           <div class="grid min-w-28 gap-0.5">
             <StationCodeBadge code={data.from?.code} name={data.from?.name} class="text-sm" />
             <span class="truncate text-xs text-muted-foreground">{fmt(data.from?.name)}</span>

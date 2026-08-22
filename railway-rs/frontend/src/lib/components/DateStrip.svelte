@@ -44,8 +44,8 @@
   }
 
   const TODAY = today()
-  const MIN = DATE_RE.test(String(min ?? '')) ? min : TODAY
-  const MAX = DATE_RE.test(String(max ?? '')) ? max : isoShift(TODAY, MAX_DAY)
+  const MIN = $derived(DATE_RE.test(String(min ?? '')) ? min : TODAY)
+  const MAX = $derived(DATE_RE.test(String(max ?? '')) ? max : isoShift(TODAY, MAX_DAY))
 
   // Empty/invalid parent values fall back to Today for strip positioning only;
   // the bound value is only written when the user picks a date.
@@ -81,7 +81,7 @@
 </script>
 
 <div
-  class={`flex items-center gap-1 rounded-lg border bg-card p-1 shadow-sm ${klass}`}
+  class={`flex w-full min-w-0 items-center gap-1 rounded-lg border bg-card px-1.5 py-1 shadow-sm ${klass}`}
   role="group"
   aria-label={label}
 >
@@ -98,7 +98,7 @@
   </Button>
   <div class="min-w-0 flex-1">
     <div
-      class="flex items-center gap-1 overflow-x-auto px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      class="flex items-center gap-0.5 overflow-x-auto px-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
     >
       {#each stripDates as iso (iso)}
         {@const active = iso === sel}
@@ -108,18 +108,18 @@
           aria-current={active ? 'date' : undefined}
           aria-label={`${label}: ${iso}`}
           onclick={() => pickDate(iso)}
-          class={`flex w-[3.4rem] shrink-0 cursor-pointer flex-col items-center rounded-md border px-1 py-1 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+          class={`flex w-[3.6rem] shrink-0 cursor-pointer flex-col items-center rounded-md border px-1 py-1 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
             active
               ? 'border-transparent bg-primary text-primary-foreground shadow-sm'
               : 'border-transparent hover:bg-muted'
           }`}
         >
           <span
-            class={`text-[9px] font-medium uppercase tracking-wide ${active ? 'opacity-80' : 'text-muted-foreground'}`}
+            class={`text-[10px] font-medium uppercase tracking-wide ${active ? 'opacity-80' : 'text-muted-foreground'}`}
           >
             {iso === TODAY ? 'Today' : weekdayShort(iso)}
           </span>
-          <span class="font-mono text-xs font-semibold tabular-nums">
+          <span class="font-mono text-[11px] font-semibold tabular-nums">
             {iso.slice(8)}&thinsp;{monthShort(iso)}
           </span>
         </button>
@@ -148,6 +148,6 @@
     }}
     aria-label={`${label} (calendar)`}
     title="Calendar"
-    class="h-8 w-36 shrink-0"
+    class="h-8 w-32 shrink-0 sm:w-36"
   />
 </div>

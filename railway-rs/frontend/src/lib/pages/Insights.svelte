@@ -121,8 +121,8 @@
 
   <Card.Root>
     <Card.Content class="grid gap-4">
-      <Tabs.Root bind:value={selected} onValueChange={resetResult}>
-        <Tabs.List class="w-full justify-start">
+      <Tabs.Root class="min-w-0" bind:value={selected} onValueChange={resetResult}>
+        <Tabs.List class="w-full justify-start overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {#each KINDS as k (k.value)}
             <Tabs.Trigger value={k.value}>
               <k.icon class="mr-2 size-4" />{k.label}

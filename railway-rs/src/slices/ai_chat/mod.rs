@@ -18,7 +18,7 @@ use axum::{Json, Router};
 use futures::Stream;
 use futures::StreamExt;
 use serde::Deserialize;
-use serde_json::json;
+use serde_json::{json, Value};
 
 use crate::core::ai::{AiEvent, AssembledToolCall, ChatMessage};
 use crate::core::error::AppError;
@@ -91,6 +91,8 @@ async fn chat_handler(
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(64);
     tokio::spawn(async move {
         let mut rounds = 0usize;
+        // Last successful projection per executed tool, feeding next-actions.
+        let mut last_results: Vec<(String, Value)> = Vec::new();
         let mut current: Option<AiEventStream> = Some(Box::pin(first));
         loop {
             rounds += 1;
@@ -141,6 +143,14 @@ async fn chat_handler(
 
             if calls.is_empty() {
                 if !errored {
+                    let items: Vec<Value> = tools::next_actions(&last_results)
+                        .into_iter()
+                        .map(|(label, prompt)| json!({ "label": label, "prompt": prompt }))
+                        .collect();
+                    let _ = tx
+                        .send(Ok(Event::default()
+                            .data(json!({"type": "actions", "items": items}).to_string())))
+                        .await;
                     let _ = tx.send(Ok(service::done_frame(usage.0, usage.1))).await;
                     tracing::info!(
                         source = "zen",
@@ -183,6 +193,25 @@ async fn chat_handler(
             }))
             .await;
             for (call, payload) in calls.iter().zip(results) {
+                // Rich-card frame: the projected tool output rendered as a UI
+                // component in the transcript. Budget-exhaustion markers are
+                // not card-worthy.
+                if let Ok(view) = serde_json::from_str::<Value>(&payload) {
+                    if view.get("context_budget_exhausted").is_none() {
+                        let _ = tx
+                            .send(Ok(Event::default().data(
+                                json!({
+                                    "type": "card",
+                                    "kind": call.name,
+                                    "call_id": call.id,
+                                    "data": view.clone(),
+                                })
+                                .to_string(),
+                            )))
+                            .await;
+                        last_results.push((call.name.to_string(), view));
+                    }
+                }
                 messages.push(ChatMessage::tool_result(call.id.clone(), payload));
             }
         }

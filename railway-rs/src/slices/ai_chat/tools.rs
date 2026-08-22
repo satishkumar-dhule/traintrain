@@ -25,6 +25,7 @@ pub const DEFAULT_BUDGET_CHARS: i64 = 24_000;
 const MAX_BETWEEN_TRAINS: usize = 12;
 const MAX_UPCOMING_STOPS: usize = 4;
 const SEARCH_DEFAULT_LIMIT: usize = 6;
+const MAX_SCHEDULE_STOPS: usize = 12;
 const SEARCH_MAX_LIMIT: usize = 8;
 const MAX_AVAILABILITY_TRAINS: usize = 8;
 const MAX_AVAILABILITY_CLASSES: usize = 6;
@@ -98,6 +99,28 @@ pub fn registry() -> Vec<ToolDef> {
                     "hours": {"type": "integer", "minimum": 1, "maximum": 4, "description": "Lookahead window in hours; default 2"}
                 },
                 "required": ["station"]
+            }),
+        },
+        ToolDef {
+            name: "train_schedule",
+            description: "Full ordered route of a train: every stop with arrival/departure times and halt minutes. Use when asked about a train's route, halts or timing at an intermediate station.",
+            parameters: json!({
+                "type": "object",
+                "properties": {"train": {"type": "string"}},
+                "required": ["train"]
+            }),
+        },
+        ToolDef {
+            name: "chart_status",
+            description: "IRCTC chart preparation status for a train and journey date: boarding station, whether coaches are assigned and how many.",
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "train": {"type": "string"},
+                    "date": {"type": "string", "description": "Journey date; defaults to today IST"},
+                    "station": {"type": "string", "description": "Boarding station code"}
+                },
+                "required": ["train"]
             }),
         },
         ToolDef {
@@ -248,7 +271,10 @@ async fn dispatch(state: &AppState, name: &str, args: &Value) -> Result<Value, A
                 crate::slices::availability::SourcePref::Auto,
             )
             .await?;
-            Ok(project_seat_availability(&dto))
+            let mut view = project_seat_availability(&dto);
+            view["src_code"] = json!(src);
+            view["dst_code"] = json!(dst);
+            Ok(view)
         }
         "station_board" => {
             let station = require_station(state, args, "station").await?;
@@ -262,6 +288,26 @@ async fn dispatch(state: &AppState, name: &str, args: &Value) -> Result<Value, A
             )
             .await?;
             Ok(project_station_board(&dto))
+        }
+        "train_schedule" => {
+            let train = require_train(args)?;
+            let dto =
+                crate::slices::schedule::service::Service::get_schedule(state, &train).await?;
+            Ok(project_schedule(&dto))
+        }
+        "chart_status" => {
+            let train = require_train(args)?;
+            let date = resolve_journey_date(args)?;
+            let station = args
+                .get("station")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            let dto =
+                crate::slices::chart::service::Service::get_chart(state, &train, &date, &station)
+                    .await?;
+            Ok(project_chart(&dto))
         }
         "search_rail" => {
             let query = require_str(args, "query")?;
@@ -401,6 +447,195 @@ fn project_average_delay(dto: &crate::models::AverageDelayResponse) -> Value {
 /// Seat-availability rows: trains carrying real class-wise status rank first
 /// (stable), everything is capped, fares/predictions ride along only when the
 /// source supplied them.
+/// Route timeline trimmed to the first MAX_SCHEDULE_STOPS stops with a
+/// total-count note; enough for "when does it reach X" without dumping 80
+/// rows into the context.
+fn project_schedule(dto: &crate::models::ScheduleResponse) -> Value {
+    let stops_all = dto.stops.as_deref().unwrap_or(&[]);
+    let stops: Vec<Value> = stops_all
+        .iter()
+        .take(MAX_SCHEDULE_STOPS)
+        .map(|s| {
+            json!({
+                "code": s.code,
+                "name": s.name,
+                "arr": s.arrival,
+                "dep": s.departure,
+                "day": s.day,
+                "km": s.distance_km.map(|d| d as i64),
+            })
+        })
+        .collect();
+    json!({
+        "train_number": dto.train_number,
+        "train_name": dto.train_name,
+        "running_days": dto.running_days,
+        "data_source": dto.source,
+        "total_stops": stops_all.len(),
+        "note": (stops_all.len() > MAX_SCHEDULE_STOPS)
+            .then(|| format!("showing first {MAX_SCHEDULE_STOPS} of {}", stops_all.len())),
+        "stops": stops,
+    })
+}
+
+fn project_chart(dto: &crate::models::ChartResponse) -> Value {
+    json!({
+        "train_number": dto.train_number,
+        "journey_date": dto.journey_date,
+        "boarding_station": dto.boarding_station,
+        "coach_count": dto.coaches.as_ref().map(Vec::len),
+        "data_source": dto.data_source,
+        "notice": dto.notice,
+    })
+}
+
+/// Suggested follow-ups derived from what the agent actually looked up this
+/// turn. Deterministic (no extra model call): each executed tool contributes
+/// at most one or two chips; duplicates are dropped, newest tools win, cap 4.
+pub fn next_actions(results: &[(String, Value)]) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = Vec::new();
+    let push = |out: &mut Vec<(String, String)>, label: String, prompt: String| {
+        if label.is_empty() || prompt.is_empty() {
+            return;
+        }
+        if !out.iter().any(|(l, _)| *l == label) {
+            out.push((label, prompt));
+        }
+    };
+
+    for (name, v) in results {
+        match name.as_str() {
+            "trains_between" => {
+                let first = v["trains"][0]["number"].as_str().unwrap_or("");
+                if !first.is_empty() {
+                    push(
+                        &mut out,
+                        format!("Track {first}"),
+                        format!("live status of {first}"),
+                    );
+                }
+                let (sc, dc) = (v["src_code"].as_str(), v["dst_code"].as_str());
+                if let (Some(sc), Some(dc)) = (sc, dc) {
+                    push(
+                        &mut out,
+                        format!("Availability {sc}→{dc}"),
+                        format!("seat availability from {sc} to {dc}"),
+                    );
+                }
+                let (sc, dc) = (v["src_code"].as_str(), v["dst_code"].as_str());
+                if let (Some(sc), Some(dc)) = (sc, dc) {
+                    push(
+                        &mut out,
+                        format!("Board at {sc}"),
+                        format!("station board {sc}"),
+                    );
+                    let _ = dc;
+                }
+            }
+            "live_status" => {
+                let num = v["train_number"].as_str().unwrap_or("");
+                if !num.is_empty() {
+                    push(
+                        &mut out,
+                        format!("Route of {num}"),
+                        format!("route of train {num}"),
+                    );
+                    push(
+                        &mut out,
+                        format!("Avg delay {num}"),
+                        format!("average delay of train {num}"),
+                    );
+                }
+            }
+            "seat_availability" => {
+                let (sc, dc) = (v["src_code"].as_str(), v["dst_code"].as_str());
+                if let (Some(sc), Some(dc)) = (sc, dc) {
+                    push(
+                        &mut out,
+                        format!("Board at {sc}"),
+                        format!("station board {sc}"),
+                    );
+                    push(
+                        &mut out,
+                        format!("Trains {sc}→{dc}"),
+                        format!("trains from {sc} to {dc}"),
+                    );
+                }
+            }
+            "station_board" => {
+                let code = v["station_code"].as_str().unwrap_or("");
+                let first = v["trains"][0]["number"]
+                    .as_str()
+                    .or(v["trains"][1]["number"].as_str())
+                    .unwrap_or("");
+                if !first.is_empty() {
+                    push(
+                        &mut out,
+                        format!("Track {first}"),
+                        format!("live status of {first}"),
+                    );
+                }
+                let _ = code;
+            }
+            "search_rail" => {
+                for hit in v["results"].as_array().unwrap_or(&vec![]) {
+                    let kind = hit["kind"].as_str().unwrap_or("");
+                    let code = hit["code"].as_str().unwrap_or("");
+                    if code.is_empty() {
+                        continue;
+                    }
+                    if kind == "station" && out.len() < 4 {
+                        push(
+                            &mut out,
+                            format!("Board {code}"),
+                            format!("station board {code}"),
+                        );
+                    } else if kind == "train" && out.len() < 4 {
+                        push(
+                            &mut out,
+                            format!("Track {code}"),
+                            format!("live status of {code}"),
+                        );
+                    }
+                }
+            }
+            "train_schedule" => {
+                let num = v["train_number"].as_str().unwrap_or("");
+                if !num.is_empty() {
+                    push(
+                        &mut out,
+                        format!("Chart status {num}"),
+                        format!("chart status of train {num}"),
+                    );
+                }
+            }
+            "chart_status" => {
+                let num = v["train_number"].as_str().unwrap_or("");
+                if !num.is_empty() {
+                    push(
+                        &mut out,
+                        format!("Track {num}"),
+                        format!("live status of {num}"),
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+
+    out.truncate(4);
+    if out.is_empty() {
+        return vec![
+            (
+                "Trains between stations".into(),
+                "which trains run from secunderabad to pune".into(),
+            ),
+            ("12951 today".into(), "live status of 12951".into()),
+        ];
+    }
+    out
+}
+
 fn project_seat_availability(dto: &crate::models::AvailabilityResponse) -> Value {
     let trains = dto.trains.as_deref().unwrap_or(&[]);
     let mut ranked: Vec<&crate::models::AvailabilityTrain> = trains
@@ -796,5 +1031,85 @@ mod tests {
             "2026-10-20"
         );
         assert!(resolve_journey_date(&json!({"date": "not-a-date"})).is_err());
+    }
+
+    fn chip(labels: &[(String, String)]) -> Vec<&str> {
+        labels.iter().map(|(l, _)| l.as_str()).collect()
+    }
+
+    #[test]
+    fn next_actions_tracks_first_train_from_between() {
+        let results = vec![(
+            "trains_between".to_string(),
+            json!({
+                "src_code": "SC", "dst_code": "PUNE",
+                "trains": [{"number": "17013", "name": "Humsafar"}]
+            }),
+        )];
+        let actions = next_actions(&results);
+        let labels = chip(&actions);
+        assert!(labels.contains(&"Track 17013"));
+        assert!(labels.contains(&"Availability SC→PUNE"));
+        assert_eq!(
+            actions[0],
+            ("Track 17013".into(), "live status of 17013".into())
+        );
+    }
+
+    #[test]
+    fn next_actions_dedupes_and_caps_at_four() {
+        let results = vec![
+            (
+                "trains_between".to_string(),
+                json!({"src_code":"SC","dst_code":"PUNE","trains":[{"number":"17013"}]}),
+            ),
+            ("live_status".to_string(), json!({"train_number":"17013"})),
+        ];
+        // "Track 17013" appears from both between and (via route chip) live —
+        // dedupe keeps one; total never exceeds 4.
+        let actions = next_actions(&results);
+        assert!(actions.len() <= 4);
+        let labels = chip(&actions);
+        let unique: std::collections::HashSet<_> = labels.iter().collect();
+        assert_eq!(unique.len(), labels.len());
+        assert_eq!(labels.iter().filter(|l| **l == "Track 17013").count(), 1);
+    }
+
+    #[test]
+    fn next_actions_schedule_chains_to_chart() {
+        let results = vec![(
+            "train_schedule".to_string(),
+            json!({"train_number": "12951"}),
+        )];
+        let actions = next_actions(&results);
+        assert_eq!(
+            actions[0],
+            (
+                "Chart status 12951".into(),
+                "chart status of train 12951".into()
+            )
+        );
+    }
+
+    #[test]
+    fn next_actions_search_suggests_board_or_track() {
+        let results = vec![(
+            "search_rail".to_string(),
+            json!({"query":"sec","results":[
+                {"kind":"station","code":"SC"},
+                {"kind":"train","code":"12723"}
+            ]}),
+        )];
+        let actions = next_actions(&results);
+        let labels = chip(&actions);
+        assert!(labels.contains(&"Board SC"));
+        assert!(labels.contains(&"Track 12723"));
+    }
+
+    #[test]
+    fn next_actions_falls_back_when_no_tools_ran() {
+        let actions = next_actions(&[]);
+        assert_eq!(actions.len(), 2);
+        assert!(!actions[0].0.is_empty() && !actions[0].1.is_empty());
     }
 }

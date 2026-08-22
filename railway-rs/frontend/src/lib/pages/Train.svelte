@@ -358,13 +358,13 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
       key: 'arrival_delay',
       label: 'Arrival delay',
       value: (s) => delayLabel(s.arrival_delay),
-      sortValue: (s) => numOrNull(s.arrival_delay),
+      sortValue: (s) => avgDelayMins(s.arrival_delay),
     },
     {
       key: 'departure_delay',
       label: 'Departure delay',
       value: (s) => delayLabel(s.departure_delay),
-      sortValue: (s) => numOrNull(s.departure_delay),
+      sortValue: (s) => avgDelayMins(s.departure_delay),
     },
   ]
 
@@ -408,6 +408,20 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
     if (/on time/i.test(str)) return 0
     const m = /(\d+)\s*min/i.exec(str)
     if (m) return Number(m[1])
+    return avgDelayMins(v)
+  }
+
+  /* NTES average-delay strings: "" (unknown), "On Time" (0), "HH:MM"
+     (hours:minutes late, e.g. "00:20"), or signed plain minutes ("+12").
+     → signed minutes when parseable; null otherwise. */
+  function avgDelayMins(v) {
+    const str = String(v ?? '').trim()
+    if (!str) return null
+    if (/on time/i.test(str)) return 0
+    let m = /^(\d{1,3}):(\d{2})$/.exec(str)
+    if (m) return Number(m[1]) * 60 + Number(m[2])
+    m = /^[+-]?\d+$/.exec(str)
+    if (m) return Number(str)
     return null
   }
 
@@ -419,23 +433,22 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
     let m = 0
     for (const s of stations ?? []) {
       for (const v of [s.arrival_delay, s.departure_delay]) {
-        const n = Number(v)
-        if (Number.isFinite(n) && n > m) m = n
+        const n = avgDelayMins(v)
+        if (n != null && n > m) m = n
       }
     }
     return m
   }
 
   function barPct(v, m) {
-    const n = Number(v)
-    if (!Number.isFinite(n)) return null
-    if (m <= 0) return 0
-    return Math.min(100, (n / m) * 100)
+    const n = avgDelayMins(v)
+    if (n == null || m <= 0) return n == null ? null : 0
+    return Math.min(100, Math.max(0, (n / m) * 100))
   }
 
   function delayLabel(v) {
-    const n = Number(v)
-    if (!Number.isFinite(n)) return '—'
+    const n = avgDelayMins(v)
+    if (n == null) return '—'
     return `${Math.round(n)}m`
   }
 </script>
@@ -553,8 +566,8 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
     />
   {/if}
 
-  <Tabs.Root bind:value={activeTab} onValueChange={onTabChange}>
-    <Tabs.List class="w-full justify-start">
+  <Tabs.Root class="min-w-0" bind:value={activeTab} onValueChange={onTabChange}>
+    <Tabs.List class="w-full justify-start overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
       <Tabs.Trigger value="status"><ActivityIcon class="mr-2 size-4" />Status</Tabs.Trigger>
       <Tabs.Trigger value="schedule"><CalendarClockIcon class="mr-2 size-4" />Schedule</Tabs.Trigger>
       <Tabs.Trigger value="avg"><ChartColumnIcon class="mr-2 size-4" />Avg delay</Tabs.Trigger>

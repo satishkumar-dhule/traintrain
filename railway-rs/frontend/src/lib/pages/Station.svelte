@@ -4,13 +4,13 @@
   import { navigate, route } from '$lib/router.svelte.js'
   import * as Card from '$lib/components/ui/card/index.js'
   import { Button } from '$lib/components/ui/button/index.js'
-  import { Input } from '$lib/components/ui/input/index.js'
   import { Label } from '$lib/components/ui/label/index.js'
   import * as Tabs from '$lib/components/ui/tabs/index.js'
   import * as Select from '$lib/components/ui/select/index.js'
   import { Skeleton } from '$lib/components/ui/skeleton/index.js'
   import * as Alert from '$lib/components/ui/alert/index.js'
 import AutoCompleteInput from '$lib/components/AutoCompleteInput.svelte'
+import DateStrip from '$lib/components/DateStrip.svelte'
 import DataTable from '$lib/components/DataTable.svelte'
 import EmptyState from '$lib/components/EmptyState.svelte'
 import RecentSearches from '$lib/components/RecentSearches.svelte'
@@ -330,7 +330,7 @@ import {
   <RunsOnBadges days={days} />
 {/snippet}
 
-<section class="grid gap-6" class:idle-center={!committedCode}>
+<section class="grid grid-cols-[minmax(0,1fr)] gap-6" class:idle-center={!committedCode}>
   <div class="grid gap-1">
     <h1 class="text-2xl font-semibold tracking-tight">Station board</h1>
     <p class="text-sm text-muted-foreground">Live board and full-day timetable for any station.</p>
@@ -367,10 +367,6 @@ import {
           </Select.Content>
         </Select.Root>
       </div>
-      <div class="grid gap-2">
-        <Label for="stn-date">Date (timetable)</Label>
-        <Input id="stn-date" type="date" bind:value={dateInput} class="w-40" />
-      </div>
       <Button
         onclick={showBoard}
         disabled={(tab === 'live' && (livePhase === 'loading' || livePhase === 'refreshing')) ||
@@ -399,6 +395,16 @@ import {
       {/if}
     </Card.Content>
   </Card.Root>
+
+  <DateStrip
+    id="stn-date"
+    bind:value={dateInput}
+    label="Timetable date"
+    class="sticky top-14 z-20 lg:top-0"
+    onchange={() => {
+      if (tab === 'timetable') ensureTimetable()
+    }}
+  />
 
   {#if nearbyPhase === 'message'}
     <Alert.Root role="status">
@@ -469,8 +475,8 @@ import {
     />
   {/if}
 
-  <Tabs.Root bind:value={tab} onValueChange={onTabChange}>
-    <Tabs.List class="w-full justify-start">
+  <Tabs.Root class="min-w-0" bind:value={tab} onValueChange={onTabChange}>
+    <Tabs.List class="w-full justify-start overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
       <Tabs.Trigger value="live"><ActivityIcon class="mr-2 size-4" />Live</Tabs.Trigger>
       <Tabs.Trigger value="timetable"><CalendarClockIcon class="mr-2 size-4" />Timetable</Tabs.Trigger>
     </Tabs.List>
@@ -494,7 +500,7 @@ import {
               <Card.Title>{live.station ?? '—'} departures &amp; arrivals</Card.Title>
               <Card.Description>{live.trains?.length ?? 0} trains within {live.hours}h</Card.Description>
             </div>
-            <StatusBadge tone="info">{live.hours}h window</StatusBadge>
+            <span class="inline-flex items-center rounded-md bg-sky-500/10 px-2 py-0.5 text-xs font-medium text-sky-700 dark:text-sky-400">{live.hours}h window</span>
           </Card.Header>
           <Card.Content>
             <DataTable

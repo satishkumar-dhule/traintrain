@@ -8,6 +8,7 @@
   import { Separator } from '$lib/components/ui/separator/index.js'
   import { Button } from '$lib/components/ui/button/index.js'
   import AutoCompleteInput from '$lib/components/AutoCompleteInput.svelte'
+  import DateStrip from '$lib/components/DateStrip.svelte'
   import { StationCodeBadge } from '$lib/components/badges/index.js'
   import TrainFront from 'lucide-svelte/icons/train-front'
   import Building2 from 'lucide-svelte/icons/building-2'
@@ -319,12 +320,12 @@
 
 <section class="grid gap-8">
   <div class="grid gap-3">
-    <h1 class="text-4xl font-semibold tracking-tight">Train Bro</h1>
+    <h1 class="text-3xl font-semibold tracking-tight">Train Bro</h1>
     <p class="max-w-xl text-muted-foreground">
       Live train status, station boards, journey planning and PNR — free, no accounts.
     </p>
 
-    <div class="flex flex-wrap items-center gap-2 pt-1">
+    <div class="flex flex-wrap items-center gap-2 pt-2">
       <span class="text-xs text-muted-foreground">Popular trains</span>
       {#each popularTrains as n (n)}
         <button
@@ -338,8 +339,8 @@
     </div>
   </div>
 
-  <Card.Root class="border-primary/30 transition-colors hover:border-primary/60">
-    <form class="grid gap-4 p-6" onsubmit={submitPlan}>
+  <Card.Root class="transition-colors hover:border-primary/50">
+    <form class="grid grid-cols-[minmax(0,1fr)] gap-4 p-6" onsubmit={submitPlan}>
       <div class="flex items-start gap-3">
         <span class="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
           <MapPinIcon class="size-5" />
@@ -426,26 +427,23 @@
         </div>
       {/if}
 
-      <div class="flex flex-wrap items-end gap-2">
-        <div class="grid min-w-44 flex-1 gap-1.5">
-          <Label for="home-plan-to">Destination</Label>
-          <AutoCompleteInput
-            id="home-plan-to"
-            kind="station"
-            placeholder="Where to? e.g. PUNE"
-            bind:value={destQuery}
-            onpick={onDestPick}
-          />
+        <div class="flex flex-wrap items-end gap-2">
+          <div class="grid min-w-44 flex-1 gap-1.5">
+            <Label for="home-plan-to">Destination</Label>
+            <AutoCompleteInput
+              id="home-plan-to"
+              kind="station"
+              placeholder="Where to? e.g. PUNE"
+              bind:value={destQuery}
+              onpick={onDestPick}
+            />
+          </div>
+          <Button type="submit" disabled={!canPlan}>
+            <SearchIcon data-icon="inline-start" />
+            Find trains &amp; availability
+          </Button>
         </div>
-        <div class="grid gap-1.5">
-          <Label for="home-plan-date">Journey date</Label>
-          <Input id="home-plan-date" type="date" bind:value={journeyDate} min={TODAY} class="w-40" />
-        </div>
-        <Button type="submit" disabled={!canPlan}>
-          <SearchIcon data-icon="inline-start" />
-          Find trains &amp; availability
-        </Button>
-      </div>
+        <DateStrip id="home-plan-date" bind:value={journeyDate} min={TODAY} label="Journey date" />
       {#if planError}
         <p class="text-xs text-destructive">{planError}</p>
       {/if}
@@ -624,12 +622,12 @@
       <span class="text-xs text-muted-foreground tabular-nums">{stationView.matched} matched</span>
     </div>
 
-    <div class="flex flex-wrap gap-1">
+    <div class="flex flex-wrap gap-0.5">
       {#each LETTERS as letter (letter)}
         <button
           type="button"
           aria-pressed={activeLetter === letter}
-          class="inline-flex h-7 min-w-7 items-center justify-center rounded-md border px-1.5 text-xs font-medium transition-colors {activeLetter === letter
+          class="inline-flex h-6 min-w-6 items-center justify-center rounded-md border px-1 text-xs font-medium transition-colors {activeLetter === letter
             ? 'border-primary bg-primary text-primary-foreground'
             : 'hover:bg-muted hover:text-foreground'}"
           onclick={() => selectLetter(letter)}

@@ -581,3 +581,53 @@ async fn seat_tool_defaults_blank_date_to_today_without_panicking() {
     );
     assert!(second.contains("\\\"trains\\\""), "rows missing: {second}");
 }
+
+#[tokio::test]
+async fn tool_round_emits_card_and_action_frames() {
+    let app = TestApp::spawn().await;
+    app.mock("ntes").ntes_web(TB_TOOL_HTML);
+
+    let round1 = sse_tool_call_round("trains_between", "{\"src\":\"SC\",\"dst\":\"PUNE\"}");
+    let round2 = concat!(
+        "data: {\"choices\":[{\"delta\":{\"content\":\"Found HUBLI EXPRESS.\"}}]}\n\n",
+        "data: {\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5}}\n\n",
+        "data: [DONE]\n\n"
+    );
+    app.mock("zen").route_raw_seq(
+        "/chat/completions",
+        vec![
+            (StatusCode::OK, "text/event-stream", round1),
+            (StatusCode::OK, "text/event-stream", round2.to_string()),
+        ],
+    );
+
+    let (status, body) = app
+        .post_raw(
+            CHAT_PATH,
+            json!({"messages":[{"role":"user","content":"trains SC to PUNE?"}]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Rich-card frame carries the projection for the UI.
+    assert!(
+        body.contains("\"type\":\"card\"") && body.contains("\"kind\":\"trains_between\""),
+        "card frame missing: {body}"
+    );
+    assert!(body.contains("\"src_code\":\"SC\""), "codes not projected");
+
+    // Actions frame lands before done, derived from the executed tool.
+    let card_at = body.find("\"type\":\"card\"").expect("card index");
+    let actions_at = body
+        .find("\"type\":\"actions\"")
+        .expect("actions frame missing");
+    let done_at = body.find("\"type\":\"done\"").expect("done missing");
+    assert!(
+        card_at < actions_at && actions_at < done_at,
+        "frame order wrong: {body}"
+    );
+    assert!(
+        body.contains("{\"label\":\"Track 17013\",\"prompt\":\"live status of 17013\"}"),
+        "track chip missing: {body}"
+    );
+}

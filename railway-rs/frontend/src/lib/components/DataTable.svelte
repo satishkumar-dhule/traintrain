@@ -131,9 +131,9 @@
           </Table.Head>
         {/each}
       </Table.Row>
-      <Table.Row>
+      <Table.Row class="border-b-0">
         {#each columns as col (col.key)}
-          <Table.Head class="h-auto py-1 {col.class ?? ''}">
+          <Table.Head class="h-auto py-1.5 {col.class ?? ''}">
             <Input
               type="text"
               placeholder="Filter…"

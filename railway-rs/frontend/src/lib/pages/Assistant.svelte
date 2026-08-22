@@ -9,6 +9,7 @@
   import BotMessageSquareIcon from 'lucide-svelte/icons/bot-message-square'
   import SendHorizontalIcon from 'lucide-svelte/icons/send-horizontal'
   import { renderMarkdown } from '$lib/markdown.js'
+  import ToolCard from '$lib/components/chat/ToolCards.svelte'
 
   const HISTORY_KEY = 'rc-assistant-history'
   const TIMEOUT_MS = 12000
@@ -110,6 +111,10 @@
       last.reasoning = (last.reasoning ?? '') + (evt.text ?? '')
     } else if (evt.type === 'tools') {
       last.tools = [...(last.tools ?? []), ...(evt.names ?? [])]
+    } else if (evt.type === 'card') {
+      if (evt.kind) last.cards = [...(last.cards ?? []), { kind: evt.kind, data: evt.data ?? {} }]
+    } else if (evt.type === 'actions') {
+      last.actions = (evt.items ?? []).filter((a) => a?.label && a?.prompt)
     } else if (evt.type === 'done') {
       last.tokens = evt.completion_tokens ?? 0
     } else if (evt.type === 'error') {
@@ -118,8 +123,8 @@
     }
   }
 
-  async function send() {
-    const text = draft.trim()
+  async function sendText(text) {
+    text = (text ?? '').trim()
     if (!text || streaming || phase !== 'ready') return
     streamError = null
     draft = ''
@@ -128,7 +133,7 @@
       content: t.content,
     }))
     turns.push({ role: 'user', content: text })
-    turns.push({ role: 'assistant', content: '', reasoning: '', tokens: null, tools: [] })
+    turns.push({ role: 'assistant', content: '', reasoning: '', tokens: null, tools: [], cards: [], actions: [] })
     streaming = true
     try {
       const res = await fetch('/rail-api/ai/chat', {
@@ -171,7 +176,7 @@
   function onKeydown(e) {
     if (e.key === 'Enter' && !e.shiftKey && !e.defaultPrevented) {
       e.preventDefault()
-      send()
+      sendText(draft)
     }
   }
 </script>
@@ -242,6 +247,24 @@
                         >{/if}
                     </div>
                   {/if}
+                  {#if t.cards?.length}
+                    <div class="mt-2 grid gap-2">
+                      {#each t.cards as c, ci (ci)}
+                        <ToolCard kind={c.kind} data={c.data} />
+                      {/each}
+                    </div>
+                  {/if}
+                  {#if t.actions?.length && !(streaming && i === turns.length - 1)}
+                    <div class="mt-2 flex flex-wrap gap-1.5" data-testid="next-actions">
+                      {#each t.actions as a (a.label)}
+                        <button
+                          type="button"
+                          class="rounded-full border bg-muted/60 px-2.5 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                          onclick={() => sendText(a.prompt)}
+                        >{a.label}</button>
+                      {/each}
+                    </div>
+                  {/if}
                   {#if typeof t.tokens === 'number'}
                     <p class="mt-1 text-xs text-muted-foreground">{model} · {t.tokens} tokens</p>
                   {/if}
@@ -283,7 +306,7 @@
               >
                 Clear chat
               </Button>
-              <Button type="button" size="sm" onclick={() => send()} disabled={!canSend}>
+              <Button type="button" size="sm" onclick={() => sendText(draft)} disabled={!canSend}>
                 <SendHorizontalIcon class="size-4" />
                 {streaming ? 'Answering…' : 'Send'}
               </Button>

@@ -299,7 +299,7 @@
         value: errorRatePct === null ? '—' : `${errorRatePct.toFixed(1)}%`,
         sub:
           codeAgg.total > 0
-            ? `${codeAgg.errors.toLocaleString()} × 5xx of ${codeAgg.total.toLocaleString()}`
+            ? `${codeAgg.errors.toLocaleString()} of ${codeAgg.total.toLocaleString()} are 5xx`
             : 'no responses recorded yet',
         tone: errTone
       }
