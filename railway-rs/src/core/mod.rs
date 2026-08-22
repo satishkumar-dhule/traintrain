@@ -1,6 +1,7 @@
 pub mod aggregator;
 pub mod ai;
 pub mod cache;
+pub mod corover;
 pub mod error;
 pub mod http;
 pub mod irctc;

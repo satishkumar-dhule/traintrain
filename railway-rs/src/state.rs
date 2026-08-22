@@ -4,6 +4,7 @@ use std::time::Instant;
 use crate::config::Config;
 use crate::core::ai::AiClient;
 use crate::core::cache::Cache;
+use crate::core::corover::CoroverClient;
 use crate::core::http::HttpClient;
 use crate::core::irctc::IrctcClient;
 use crate::core::metrics::{Metrics, SharedMetrics};
@@ -26,6 +27,10 @@ pub struct AppState {
     pub paytm: PaytmClient,
     pub ai: AiClient,
     pub datasets: Arc<Datasets>,
+    /// AskDISHA guest client, `Some` iff the module is enabled
+    /// (`ASKDISHA_ENABLED`). When `None` the askdisha slice router is not
+    /// merged and its endpoints answer 404 (zero network footprint).
+    pub askdisha: Option<Arc<CoroverClient>>,
     pub started_at: Instant,
 }
 
@@ -46,6 +51,13 @@ impl AppState {
         )?;
         let datasets = Arc::new(Datasets::load(&config.data_dir)?);
         let metrics = Arc::new(Metrics::new());
+        let askdisha = config.askdisha_enabled.then(|| {
+            Arc::new(CoroverClient::new(
+                config.corover_base.clone(),
+                config.corover_cdn_base.clone(),
+                config.http_timeout,
+            ))
+        });
         Ok(Self {
             cache: Arc::new(Cache::with_metrics(config.cache_ttl, Some(metrics.clone()))),
             metrics,
@@ -58,6 +70,7 @@ impl AppState {
             paytm,
             ai,
             datasets,
+            askdisha,
             started_at: Instant::now(),
         })
     }

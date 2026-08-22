@@ -6,11 +6,13 @@
   import { Button } from '$lib/components/ui/button/index.js'
   import { Label } from '$lib/components/ui/label/index.js'
   import { Badge } from '$lib/components/ui/badge/index.js'
-  import * as Table from '$lib/components/ui/table/index.js'
   import { Skeleton } from '$lib/components/ui/skeleton/index.js'
   import * as Alert from '$lib/components/ui/alert/index.js'
-  import AutoCompleteInput from '$lib/components/AutoCompleteInput.svelte'
-  import ArrowDownUpIcon from 'lucide-svelte/icons/arrow-down-up'
+import AutoCompleteInput from '$lib/components/AutoCompleteInput.svelte'
+import ArrowDownUpIcon from 'lucide-svelte/icons/arrow-down-up'
+import RouteIcon from 'lucide-svelte/icons/route'
+import DataTable from '$lib/components/DataTable.svelte'
+import EmptyState from '$lib/components/EmptyState.svelte'
 
   let { src = '', dst = '' } = $props()
 
@@ -34,6 +36,27 @@
   let sameCode = $derived(canSearch && fromCode === toCode)
   let loading = $derived(phase === 'loading')
   let trains = $derived(Array.isArray(result?.trains) ? result.trains : [])
+
+  const cols = [
+    { key: 'train', label: 'Train', value: (t) => `${t.number ?? ''} ${t.name ?? ''}` },
+    { key: 'dep', label: 'Departs', cellClass: 'font-mono text-xs', value: (t) => t.departure_time },
+    { key: 'arr', label: 'Arrives', cellClass: 'font-mono text-xs', value: (t) => t.arrival_time },
+    {
+      key: 'runs',
+      label: 'Runs on',
+      value: (t) => daysText(t.runs_on),
+      sortValue: (t) => (Array.isArray(t.runs_on) ? t.runs_on.filter(Boolean).length : null),
+    },
+  ]
+
+  function daysText(runsOn) {
+    if (!Array.isArray(runsOn)) return ''
+    return runsOn.map((on, i) => (on ? DAY_LETTERS[i] ?? '' : '-')).join('')
+  }
+
+  function trainKey(t, i) {
+    return `${i}-${t?.number ?? ''}-${t?.name ?? ''}`
+  }
 
   function commit() {
     const s = norm(from)
@@ -88,6 +111,26 @@
     })
   })
 </script>
+
+{#snippet trainCell(t)}
+  <span class="flex items-center gap-2">
+    <Badge variant="secondary">{t.number}</Badge>
+    <span>{t.name}</span>
+  </span>
+{/snippet}
+
+{#snippet runsCell(t)}
+  <span class="flex flex-wrap items-center gap-1">
+    {#each t.runs_on ?? [] as active, di (di)}
+      <Badge
+        variant={active ? 'secondary' : 'outline'}
+        class={`flex h-5 w-5 items-center justify-center px-1 text-[10px]${active ? '' : ' opacity-40'}`}
+      >
+        {DAY_LETTERS[di] ?? ''}
+      </Badge>
+    {/each}
+  </span>
+{/snippet}
 
 <div class="flex flex-col gap-4">
   <Card.Root>
@@ -149,48 +192,27 @@
       </Card.Header>
       <Card.Content>
         {#if trains.length === 0}
-          <p class="text-sm text-muted-foreground">
-            No trains found between {norm(src)} and {norm(dst)}.
-          </p>
+          <EmptyState
+            icon={RouteIcon}
+            title="No trains found"
+            hint={`Nothing runs between ${norm(src)} and ${norm(dst)}.`}
+          />
         {:else}
-          <Table.Root>
-            <Table.Header>
-              <Table.Row>
-                <Table.Head>Train</Table.Head>
-                <Table.Head>Departs</Table.Head>
-                <Table.Head>Arrives</Table.Head>
-                <Table.Head>Runs on</Table.Head>
-              </Table.Row>
-            </Table.Header>
-            <Table.Body>
-              {#each trains as t, i (t.number ?? i)}
-                <Table.Row>
-                  <Table.Cell>
-                    <span class="flex items-center gap-2">
-                      <Badge variant="secondary">{t.number}</Badge>
-                      <span>{t.name}</span>
-                    </span>
-                  </Table.Cell>
-                  <Table.Cell>{t.departure_time}</Table.Cell>
-                  <Table.Cell>{t.arrival_time}</Table.Cell>
-                  <Table.Cell>
-                    <span class="flex flex-wrap items-center gap-1">
-                      {#each t.runs_on ?? [] as active, di (di)}
-                        <Badge
-                          variant={active ? 'secondary' : 'outline'}
-                          class={`flex h-5 w-5 items-center justify-center px-1 text-[10px]${active ? '' : ' opacity-40'}`}
-                        >
-                          {DAY_LETTERS[di] ?? ''}
-                        </Badge>
-                      {/each}
-                    </span>
-                  </Table.Cell>
-                </Table.Row>
-              {/each}
-            </Table.Body>
-          </Table.Root>
+          <DataTable
+            columns={cols}
+            rows={trains}
+            rowKey={trainKey}
+            cells={{ train: trainCell, runs: runsCell }}
+            empty={`No trains found between ${norm(src)} and ${norm(dst)}.`}
+          />
         {/if}
       </Card.Content>
     </Card.Root>
+  {:else if phase === 'idle'}
+    <EmptyState
+      icon={RouteIcon}
+      title="Pick two stations"
+      hint="Choose From and To station codes to list every train between them."
+    />
   {/if}
 </div>

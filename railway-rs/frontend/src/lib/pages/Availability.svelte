@@ -6,11 +6,13 @@
   import { Input } from '$lib/components/ui/input/index.js'
   import { Label } from '$lib/components/ui/label/index.js'
   import { Badge } from '$lib/components/ui/badge/index.js'
-  import * as Table from '$lib/components/ui/table/index.js'
+  import DataTable from '$lib/components/DataTable.svelte'
   import { Skeleton } from '$lib/components/ui/skeleton/index.js'
   import * as Alert from '$lib/components/ui/alert/index.js'
-  import AutoCompleteInput from '$lib/components/AutoCompleteInput.svelte'
-  import ArrowDownUpIcon from 'lucide-svelte/icons/arrow-down-up'
+import AutoCompleteInput from '$lib/components/AutoCompleteInput.svelte'
+import EmptyState from '$lib/components/EmptyState.svelte'
+import ArrowDownUpIcon from 'lucide-svelte/icons/arrow-down-up'
+import CalendarDaysIcon from 'lucide-svelte/icons/calendar-days'
 
   let { src = '', dst = '', date = '' } = $props()
 
@@ -112,9 +114,26 @@
     }
     runSearch(s, d, dt, key)
   })
+
+  const cols = [
+    { key: 'class', label: 'Class', cellClass: 'font-mono font-medium', value: (r) => fmt(r?.class) },
+    { key: 'status', label: 'Status', value: (r) => statusView(r?.status).text },
+    { key: 'fare', label: 'Fare', cellClass: 'font-mono text-xs', value: (r) => fmt(r?.fare) },
+    { key: 'quota', label: 'Quota', cellClass: 'text-xs', value: (r) => fmt(r?.quota) },
+    { key: 'prediction', label: 'Prediction', cellClass: 'text-xs', value: (r) => fmt(r?.prediction) },
+  ]
 </script>
 
-<section class="grid gap-6">
+{#snippet statusCell(row)}
+  {@const st = statusView(row?.status)}
+  {#if st.plain}
+    <span class="text-muted-foreground">{st.text}</span>
+  {:else}
+    <Badge variant={st.variant}>{st.text}</Badge>
+  {/if}
+{/snippet}
+
+<section class="grid gap-6" class:idle-center={phase === 'idle'}>
   <div class="grid gap-1">
     <h1 class="text-2xl font-semibold tracking-tight">Availability</h1>
     <p class="text-sm text-muted-foreground">Class-wise availability for a route and date.</p>
@@ -227,45 +246,23 @@
               </Card.Description>
             </Card.Header>
             <Card.Content>
-              <Table.Root>
-                <Table.Header>
-                  <Table.Row>
-                    <Table.Head>Class</Table.Head>
-                    <Table.Head>Status</Table.Head>
-                    <Table.Head>Fare</Table.Head>
-                    <Table.Head>Quota</Table.Head>
-                    <Table.Head>Prediction</Table.Head>
-                  </Table.Row>
-                </Table.Header>
-                <Table.Body>
-                  {#each Array.isArray(tr?.availability) ? tr.availability : [] as row, j (j)}
-                    {@const st = statusView(row?.status)}
-                    <Table.Row>
-                      <Table.Cell class="font-mono font-medium">{fmt(row?.class)}</Table.Cell>
-                      <Table.Cell>
-                        {#if st.plain}
-                          <span class="text-muted-foreground">{st.text}</span>
-                        {:else}
-                          <Badge variant={st.variant}>{st.text}</Badge>
-                        {/if}
-                      </Table.Cell>
-                      <Table.Cell class="font-mono text-xs">{fmt(row?.fare)}</Table.Cell>
-                      <Table.Cell class="text-xs">{fmt(row?.quota)}</Table.Cell>
-                      <Table.Cell class="text-xs">{fmt(row?.prediction)}</Table.Cell>
-                    </Table.Row>
-                  {:else}
-                    <Table.Row>
-                      <Table.Cell colspan={5} class="text-muted-foreground">No availability rows returned.</Table.Cell>
-                    </Table.Row>
-                  {/each}
-                </Table.Body>
-              </Table.Root>
+              <DataTable
+                columns={cols}
+                rows={Array.isArray(tr?.availability) ? tr.availability : []}
+                rowKey={(r, j) => j}
+                cells={{ status: statusCell }}
+                empty="No availability rows returned."
+              />
             </Card.Content>
           </Card.Root>
         {/each}
       </div>
     {/if}
   {:else}
-    <p class="text-sm text-muted-foreground">Pick source, destination and a date, then Search.</p>
+    <EmptyState
+      icon={CalendarDaysIcon}
+      title="Nothing searched yet"
+      hint="Pick source, destination and a date, then Search."
+    />
   {/if}
 </section>

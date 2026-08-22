@@ -45,6 +45,13 @@ impl Service {
             origin("IRCTC", "irctc"),
             origin("Paytm", "paytm"),
         ];
+        // AskDISHA sources are listed only while the module is enabled; they
+        // report real recorded latencies once askdisha traffic has flowed.
+        let mut origins = origins;
+        if state.askdisha.is_some() {
+            origins.push(origin("AskDISHA API", crate::core::corover::SOURCE_API));
+            origins.push(origin("AskDISHA CDN", crate::core::corover::SOURCE_CDN));
+        }
 
         let top_paths = metrics
             .requests_by_path

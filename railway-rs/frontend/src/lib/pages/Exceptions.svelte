@@ -5,12 +5,13 @@
   import { Button } from '$lib/components/ui/button/index.js'
   import { Label } from '$lib/components/ui/label/index.js'
   import { Badge } from '$lib/components/ui/badge/index.js'
-  import * as Table from '$lib/components/ui/table/index.js'
   import * as Select from '$lib/components/ui/select/index.js'
   import { Skeleton } from '$lib/components/ui/skeleton/index.js'
   import * as Alert from '$lib/components/ui/alert/index.js'
-  import AutoCompleteInput from '$lib/components/AutoCompleteInput.svelte'
-  import CalendarX2Icon from 'lucide-svelte/icons/calendar-x-2'
+import AutoCompleteInput from '$lib/components/AutoCompleteInput.svelte'
+import CalendarX2Icon from 'lucide-svelte/icons/calendar-x-2'
+import DataTable from '$lib/components/DataTable.svelte'
+import EmptyState from '$lib/components/EmptyState.svelte'
 
   let { number = '', kind = '' } = $props()
 
@@ -91,9 +92,34 @@
     }
     load(n, k)
   })
+
+  const cols = [
+    {
+      key: 'date',
+      label: 'Date',
+      class: 'w-36',
+      value: (e) => fmtDate(e.date),
+      sortValue: (e) => String(e.date ?? '').trim() || null,
+    },
+    { key: 'kind', label: 'Kind', class: 'w-40', value: (e) => e.kind || 'unknown' },
+    {
+      key: 'note',
+      label: 'Note',
+      cellClass: 'max-w-md whitespace-normal break-words text-sm text-muted-foreground',
+      value: (e) => e.note || '',
+    },
+  ]
 </script>
 
-<section class="grid gap-6">
+{#snippet dateCell(e)}
+  <span class="font-mono text-xs">{fmtDate(e.date)}</span>
+{/snippet}
+
+{#snippet kindCell(e)}
+  <Badge variant={kindVariant(e.kind)}>{e.kind || 'unknown'}</Badge>
+{/snippet}
+
+<section class="grid gap-6" class:idle-center={phase === 'idle'}>
   <div class="grid gap-1">
     <h1 class="text-2xl font-semibold tracking-tight">Exceptions</h1>
     <p class="text-sm text-muted-foreground">Cancelled, rescheduled or diverted dates for a train.</p>
@@ -163,28 +189,13 @@
       </Card.Header>
       <Card.Content class="grid gap-4">
         {#if entries.length > 0}
-          <Table.Root>
-            <Table.Header>
-              <Table.Row>
-                <Table.Head class="w-36">Date</Table.Head>
-                <Table.Head class="w-40">Kind</Table.Head>
-                <Table.Head>Note</Table.Head>
-              </Table.Row>
-            </Table.Header>
-            <Table.Body>
-              {#each entries as e, i (`${e.date ?? ''}|${e.kind ?? ''}|${i}`)}
-                <Table.Row>
-                  <Table.Cell class="font-mono text-xs">{fmtDate(e.date)}</Table.Cell>
-                  <Table.Cell>
-                    <Badge variant={kindVariant(e.kind)}>{e.kind || 'unknown'}</Badge>
-                  </Table.Cell>
-                  <Table.Cell class="max-w-md whitespace-normal break-words text-sm text-muted-foreground">
-                    {e.note || '—'}
-                  </Table.Cell>
-                </Table.Row>
-              {/each}
-            </Table.Body>
-          </Table.Root>
+          <DataTable
+            columns={cols}
+            rows={entries}
+            rowKey={(e, i) => `${e.date ?? ''}|${e.kind ?? ''}|${i}`}
+            cells={{ date: dateCell, kind: kindCell }}
+            empty="No exception records found."
+          />
         {:else if msg}
           <Alert.Root role="status">
             <Alert.Title>Nothing to report</Alert.Title>
@@ -202,9 +213,10 @@
       </Card.Content>
     </Card.Root>
   {:else}
-    <div class="flex flex-col items-center gap-2 rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
-      <CalendarX2Icon class="size-5" />
-      Pick a train and an exception type, then search to see its exceptional running days.
-    </div>
+    <EmptyState
+      icon={CalendarX2Icon}
+      title="Nothing searched yet"
+      hint="Pick a train and an exception type, then search to see its exceptional running days."
+    />
   {/if}
 </section>

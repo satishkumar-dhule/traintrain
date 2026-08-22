@@ -37,7 +37,7 @@ use crate::system;
 pub fn router(state: AppState, static_dir: PathBuf) -> Router {
     let index = static_dir.join("index.html");
 
-    let buffered = Router::new()
+    let mut buffered = Router::new()
         .merge(system::router())
         .merge(slices::pnr::router())
         .merge(slices::schedule::router())
@@ -56,7 +56,14 @@ pub fn router(state: AppState, static_dir: PathBuf) -> Router {
         .merge(slices::stations::router())
         .merge(slices::search::router())
         .merge(slices::observability::router())
-        .route("/rail-api/*rest", get(api_404))
+        .route("/rail-api/*rest", get(api_404));
+    // AskDISHA is feature-gated: its routes exist only when the module is
+    // enabled so a disabled deployment keeps a zero API/network footprint
+    // (`/rail-api/askdisha/*` falls through to `api_404`).
+    if state.askdisha.is_some() {
+        buffered = buffered.merge(slices::askdisha::router());
+    }
+    let buffered = buffered
         .layer(middleware::from_fn_with_state(state.clone(), metrics_mw))
         .layer(CatchPanicLayer::new())
         .layer(TraceLayer::new_for_http())

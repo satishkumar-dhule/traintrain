@@ -9,6 +9,7 @@
 
 pub mod ai_chat;
 pub mod ai_insight;
+pub mod askdisha;
 pub mod availability;
 pub mod average_delay;
 pub mod chart;

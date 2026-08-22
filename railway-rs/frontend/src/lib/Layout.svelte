@@ -12,6 +12,7 @@
   import CalendarDays from 'lucide-svelte/icons/calendar-days'
   import TriangleAlert from 'lucide-svelte/icons/triangle-alert'
   import Package from 'lucide-svelte/icons/package'
+  import BotMessageSquare from 'lucide-svelte/icons/bot-message-square'
   import Search from 'lucide-svelte/icons/search'
   import Sun from 'lucide-svelte/icons/sun'
   import Moon from 'lucide-svelte/icons/moon'
@@ -30,6 +31,7 @@
     { href: '/pnr', label: 'PNR Status', icon: Ticket },
     { href: '/exceptions', label: 'Exceptions', icon: TriangleAlert },
     { href: '/extras', label: 'Heritage & Parcel', icon: Package },
+    { href: '/askdisha', label: 'Ask DISHA', icon: BotMessageSquare },
     { href: '/system', label: 'System', icon: Activity }
   ]
 

@@ -7,12 +7,13 @@
   import { Input } from '$lib/components/ui/input/index.js'
   import { Label } from '$lib/components/ui/label/index.js'
   import { Badge } from '$lib/components/ui/badge/index.js'
-  import * as Table from '$lib/components/ui/table/index.js'
   import * as Tabs from '$lib/components/ui/tabs/index.js'
   import * as Select from '$lib/components/ui/select/index.js'
   import { Skeleton } from '$lib/components/ui/skeleton/index.js'
   import * as Alert from '$lib/components/ui/alert/index.js'
-  import AutoCompleteInput from '$lib/components/AutoCompleteInput.svelte'
+import AutoCompleteInput from '$lib/components/AutoCompleteInput.svelte'
+import DataTable from '$lib/components/DataTable.svelte'
+import EmptyState from '$lib/components/EmptyState.svelte'
   import ActivityIcon from 'lucide-svelte/icons/activity'
   import CalendarClockIcon from 'lucide-svelte/icons/calendar-clock'
 
@@ -54,6 +55,53 @@
   function fmt(v) {
     return v && v !== '-' && v !== '--' ? v : '—'
   }
+
+  function numOrNull(v) {
+    const s = String(v ?? '').trim()
+    if (!s) return null
+    const n = Number(s)
+    return Number.isFinite(n) ? n : null
+  }
+
+  function daysText(flags) {
+    if (!Array.isArray(flags)) return ''
+    return flags.map((on, i) => (on ? DAY_LETTERS[i] ?? '' : '-')).join('')
+  }
+
+  const liveCols = [
+    { key: 'train', label: 'Train', value: (t) => `${t.number ?? ''} ${t.name ?? ''}` },
+    { key: 'sta', label: 'Sched', cellClass: 'font-mono text-xs', value: (t) => fmt(t.sta) },
+    { key: 'eta', label: 'Expected', cellClass: 'font-mono text-xs', value: (t) => fmt(t.eta) },
+    {
+      key: 'delay',
+      label: 'Delay',
+      class: 'w-24',
+      value: (t) => fmt(t.delay_arr),
+      sortValue: (t) => numOrNull(String(t.delay_arr ?? '').replace(/m$/, '')),
+    },
+    {
+      key: 'platform',
+      label: 'Platform',
+      class: 'w-24',
+      cellClass: 'font-mono text-xs',
+      value: (t) => fmt(t.platform),
+      sortValue: (t) => numOrNull(t.platform),
+    },
+  ]
+
+  const ttCols = [
+    { key: 'train', label: 'Train', value: (t) => `${t.number ?? ''} ${t.name ?? ''}` },
+    { key: 'type', label: 'Type', class: 'w-28', value: (t) => t.train_type || '' },
+    { key: 'classes', label: 'Classes', class: 'w-28', value: (t) => t.classes || '' },
+    { key: 'arrival', label: 'Arr', cellClass: 'font-mono text-xs', value: (t) => fmt(t.arrival) },
+    { key: 'departure', label: 'Dep', cellClass: 'font-mono text-xs', value: (t) => fmt(t.departure) },
+    {
+      key: 'days',
+      label: 'Days',
+      value: (t) => daysText(Array.isArray(t.days) ? t.days : []),
+      sortValue: (t) => (Array.isArray(t.days) ? t.days.filter(Boolean).length : null),
+    },
+  ]
 
   async function loadLive(target) {
     const c = norm(target)
@@ -146,7 +194,46 @@
   })
 </script>
 
-<section class="grid gap-6">
+{#snippet liveTrainCell(t)}
+  <span class="font-mono text-xs text-muted-foreground">{t.number}</span>
+  <span class="ml-2 font-medium">{t.name}</span>
+{/snippet}
+
+{#snippet liveDelayCell(t)}
+  {#if Number(t.delay_arr) > 0}
+    <Badge variant="destructive">{t.delay_arr}m</Badge>
+  {:else}
+    <Badge variant="secondary">on time</Badge>
+  {/if}
+{/snippet}
+
+{#snippet ttTrainCell(t)}
+  <span class="font-mono text-xs text-muted-foreground">{t.number}</span>
+  <span class="ml-2 font-medium">{t.name}</span>
+{/snippet}
+
+{#snippet ttTypeCell(t)}
+  {#if t.train_type}<Badge variant="outline">{t.train_type}</Badge>{:else}—{/if}
+{/snippet}
+
+{#snippet ttClassesCell(t)}
+  <span class="text-xs text-muted-foreground">{t.classes || '—'}</span>
+{/snippet}
+
+{#snippet ttDaysCell(t)}
+  {@const days = Array.isArray(t.days) ? t.days : []}
+  <div class="flex flex-wrap gap-1">
+    {#each DAY_LETTERS as letter, i (i)}
+      {#if days[i]}
+        <Badge variant="secondary" class="px-1.5 text-[10px]">{letter}</Badge>
+      {:else}
+        <Badge variant="outline" class="px-1.5 text-[10px] opacity-40">{letter}</Badge>
+      {/if}
+    {/each}
+  </div>
+{/snippet}
+
+<section class="grid gap-6" class:idle-center={!committedCode}>
   <div class="grid gap-1">
     <h1 class="text-2xl font-semibold tracking-tight">Station board</h1>
     <p class="text-sm text-muted-foreground">Live board and full-day timetable for any station.</p>
@@ -221,45 +308,21 @@
             <Badge variant="secondary">{live.hours}h window</Badge>
           </Card.Header>
           <Card.Content>
-            <Table.Root>
-              <Table.Header>
-                <Table.Row>
-                  <Table.Head>Train</Table.Head>
-                  <Table.Head>Sched</Table.Head>
-                  <Table.Head>Expected</Table.Head>
-                  <Table.Head class="w-24">Delay</Table.Head>
-                  <Table.Head class="w-24">Platform</Table.Head>
-                </Table.Row>
-              </Table.Header>
-              <Table.Body>
-                {#each live.trains ?? [] as t (t.number + t.name)}
-                  {@const late = Number(t.delay_arr) > 0}
-                  <Table.Row>
-                    <Table.Cell>
-                      <span class="font-mono text-xs text-muted-foreground">{t.number}</span>
-                      <span class="ml-2 font-medium">{t.name}</span>
-                    </Table.Cell>
-                    <Table.Cell class="font-mono text-xs">{fmt(t.sta)}</Table.Cell>
-                    <Table.Cell class="font-mono text-xs">{fmt(t.eta)}</Table.Cell>
-                    <Table.Cell>
-                      {#if late}<Badge variant="destructive">{t.delay_arr}m</Badge>
-                      {:else}<Badge variant="secondary">on time</Badge>{/if}
-                    </Table.Cell>
-                    <Table.Cell class="font-mono text-xs">{fmt(t.platform)}</Table.Cell>
-                  </Table.Row>
-                {:else}
-                  <Table.Row>
-                    <Table.Cell colspan={5} class="text-muted-foreground">No trains in this window.</Table.Cell>
-                  </Table.Row>
-                {/each}
-              </Table.Body>
-            </Table.Root>
+            <DataTable
+              columns={liveCols}
+              rows={live.trains ?? []}
+              rowKey={(t, i) => `${i}-${t?.number ?? ''}-${t?.name ?? ''}`}
+              cells={{ train: liveTrainCell, delay: liveDelayCell }}
+              empty="No trains in this window."
+            />
           </Card.Content>
         </Card.Root>
       {:else}
-        <div class="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
-          Enter a station and show the board to see live arrivals &amp; departures.
-        </div>
+        <EmptyState
+          icon={ActivityIcon}
+          title="No board loaded"
+          hint="Enter a station and show the board to see live arrivals &amp; departures."
+        />
       {/if}
     </Tabs.Content>
 
@@ -285,56 +348,26 @@
             <Badge variant="secondary">{timetable.total ?? timetable.trains?.length ?? 0} total</Badge>
           </Card.Header>
           <Card.Content>
-            <Table.Root>
-              <Table.Header>
-                <Table.Row>
-                  <Table.Head>Train</Table.Head>
-                  <Table.Head class="w-28">Type</Table.Head>
-                  <Table.Head class="w-24">Classes</Table.Head>
-                  <Table.Head class="w-20">Arr</Table.Head>
-                  <Table.Head class="w-20">Dep</Table.Head>
-                  <Table.Head>Days</Table.Head>
-                </Table.Row>
-              </Table.Header>
-              <Table.Body>
-                {#each timetable.trains ?? [] as t (t.number + t.name)}
-                  {@const days = Array.isArray(t.days) ? t.days : []}
-                  <Table.Row>
-                    <Table.Cell>
-                      <span class="font-mono text-xs text-muted-foreground">{t.number}</span>
-                      <span class="ml-2 font-medium">{t.name}</span>
-                    </Table.Cell>
-                    <Table.Cell>
-                      {#if t.train_type}<Badge variant="outline">{t.train_type}</Badge>{:else}—{/if}
-                    </Table.Cell>
-                    <Table.Cell class="text-xs text-muted-foreground">{t.classes || '—'}</Table.Cell>
-                    <Table.Cell class="font-mono text-xs">{fmt(t.arrival)}</Table.Cell>
-                    <Table.Cell class="font-mono text-xs">{fmt(t.departure)}</Table.Cell>
-                    <Table.Cell>
-                      <div class="flex flex-wrap gap-1">
-                        {#each DAY_LETTERS as letter, i (i)}
-                          {#if days[i]}
-                            <Badge variant="secondary" class="px-1.5 text-[10px]">{letter}</Badge>
-                          {:else}
-                            <Badge variant="outline" class="px-1.5 text-[10px] opacity-40">{letter}</Badge>
-                          {/if}
-                        {/each}
-                      </div>
-                    </Table.Cell>
-                  </Table.Row>
-                {:else}
-                  <Table.Row>
-                    <Table.Cell colspan={6} class="text-muted-foreground">No scheduled trains found.</Table.Cell>
-                  </Table.Row>
-                {/each}
-              </Table.Body>
-            </Table.Root>
+            <DataTable
+              columns={ttCols}
+              rows={timetable.trains ?? []}
+              rowKey={(t, i) => `${i}-${t?.number ?? ''}-${t?.name ?? ''}`}
+              cells={{
+                train: ttTrainCell,
+                type: ttTypeCell,
+                classes: ttClassesCell,
+                days: ttDaysCell,
+              }}
+              empty="No scheduled trains found."
+            />
           </Card.Content>
         </Card.Root>
       {:else}
-        <div class="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
-          Enter a station (and optionally a date) to load the full-day timetable.
-        </div>
+        <EmptyState
+          icon={CalendarClockIcon}
+          title="No timetable loaded"
+          hint="Enter a station (and optionally a date) to load the full-day timetable."
+        />
       {/if}
     </Tabs.Content>
   </Tabs.Root>

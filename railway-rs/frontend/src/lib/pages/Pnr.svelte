@@ -6,10 +6,12 @@
   import { Input } from '$lib/components/ui/input/index.js'
   import { Label } from '$lib/components/ui/label/index.js'
   import { Badge } from '$lib/components/ui/badge/index.js'
-  import * as Table from '$lib/components/ui/table/index.js'
   import { Skeleton } from '$lib/components/ui/skeleton/index.js'
   import * as Alert from '$lib/components/ui/alert/index.js'
   import ArrowRight from 'lucide-svelte/icons/arrow-right'
+  import Ticket from 'lucide-svelte/icons/ticket'
+  import DataTable from '$lib/components/DataTable.svelte'
+  import EmptyState from '$lib/components/EmptyState.svelte'
 
   const RECENT_KEY = 'rc-pnr-recent'
 
@@ -122,9 +124,44 @@
     if (head === 'WL' || head === 'WAITLIST' || head === 'WAITLISTED') return 'wl'
     return null
   }
+
+  const passengers = $derived(Array.isArray(data?.passengers) ? data.passengers : [])
+
+  const cols = [
+    {
+      key: 'n',
+      label: '#',
+      class: 'w-12',
+      sortable: false,
+      value: (p) => String(passengers.indexOf(p) + 1),
+    },
+    { key: 'booking_status', label: 'Booking status', value: (p) => fmt(p.booking_status) },
+    { key: 'coach', label: 'Coach', cellClass: 'font-mono', value: (p) => fmt(p.coach) },
+    { key: 'berth', label: 'Berth', cellClass: 'font-mono', value: (p) => fmt(p.berth) },
+    { key: 'current_status', label: 'Current', cellClass: 'font-mono', value: (p) => fmt(p.current_status) },
+  ]
 </script>
 
-<section class="grid gap-6">
+{#snippet numCell(p)}
+  <span class="text-muted-foreground">{passengers.indexOf(p) + 1}</span>
+{/snippet}
+
+{#snippet bookingCell(p)}
+  {@const kind = statusKind(p.booking_status)}
+  {#if kind === 'cnf'}
+    <Badge variant="default" class="border-emerald-600/40 text-emerald-600 dark:text-emerald-400">
+      {fmt(p.booking_status)}
+    </Badge>
+  {:else if kind === 'rac'}
+    <Badge variant="secondary">{fmt(p.booking_status)}</Badge>
+  {:else if kind === 'wl'}
+    <Badge variant="outline">{fmt(p.booking_status)}</Badge>
+  {:else}
+    <span class="text-muted-foreground">{fmt(p.booking_status)}</span>
+  {/if}
+{/snippet}
+
+<section class="grid gap-6" class:idle-center={phase === 'idle'}>
   <div class="grid gap-1">
     <h1 class="text-2xl font-semibold tracking-tight">PNR status</h1>
     <p class="text-sm text-muted-foreground">10-digit passenger name record. Upstream may require a captcha.</p>
@@ -251,51 +288,20 @@
         </div>
       </Card.Header>
       <Card.Content>
-        <Table.Root>
-          <Table.Header>
-            <Table.Row>
-              <Table.Head>#</Table.Head>
-              <Table.Head>Booking status</Table.Head>
-              <Table.Head>Coach</Table.Head>
-              <Table.Head>Berth</Table.Head>
-              <Table.Head>Current</Table.Head>
-            </Table.Row>
-          </Table.Header>
-          <Table.Body>
-            {#each data.passengers ?? [] as p, i (i)}
-              {@const kind = statusKind(p.booking_status)}
-              <Table.Row>
-                <Table.Cell class="text-muted-foreground">{i + 1}</Table.Cell>
-                <Table.Cell class="font-medium">
-                  {#if kind === 'cnf'}
-                    <Badge
-                      variant="default"
-                      class="border-emerald-600/40 text-emerald-600 dark:text-emerald-400"
-                    >
-                      {fmt(p.booking_status)}
-                    </Badge>
-                  {:else if kind === 'rac'}
-                    <Badge variant="secondary">{fmt(p.booking_status)}</Badge>
-                  {:else if kind === 'wl'}
-                    <Badge variant="outline">{fmt(p.booking_status)}</Badge>
-                  {:else}
-                    <span class="text-muted-foreground">{fmt(p.booking_status)}</span>
-                  {/if}
-                </Table.Cell>
-                <Table.Cell class="font-mono">{fmt(p.coach)}</Table.Cell>
-                <Table.Cell class="font-mono">{fmt(p.berth)}</Table.Cell>
-                <Table.Cell class="font-mono">{fmt(p.current_status)}</Table.Cell>
-              </Table.Row>
-            {:else}
-              <Table.Row>
-                <Table.Cell colspan={5} class="text-muted-foreground">No passengers returned.</Table.Cell>
-              </Table.Row>
-            {/each}
-          </Table.Body>
-        </Table.Root>
+        <DataTable
+          columns={cols}
+          rows={passengers}
+          rowKey={(p, i) => i}
+          cells={{ n: numCell, booking_status: bookingCell }}
+          empty="No passengers returned."
+        />
       </Card.Content>
     </Card.Root>
   {:else}
-    <p class="text-sm text-muted-foreground">Enter a PNR above or pick a recent lookup to see status.</p>
+    <EmptyState
+      icon={Ticket}
+      title="No PNR checked yet"
+      hint="Enter a 10-digit PNR above or pick a recent lookup to see status."
+    />
   {/if}
 </section>

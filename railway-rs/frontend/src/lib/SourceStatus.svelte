@@ -3,9 +3,9 @@
   import { Button } from '$lib/components/ui/button/index.js'
   import * as Card from '$lib/components/ui/card/index.js'
   import { Badge } from '$lib/components/ui/badge/index.js'
-  import * as Table from '$lib/components/ui/table/index.js'
   import { Skeleton } from '$lib/components/ui/skeleton/index.js'
   import * as Alert from '$lib/components/ui/alert/index.js'
+  import DataTable from '$lib/components/DataTable.svelte'
 
   let state = $state({ phase: 'loading', data: null, error: null })
   let inflight = $state(false)
@@ -28,7 +28,30 @@
   })
 
   let sources = $derived(state.data?.sources ?? [])
+
+  const cols = [
+    { key: 'name', label: 'Source', value: (s) => s.name },
+    {
+      key: 'reachable',
+      label: 'Reachable',
+      class: 'w-32',
+      value: (s) => (s.reachable ? 'yes' : 'no'),
+      sortValue: (s) => (s.reachable ? 1 : 0),
+    },
+  ]
 </script>
+
+{#snippet sourceCell(s)}
+  <span class="font-medium">{s.name}</span>
+{/snippet}
+
+{#snippet reachableCell(s)}
+  {#if s.reachable}
+    <Badge>yes</Badge>
+  {:else}
+    <Badge variant="destructive">no</Badge>
+  {/if}
+{/snippet}
 
 <Card.Root aria-label="Data source status">
   <Card.Header class="flex-row items-center justify-between space-y-0">
@@ -87,32 +110,13 @@
         </Alert.Root>
       {/if}
 
-      <Table.Root>
-        <Table.Header>
-          <Table.Row>
-            <Table.Head>Source</Table.Head>
-            <Table.Head class="w-32">Reachable</Table.Head>
-          </Table.Row>
-        </Table.Header>
-        <Table.Body>
-          {#each sources as s (s.name)}
-            <Table.Row>
-              <Table.Cell class="font-medium">{s.name}</Table.Cell>
-              <Table.Cell>
-                {#if s.reachable}
-                  <Badge>yes</Badge>
-                {:else}
-                  <Badge variant="destructive">no</Badge>
-                {/if}
-              </Table.Cell>
-            </Table.Row>
-          {:else}
-            <Table.Row>
-              <Table.Cell colspan={2} class="text-muted-foreground">No sources reported.</Table.Cell>
-            </Table.Row>
-          {/each}
-        </Table.Body>
-      </Table.Root>
+      <DataTable
+        columns={cols}
+        rows={sources}
+        rowKey={(s) => s.name}
+        cells={{ name: sourceCell, reachable: reachableCell }}
+        empty="No sources reported."
+      />
     {/if}
   </Card.Content>
 </Card.Root>

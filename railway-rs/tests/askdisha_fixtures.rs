@@ -18,8 +18,13 @@ fn schedule_12951_parses_through_contract_struct() {
     let sched: ScheduleResponse = serde_json::from_str(&raw).expect("schedule must deserialize");
 
     assert_eq!(sched.train_number, "12951");
-    assert_eq!(sched.train_name.as_deref(), Some("MUMBAI RAJDHANI"));
-    assert!(!sched.station_list.is_empty(), "station_list must be non-empty");
+    assert_eq!(sched.train_name.as_deref(), Some("NDLS TEJAS RAJ"));
+    assert_eq!(sched.station_from.as_deref(), Some("MMCT"));
+    assert_eq!(sched.station_to.as_deref(), Some("NDLS"));
+    assert!(
+        !sched.station_list.is_empty(),
+        "station_list must be non-empty"
+    );
 
     // Upstream sends "Y"/"N" strings; the struct must expose plain bools.
     let runs: [bool; 7] = [
@@ -31,7 +36,10 @@ fn schedule_12951_parses_through_contract_struct() {
         sched.runs_sat,
         sched.runs_sun,
     ];
-    assert!(runs.iter().all(|v| *v), "12951 is a daily train, all run flags true");
+    assert!(
+        runs.iter().all(|v| *v),
+        "12951 is a daily train, all run flags true"
+    );
 
     let first = &sched.station_list[0];
     assert_eq!(first.station_code, "MMCT");
@@ -68,7 +76,11 @@ fn get_settings_parses_through_contract_struct() {
 fn faqs_en_is_valid_string_array_with_at_least_50_entries() {
     let faqs: Vec<String> =
         serde_json::from_str(&fixture("faqs_en.json")).expect("faqs must be a JSON string array");
-    assert!(faqs.len() > 50, "expected >=50 truncated FAQ entries, got {}", faqs.len());
+    assert!(
+        faqs.len() > 50,
+        "expected >=50 truncated FAQ entries, got {}",
+        faqs.len()
+    );
     assert!(faqs.iter().all(|f| !f.trim().is_empty()));
 }
 

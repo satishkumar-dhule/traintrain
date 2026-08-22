@@ -6,13 +6,14 @@
   import { Button } from '$lib/components/ui/button/index.js'
   import { Input } from '$lib/components/ui/input/index.js'
   import { Badge } from '$lib/components/ui/badge/index.js'
-  import * as Table from '$lib/components/ui/table/index.js'
   import * as Tabs from '$lib/components/ui/tabs/index.js'
   import { Skeleton } from '$lib/components/ui/skeleton/index.js'
   import * as Alert from '$lib/components/ui/alert/index.js'
   import LandmarkIcon from 'lucide-svelte/icons/landmark'
   import PackageIcon from 'lucide-svelte/icons/package'
-  import FilterIcon from 'lucide-svelte/icons/filter'
+import FilterIcon from 'lucide-svelte/icons/filter'
+import DataTable from '$lib/components/DataTable.svelte'
+import EmptyState from '$lib/components/EmptyState.svelte'
 
   let { view = '', selection = '' } = $props()
 
@@ -149,6 +150,54 @@
     navigate(`/extras/${next}`)
   }
 
+  function routeText(t) {
+    const src = stopOf(t, 'source', 'source')
+    const dst = stopOf(t, 'destination', 'dest')
+    return `${src.code}${src.time ? ` ${src.time}` : ''} → ${dst.code}${dst.time ? ` ${dst.time}` : ''}`
+  }
+
+  function daysText(raw) {
+    const { flags, any } = dayFlags(raw)
+    if (!any) return str(raw).trim()
+    return DAY_LETTERS.filter((_, i) => flags[i]).join('')
+  }
+
+  const heritageCols = [
+    { key: 'number', label: 'Number', class: 'w-24', value: (t) => fmt(t.number) },
+    { key: 'name', label: 'Name', value: (t) => fmt(t.name), cellClass: 'font-medium' },
+    { key: 'runs', label: 'Runs', cellClass: 'text-muted-foreground', value: (t) => fmt(t.runs) },
+    { key: 'duration', label: 'Duration', class: 'w-28', cellClass: 'font-mono text-xs', value: (t) => fmt(t.duration) },
+    {
+      key: 'route',
+      label: 'Source → Destination',
+      cellClass: 'font-mono text-xs',
+      value: (t) => routeText(t),
+    },
+  ]
+
+  const parcelCols = [
+    { key: 'number', label: 'Number', class: 'w-24', cellClass: 'font-mono text-xs text-muted-foreground', value: (t) => fmt(t.number) },
+    { key: 'name', label: 'Name', cellClass: 'max-w-40 truncate font-medium', value: (t) => fmt(t.name) },
+    { key: 'route', label: 'Route', cellClass: 'max-w-56 truncate', value: (t) => fmt(t.route) },
+    {
+      key: 'validity',
+      label: 'Validity',
+      class: 'w-48',
+      cellClass: 'whitespace-nowrap font-mono text-xs',
+      value: (t) => validityOf(t),
+    },
+    { key: 'travel_time', label: 'Travel time', class: 'w-24', cellClass: 'font-mono text-xs', value: (t) => fmt(t.travel_time) },
+    {
+      key: 'days',
+      label: 'Days',
+      value: (t) => daysText(t.days_of_run),
+      sortValue: (t) => {
+        const { any } = dayFlags(t.days_of_run)
+        return any ? DAY_LETTERS.filter((_, i) => dayFlags(t.days_of_run).flags[i]).join('') : null
+      },
+    },
+  ]
+
   $effect(() => {
     const nextTab = view === 'parcel' ? 'parcel' : 'heritage'
     const sel = str(selection).trim()
@@ -163,6 +212,37 @@
     })
   })
 </script>
+
+{#snippet hNumberCell(t)}
+  <Badge variant="outline" class="font-mono">{fmt(t.number)}</Badge>
+{/snippet}
+
+{#snippet hRouteCell(t)}
+  {@const src = stopOf(t, 'source', 'source')}
+  {@const dst = stopOf(t, 'destination', 'dest')}
+  <div class="flex flex-wrap items-center gap-x-2 font-mono text-xs">
+    <span title={src.name}>{src.code || '—'}{src.time ? ` · ${src.time}` : ''}</span>
+    <span class="text-muted-foreground">→</span>
+    <span title={dst.name}>{dst.code || '—'}{dst.time ? ` · ${dst.time}` : ''}</span>
+  </div>
+{/snippet}
+
+{#snippet pDaysCell(t)}
+  {@const days = dayFlags(t.days_of_run)}
+  {#if days.any}
+    <div class="flex gap-1">
+      {#each DAY_LETTERS as letter, di (di)}
+        {#if days.flags[di]}
+          <Badge variant="secondary" class="px-1.5 text-[10px]">{letter}</Badge>
+        {:else}
+          <Badge variant="outline" class="px-1.5 text-[10px] opacity-40">{letter}</Badge>
+        {/if}
+      {/each}
+    </div>
+  {:else}
+    <span class="text-xs text-muted-foreground">{fmt(t.days_of_run)}</span>
+  {/if}
+{/snippet}
 
 <section class="grid gap-6">
   <div class="grid gap-1">
@@ -218,46 +298,21 @@
             </div>
           </Card.Header>
           <Card.Content>
-            <Table.Root>
-              <Table.Header>
-                <Table.Row>
-                  <Table.Head class="w-24">Number</Table.Head>
-                  <Table.Head>Name</Table.Head>
-                  <Table.Head>Runs</Table.Head>
-                  <Table.Head class="w-28">Duration</Table.Head>
-                  <Table.Head>Source → Destination</Table.Head>
-                </Table.Row>
-              </Table.Header>
-              <Table.Body>
-                {#each hTrains as t, i (str(t.number) + '|' + str(t.name) + '|' + i)}
-                  {@const src = stopOf(t, 'source', 'source')}
-                  {@const dst = stopOf(t, 'destination', 'dest')}
-                  <Table.Row>
-                    <Table.Cell><Badge variant="outline" class="font-mono">{fmt(t.number)}</Badge></Table.Cell>
-                    <Table.Cell class="font-medium">{fmt(t.name)}</Table.Cell>
-                    <Table.Cell class="text-muted-foreground">{fmt(t.runs)}</Table.Cell>
-                    <Table.Cell class="font-mono text-xs">{fmt(t.duration)}</Table.Cell>
-                    <Table.Cell>
-                      <div class="flex flex-wrap items-center gap-x-2 font-mono text-xs">
-                        <span title={src.name}>{src.code || '—'}{src.time ? ` · ${src.time}` : ''}</span>
-                        <span class="text-muted-foreground">→</span>
-                        <span title={dst.name}>{dst.code || '—'}{dst.time ? ` · ${dst.time}` : ''}</span>
-                      </div>
-                    </Table.Cell>
-                  </Table.Row>
-                {:else}
-                  <Table.Row>
-                    <Table.Cell colspan={5} class="text-muted-foreground">No heritage trains match this selection.</Table.Cell>
-                  </Table.Row>
-                {/each}
-              </Table.Body>
-            </Table.Root>
+            <DataTable
+              columns={heritageCols}
+              rows={hTrains}
+              rowKey={(t, i) => `${i}|${str(t.number)}|${str(t.name)}`}
+              cells={{ number: hNumberCell, route: hRouteCell }}
+              empty="No heritage trains match this selection."
+            />
           </Card.Content>
         </Card.Root>
       {:else}
-        <div class="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
-          Press Filter to list heritage trains.
-        </div>
+        <EmptyState
+          icon={LandmarkIcon}
+          title="Heritage list not loaded"
+          hint="Press Filter to list heritage trains."
+        />
       {/if}
     </Tabs.Content>
 
@@ -283,55 +338,21 @@
             {#if pSource}<Badge variant="secondary">{pSource}</Badge>{/if}
           </Card.Header>
           <Card.Content>
-            <Table.Root>
-              <Table.Header>
-                <Table.Row>
-                  <Table.Head class="w-24">Number</Table.Head>
-                  <Table.Head>Name</Table.Head>
-                  <Table.Head>Route</Table.Head>
-                  <Table.Head class="w-48">Validity</Table.Head>
-                  <Table.Head class="w-24">Travel time</Table.Head>
-                  <Table.Head>Days</Table.Head>
-                </Table.Row>
-              </Table.Header>
-              <Table.Body>
-                {#each pTrains as t, i (str(t.number) + '|' + str(t.name) + '|' + i)}
-                  {@const days = dayFlags(t.days_of_run)}
-                  <Table.Row>
-                    <Table.Cell><span class="font-mono text-xs text-muted-foreground">{fmt(t.number)}</span></Table.Cell>
-                    <Table.Cell class="max-w-40 truncate font-medium" title={str(t.name)}>{fmt(t.name)}</Table.Cell>
-                    <Table.Cell class="max-w-56"><div class="truncate" title={str(t.route)}>{fmt(t.route)}</div></Table.Cell>
-                    <Table.Cell class="whitespace-nowrap font-mono text-xs">{validityOf(t)}</Table.Cell>
-                    <Table.Cell class="font-mono text-xs">{fmt(t.travel_time)}</Table.Cell>
-                    <Table.Cell>
-                      {#if days.any}
-                        <div class="flex gap-1">
-                          {#each DAY_LETTERS as letter, di (di)}
-                            {#if days.flags[di]}
-                              <Badge variant="secondary" class="px-1.5 text-[10px]">{letter}</Badge>
-                            {:else}
-                              <Badge variant="outline" class="px-1.5 text-[10px] opacity-40">{letter}</Badge>
-                            {/if}
-                          {/each}
-                        </div>
-                      {:else}
-                        <span class="text-xs text-muted-foreground">{fmt(t.days_of_run)}</span>
-                      {/if}
-                    </Table.Cell>
-                  </Table.Row>
-                {:else}
-                  <Table.Row>
-                    <Table.Cell colspan={6} class="text-muted-foreground">No parcel special trains are currently listed.</Table.Cell>
-                  </Table.Row>
-                {/each}
-              </Table.Body>
-            </Table.Root>
+            <DataTable
+              columns={parcelCols}
+              rows={pTrains}
+              rowKey={(t, i) => `${i}|${str(t.number)}|${str(t.name)}`}
+              cells={{ days: pDaysCell }}
+              empty="No parcel special trains are currently listed."
+            />
           </Card.Content>
         </Card.Root>
       {:else}
-        <div class="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
-          Open the Parcel tab to list running parcel special trains.
-        </div>
+        <EmptyState
+          icon={PackageIcon}
+          title="Parcel list not loaded"
+          hint="Open the Parcel tab to list running parcel special trains."
+        />
       {/if}
     </Tabs.Content>
   </Tabs.Root>

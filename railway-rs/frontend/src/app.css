@@ -157,3 +157,28 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Idle pages: until results exist, float the controls cluster to the vertical
+   middle of the viewport instead of pinning it to the top. Auto margins keep
+   content reachable (no clipping) when it outgrows the viewport. */
+.idle-center {
+  min-height: calc(100svh - 5rem);
+}
+.idle-center > :first-child {
+  margin-block-start: auto;
+}
+.idle-center > :last-child {
+  margin-block-end: auto;
+}
+@media (max-width: 1023.98px) {
+  .idle-center {
+    /* mobile header h-14 + main py-6 */
+    min-height: calc(100svh - 6.5rem);
+  }
+}
+@media (min-width: 768px) and (max-width: 1023.98px) {
+  .idle-center {
+    /* mobile header h-14 + main md:py-10 */
+    min-height: calc(100svh - 8.5rem);
+  }
+}

@@ -23,6 +23,12 @@ use std::time::Duration;
 /// - `RAILWAY_AI_API_KEY`    (optional) — sent as `Authorization: Bearer` when set;
 ///   the free tier works without any key (no login required)
 /// - `RAILWAY_AI_TIMEOUT_SECS` (default `120`) — total timeout for LLM completions
+/// - `ASKDISHA_ENABLED`    (default `false`) — feature gate for the AskDISHA
+///   module; truthy values are `1`/`true`/`yes` (case-insensitive)
+/// - `COROVER_BASE`        (default `https://api.disha.corover.ai`) — AskDISHA
+///   guest API origin
+/// - `COROVER_CDN_BASE`    (default `https://cdn.corover.ai`) — AskDISHA CDN
+///   origin (the `askdisha-bucket/` path is appended per call)
 ///
 /// Every source URL is prefixed by these base URLs so tests can point them at
 /// a local mock upstream. Real deployments keep the defaults.
@@ -45,6 +51,12 @@ pub struct Config {
     pub ai_model: String,
     pub ai_api_key: Option<String>,
     pub ai_timeout: Duration,
+    /// AskDISHA module feature gate (`ASKDISHA_ENABLED`, default `false`).
+    pub askdisha_enabled: bool,
+    /// AskDISHA guest API origin (`COROVER_BASE`).
+    pub corover_base: String,
+    /// AskDISHA CDN origin without the bucket path (`COROVER_CDN_BASE`).
+    pub corover_cdn_base: String,
 }
 
 impl Default for Config {
@@ -67,6 +79,9 @@ impl Default for Config {
             ai_model: "x-preview-f-free".to_string(),
             ai_api_key: None,
             ai_timeout: Duration::from_secs(120),
+            askdisha_enabled: false,
+            corover_base: "https://api.disha.corover.ai".to_string(),
+            corover_cdn_base: "https://cdn.corover.ai".to_string(),
         }
     }
 }
@@ -112,6 +127,12 @@ impl Config {
                 "RAILWAY_AI_TIMEOUT_SECS",
                 d.ai_timeout.as_secs(),
             )),
+            askdisha_enabled: flag_enabled(
+                std::env::var("ASKDISHA_ENABLED").ok(),
+                d.askdisha_enabled,
+            ),
+            corover_base: std::env::var("COROVER_BASE").unwrap_or(d.corover_base),
+            corover_cdn_base: std::env::var("COROVER_CDN_BASE").unwrap_or(d.corover_cdn_base),
         }
     }
 
@@ -133,4 +154,51 @@ fn env_u64(key: &str, default: u64) -> u64 {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(default)
+}
+
+/// Parse an opt-in boolean env var: `1` / `true` / `yes` (case-insensitive)
+/// enable the feature; anything else — or an unset variable — keeps
+/// `default`. Kept pure so the semantics are unit-testable without touching
+/// process-global environment state.
+fn flag_enabled(raw: Option<String>, default: bool) -> bool {
+    match raw {
+        Some(v) => matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"),
+        None => default,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn askdisha_flag_parses_truthy_values_case_insensitively() {
+        assert!(flag_enabled(Some("1".into()), false));
+        assert!(flag_enabled(Some("true".into()), false));
+        assert!(flag_enabled(Some("TRUE".into()), false));
+        assert!(flag_enabled(Some("Yes".into()), false));
+        assert!(flag_enabled(Some(" yes ".into()), false));
+    }
+
+    #[test]
+    fn askdisha_flag_defaults_to_false_on_falsy_or_missing() {
+        assert!(!flag_enabled(None, false));
+        assert!(!flag_enabled(Some(String::new()), false));
+        assert!(!flag_enabled(Some("0".into()), false));
+        assert!(!flag_enabled(Some("false".into()), false));
+        assert!(!flag_enabled(Some("FALSE".into()), false));
+        assert!(!flag_enabled(Some("off".into()), false));
+        assert!(!flag_enabled(Some("no".into()), false));
+        assert!(!flag_enabled(Some("enabled".into()), false));
+        // The default itself is honored when the variable is absent.
+        assert!(flag_enabled(None, true));
+    }
+
+    #[test]
+    fn default_config_keeps_askdisha_disabled_with_real_origins() {
+        let d = Config::default();
+        assert!(!d.askdisha_enabled);
+        assert_eq!(d.corover_base, "https://api.disha.corover.ai");
+        assert_eq!(d.corover_cdn_base, "https://cdn.corover.ai");
+    }
 }
