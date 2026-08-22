@@ -5,57 +5,189 @@
   import * as Table from '$lib/components/ui/table/index.js'
   import { Skeleton } from '$lib/components/ui/skeleton/index.js'
   import * as Alert from '$lib/components/ui/alert/index.js'
+  import Activity from 'lucide-svelte/icons/activity'
 
   let obs = $state({ phase: 'loading', data: null })
-  let logs = $state({ phase: 'loading', data: null })
+  let logsState = $state({ phase: 'loading', data: null })
 
   $effect(() => {
     api('/rail-api/observability').then((res) => {
       obs = res.ok ? { phase: 'ok', data: res.data } : { phase: 'error', data: null }
     })
     api('/rail-api/logs?limit=25').then((res) => {
-      logs = res.ok ? { phase: 'ok', data: res.data } : { phase: 'error', data: null }
+      logsState = res.ok ? { phase: 'ok', data: res.data } : { phase: 'error', data: null }
     })
   })
 
+  function num(v) {
+    const n = Number(v)
+    return Number.isFinite(n) ? n : null
+  }
+
   function fmtUptime(s) {
-    if (!s && s !== 0) return '—'
-    const h = Math.floor(s / 3600)
-    const m = Math.floor((s % 3600) / 60)
+    const t = num(s)
+    if (t === null || t < 0) return '—'
+    const h = Math.floor(t / 3600)
+    const m = Math.floor((t % 3600) / 60)
+    if (h >= 24) {
+      const d = Math.floor(h / 24)
+      return `${d}d ${h % 24}h`
+    }
     return h > 0 ? `${h}h ${m}m` : `${m}m`
+  }
+
+  function humanBytes(n) {
+    const b = num(n)
+    if (b === null || b < 0) return '—'
+    if (b < 1024) return `${b} B`
+    const kb = b / 1024
+    if (kb < 1024) return `${kb.toFixed(1)} KB`
+    return `${(kb / 1024).toFixed(1)} MB`
+  }
+
+  function memMb(n) {
+    const b = num(n)
+    if (b === null) return '—'
+    return (b / (1024 * 1024)).toFixed(1)
+  }
+
+  function pctFromFrac(v) {
+    const f = num(v)
+    if (f === null) return '—'
+    return `${(f * 100).toFixed(1)}%`
+  }
+
+  function latest(arr) {
+    if (!Array.isArray(arr)) return null
+    for (let i = arr.length - 1; i >= 0; i--) {
+      const n = num(arr[i])
+      if (n !== null) return n
+    }
+    return null
+  }
+
+  function sparkPoints(arr) {
+    if (!Array.isArray(arr)) return []
+    const tail = arr.slice(-60)
+    const vals = tail.map((v) => num(v)).map((v) => (v === null ? 0 : Math.max(v, 0)))
+    const max = Math.max(...vals)
+    return vals.map((v, i) => ({
+      pct: max > 0 ? Math.min(100, (v / max) * 100) : 0,
+      op: vals.length > 1 ? 0.2 + 0.8 * (i / (vals.length - 1)) : 1,
+      val: tail[i]
+    }))
+  }
+
+  const sparks = [
+    { key: 'rps', label: 'Requests / sec', fmt: (v) => (num(v) === null ? '—' : String(num(v))) },
+    { key: 'latency_ms', label: 'Latency', fmt: (v) => (num(v) === null ? '—' : `${num(v)} ms`) },
+    { key: 'mem_mb', label: 'Memory', fmt: (v) => (num(v) === null ? '—' : `${num(v)} MB`) },
+    { key: 'cpu_frac', label: 'CPU', fmt: pctFromFrac }
+  ]
+
+  function statusList(raw) {
+    const arr = Array.isArray(raw) ? raw : []
+    const out = []
+    for (const item of arr) {
+      if (Array.isArray(item) && item.length >= 2) {
+        out.push({ code: item[0], count: item[1] })
+      } else if (item && typeof item === 'object') {
+        const code = item.code ?? item.status ?? item.key
+        const count = item.count ?? item.value
+        if (code != null && count != null) {
+          out.push({ code, count })
+        } else {
+          console.warn('[System] unexpected status_codes entry keys:', Object.keys(item))
+        }
+      } else {
+        console.warn('[System] unexpected status_codes entry keys:', Object.keys(item ?? {}))
+      }
+    }
+    return out.sort((a, b) => Number(b.count) - Number(a.count))
   }
 
   function levelVariant(level) {
     const l = String(level ?? '').toUpperCase()
-    if (l.includes('ERROR')) return 'destructive'
+    if (l.includes('ERROR') || l.includes('FATAL')) return 'destructive'
     if (l.includes('WARN')) return 'outline'
     return 'secondary'
   }
 
   function logLine(l) {
-    const f = l.fields ?? {}
+    const f = l && typeof l === 'object' ? l.fields ?? {} : {}
+    const msg = l?.message != null ? String(l.message) : ''
     const bits = []
     if (f.method) bits.push(f.method)
     if (f.path) bits.push(f.path)
-    if (f.status_code) bits.push(`→ ${f.status_code}`)
-    if (f.latency_ms) bits.push(`${f.latency_ms}ms`)
-    return bits.length ? `${l.message} · ${bits.join(' ')}` : l.message
+    if (f.status_code != null) bits.push(`→ ${f.status_code}`)
+    if (f.latency_ms != null) bits.push(`${f.latency_ms}ms`)
+    return bits.length ? `${msg} · ${bits.join(' ')}` : msg
   }
 
-  function ts(t) {
-    return new Date(Number(t)).toLocaleTimeString()
+  function tsTime(t) {
+    const ms = num(t)
+    if (ms === null) return '—'
+    const d = new Date(ms)
+    if (Number.isNaN(d.getTime())) return '—'
+    return d.toLocaleTimeString('en-GB', { hour12: false })
   }
+
+  function sortedLogs(raw) {
+    const arr = Array.isArray(raw) ? raw.slice() : []
+    arr.sort((a, b) => {
+      const ta = num(a?.ts) ?? 0
+      const tb = num(b?.ts) ?? 0
+      return tb - ta
+    })
+    return arr
+  }
+
+  const tiles = $derived.by(() => {
+    if (obs.phase !== 'ok' || !obs.data || typeof obs.data !== 'object') return []
+    const d = obs.data
+    return [
+      ['Requests', num(d.requests_total)?.toLocaleString() ?? '—'],
+      ['RPS', num(d.req_per_sec)?.toFixed(2) ?? '—'],
+      ['Latency ms', num(d.latency_ms) !== null ? `${num(d.latency_ms)} ms` : '—'],
+      ['Uptime', fmtUptime(d.uptime_secs)],
+      ['In-flight', num(d.active_connections)?.toLocaleString() ?? '—'],
+      ['CPU %', pctFromFrac(d.cpu_usage)],
+      ['Mem MB', memMb(d.mem_usage)],
+      ['Bytes out', humanBytes(d.bytes_out)]
+    ]
+  })
+
+  const paths = $derived(
+    obs.phase === 'ok' && Array.isArray(obs.data?.top_paths)
+      ? obs.data.top_paths.slice(0, 8).filter((p) => Array.isArray(p) && p.length >= 2)
+      : []
+  )
+
+  const codesParsed = $derived.by(() => {
+    if (obs.phase !== 'ok') return { list: [], unexpected: false }
+    const raw = obs.data?.status_codes
+    const list = statusList(raw)
+    const unexpected =
+      list.length === 0 &&
+      ((Array.isArray(raw) && raw.length > 0) || (raw != null && !Array.isArray(raw)))
+    return { list, unexpected }
+  })
+
+  const logsNewest = $derived(logsState.phase === 'ok' ? sortedLogs(logsState.data?.logs) : [])
 </script>
 
 <section class="grid gap-6">
   <div class="grid gap-1">
-    <h1 class="text-2xl font-semibold tracking-tight">System</h1>
+    <h1 class="flex items-center gap-2 text-2xl font-semibold tracking-tight">
+      <Activity class="size-5 text-muted-foreground" />
+      System
+    </h1>
     <p class="text-sm text-muted-foreground">Runtime metrics and recent request logs — real numbers only.</p>
   </div>
 
   {#if obs.phase === 'loading'}
     <div class="grid grid-cols-2 gap-3 sm:grid-cols-4" aria-busy="true">
-      {#each [0, 1, 2, 3] as i (i)}
+      {#each Array.from({ length: 8 }, (_, i) => i) as i (i)}
         <Skeleton class="h-20" />
       {/each}
     </div>
@@ -66,12 +198,88 @@
     </Alert.Root>
   {:else}
     <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
-      {#each [['Requests', obs.data.requests_total], ['RPS', obs.data.req_per_sec], ['Latency', `${obs.data.latency_ms} ms`], ['Uptime', fmtUptime(obs.data.uptime_secs)], ['In-flight', obs.data.active_connections], ['CPU', `${obs.data.cpu_usage ?? 0}%`], ['Mem MB', obs.data.mem_usage], ['Bytes out', obs.data.bytes_out]] as [label, value] (label)}
+      {#each tiles as [label, value] (label)}
         <Card.Root class="gap-1 py-4">
           <Card.Title class="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</Card.Title>
-          <Card.Description class="font-mono text-xl font-semibold">{value ?? '—'}</Card.Description>
+          <Card.Description class="font-mono text-xl font-semibold">{value}</Card.Description>
         </Card.Root>
       {/each}
+    </div>
+
+    <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      {#each sparks as s (s.key)}
+        {@const seriesArr = obs.data?.series?.[s.key]}
+        {@const pts = sparkPoints(seriesArr)}
+        {@const lastVal = latest(seriesArr)}
+        <Card.Root class="gap-2 py-4">
+          <Card.Title class="text-xs font-medium uppercase tracking-wide text-muted-foreground">{s.label}</Card.Title>
+          <Card.Description class="font-mono text-lg font-semibold">{s.fmt(lastVal)}</Card.Description>
+          <Card.Content class="px-4">
+            {#if pts.length}
+              <div class="flex h-16 items-end gap-[2px]" role="img" aria-label={`${s.label} sparkline, last ${pts.length} samples`}>
+                {#each pts as p, i (i)}
+                  <div
+                    class="min-w-[2px] flex-1 rounded-sm bg-primary"
+                    style={`height:${p.pct}%;opacity:${p.op};${p.pct > 0 ? 'min-height:2px;' : ''}`}
+                  ></div>
+                {/each}
+              </div>
+              <p class="mt-2 text-[10px] text-muted-foreground">last {pts.length} samples · 2s interval</p>
+            {:else}
+              <p class="py-5 text-center text-xs text-muted-foreground">no series data yet — sampler warms up within seconds</p>
+            {/if}
+          </Card.Content>
+        </Card.Root>
+      {/each}
+    </div>
+
+    <div class="grid gap-3 lg:grid-cols-2">
+      <Card.Root>
+        <Card.Header>
+          <Card.Title class="text-base">Top paths</Card.Title>
+          <Card.Description>Most requested routes since process start.</Card.Description>
+        </Card.Header>
+        <Card.Content>
+          {#if paths.length}
+            <ol class="grid gap-2">
+              {#each paths as p, i (p[0])}
+                <li class="flex items-center gap-3">
+                  <span class="w-5 text-right font-mono text-xs text-muted-foreground">{i + 1}.</span>
+                  <span class="min-w-0 flex-1 truncate font-mono text-xs">{String(p[0])}</span>
+                  <Badge variant="secondary">{Number(p[1]).toLocaleString()}</Badge>
+                </li>
+              {/each}
+            </ol>
+          {:else}
+            <p class="text-sm text-muted-foreground">No request counts recorded yet.</p>
+          {/if}
+        </Card.Content>
+      </Card.Root>
+
+      <Card.Root>
+        <Card.Header>
+          <Card.Title class="text-base">Status distribution</Card.Title>
+          <Card.Description>Response counts per HTTP status code.</Card.Description>
+        </Card.Header>
+        <Card.Content>
+          {#if codesParsed.list.length}
+            <div class="flex flex-wrap gap-2">
+              {#each codesParsed.list as c (`${c.code}-${c.count}`)}
+                <Badge variant={Number(c.code) >= 400 ? 'destructive' : 'secondary'}>
+                  {String(c.code)} × {Number(c.count).toLocaleString()}
+                </Badge>
+              {/each}
+            </div>
+          {:else if codesParsed.unexpected}
+            <Alert.Root variant="destructive">
+              <Alert.Title>Unexpected payload shape</Alert.Title>
+              <Alert.Description>status_codes did not match any known shape — see browser console for logged keys.</Alert.Description>
+            </Alert.Root>
+          {:else}
+            <p class="text-sm text-muted-foreground">No responses recorded yet.</p>
+          {/if}
+        </Card.Content>
+      </Card.Root>
     </div>
 
     {#if obs.data.origins?.length}
@@ -116,14 +324,17 @@
       <Card.Description>Newest first, in-memory ring buffer.</Card.Description>
     </Card.Header>
     <Card.Content>
-      {#if logs.phase === 'loading'}
+      {#if logsState.phase === 'loading'}
         <div class="grid gap-2" aria-busy="true">
-          {#each [0, 1, 2] as i (i)}
+          {#each Array.from({ length: 4 }, (_, i) => i) as i (i)}
             <Skeleton class="h-8 w-full" />
           {/each}
         </div>
-      {:else if logs.phase === 'error'}
-        <p class="text-sm text-muted-foreground">Logs endpoint unavailable.</p>
+      {:else if logsState.phase === 'error'}
+        <Alert.Root variant="destructive">
+          <Alert.Title>Logs unavailable</Alert.Title>
+          <Alert.Description>Could not load /rail-api/logs?limit=25.</Alert.Description>
+        </Alert.Root>
       {:else}
         <Table.Root>
           <Table.Header>
@@ -134,10 +345,10 @@
             </Table.Row>
           </Table.Header>
           <Table.Body>
-            {#each logs.data.logs ?? [] as l (l.ts + l.message)}
+            {#each logsNewest as l, i (i)}
               <Table.Row>
-                <Table.Cell class="font-mono text-xs">{ts(l.ts)}</Table.Cell>
-                <Table.Cell><Badge variant={levelVariant(l.level)}>{String(l.level).toLowerCase()}</Badge></Table.Cell>
+                <Table.Cell class="font-mono text-xs">{tsTime(l?.ts)}</Table.Cell>
+                <Table.Cell><Badge variant={levelVariant(l?.level)}>{String(l?.level ?? 'unknown').toLowerCase()}</Badge></Table.Cell>
                 <Table.Cell class="max-w-md truncate font-mono text-xs">{logLine(l)}</Table.Cell>
               </Table.Row>
             {:else}

@@ -9,15 +9,35 @@
   import Building2 from 'lucide-svelte/icons/building-2'
   import RouteIcon from 'lucide-svelte/icons/route'
   import Ticket from 'lucide-svelte/icons/ticket'
-  import Activity from 'lucide-svelte/icons/activity'
 
   let state = $state({ phase: 'loading', data: null })
+  let obs = $state(null)
 
   $effect(() => {
     api('/rail-api/source-status').then((res) => {
       state = res.ok ? { phase: 'ok', data: res.data } : { phase: 'error', data: null }
     })
+    api('/rail-api/observability').then((res) => {
+      if (res.ok && res.data && typeof res.data === 'object') {
+        obs = res.data
+      }
+    })
   })
+
+  function fmtUptime(secs) {
+    const n = Number(secs)
+    if (!Number.isFinite(n) || n <= 0) return null
+    const h = Math.floor(n / 3600)
+    const m = Math.floor((n % 3600) / 60)
+    return h > 0 ? `${h}h ${m}m` : `${m}m`
+  }
+
+  const uptimeLabel = $derived(fmtUptime(obs?.uptime_secs))
+  const showObs = $derived(
+    Boolean(obs && (obs?.requests_total != null || uptimeLabel || obs?.active_connections != null))
+  )
+
+  const popularTrains = [12951, 12309, 12002]
 
   const features = [
     { href: '/train', icon: TrainFront, title: 'Live train status', desc: 'Where is my train right now, delay per station.' },
@@ -49,6 +69,36 @@
           {state.data.sources.filter((s) => s.reachable).length}/{state.data.sources.length} upstreams up
         </Badge>
       {/if}
+    </div>
+
+    {#if showObs}
+      <div class="flex flex-wrap gap-2">
+        <div class="rounded-md border bg-muted/40 px-3 py-1.5">
+          <p class="text-[10px] uppercase tracking-wide text-muted-foreground">requests_total</p>
+          <p class="text-sm font-medium tabular-nums">{obs?.requests_total ?? '—'}</p>
+        </div>
+        <div class="rounded-md border bg-muted/40 px-3 py-1.5">
+          <p class="text-[10px] uppercase tracking-wide text-muted-foreground">uptime</p>
+          <p class="text-sm font-medium tabular-nums">{uptimeLabel ?? '—'}</p>
+        </div>
+        <div class="rounded-md border bg-muted/40 px-3 py-1.5">
+          <p class="text-[10px] uppercase tracking-wide text-muted-foreground">active connections</p>
+          <p class="text-sm font-medium tabular-nums">{obs?.active_connections ?? '—'}</p>
+        </div>
+      </div>
+    {/if}
+
+    <div class="flex flex-wrap items-center gap-2 pt-1">
+      <span class="text-xs text-muted-foreground">Popular trains</span>
+      {#each popularTrains as n (n)}
+        <button
+          type="button"
+          class="inline-flex h-6 items-center rounded-full border px-2.5 font-mono text-xs transition-colors hover:bg-muted hover:text-foreground"
+          onclick={() => navigate(`/train/${n}`)}
+        >
+          {n}
+        </button>
+      {/each}
     </div>
   </div>
 
