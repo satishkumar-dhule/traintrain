@@ -4,7 +4,9 @@
 //!
 //! Contract: `docs/ASKDISHA_MODULE.md` (Fixtures + Rust types sections).
 
-use railway_rs::core::corover::{ScheduleResponse, SettingsFlag, StationRow};
+use railway_rs::core::corover::{
+    NearbyStation, PinLookup, ScheduleResponse, SettingsFlag, StationRow,
+};
 
 fn fixture(name: &str) -> String {
     std::fs::read_to_string(format!("testdata/askdisha/{name}")).unwrap_or_else(|e| {
@@ -82,6 +84,50 @@ fn faqs_en_is_valid_string_array_with_at_least_50_entries() {
         faqs.len()
     );
     assert!(faqs.iter().all(|f| !f.trim().is_empty()));
+}
+
+#[test]
+fn nearby_mumbai_parses_through_contract_struct() {
+    let raw = fixture("nearby_mumbai.json");
+    let rows: Vec<NearbyStation> = serde_json::from_str(&raw).expect("nearby must deserialize");
+
+    assert!(!rows.is_empty(), "nearby rows must be non-empty");
+    // Upstream carries real km distances; they must survive parsing as f64.
+    assert!(
+        rows.iter()
+            .all(|r| r.distance.is_some_and(|d| d.is_finite())),
+        "every captured row has a finite distance"
+    );
+    // Fixture is captured already nearest-first.
+    assert!(
+        rows.windows(2)
+            .all(|w| w[0].distance.unwrap_or(f64::INFINITY)
+                <= w[1].distance.unwrap_or(f64::INFINITY)),
+        "capture is distance-sorted"
+    );
+
+    let first = &rows[0];
+    assert_eq!(first.code, "CLA");
+    assert_eq!(first.name, "KURLA JN");
+    assert_eq!(first.name_hi.as_deref(), Some("कुर्ला जन"));
+    assert_eq!(first.name_gu.as_deref(), Some("કુર્લા જન"));
+    assert_eq!(first.district.as_deref(), Some("Mumbai Suburban"));
+    assert_eq!(first.state.as_deref(), Some("Maharashtra"));
+
+    // Unknown upstream fields (trainCount/latitude/longitude/address) are
+    // ignored by the contract struct - the parse above tolerates them.
+
+    // The fixture holds fewer rows than the 50-row response cap.
+    assert!(rows.len() < 50);
+}
+
+#[test]
+fn pin_400001_parses_through_contract_struct() {
+    let raw = fixture("pin_400001.json");
+    let pin: PinLookup = serde_json::from_str(&raw).expect("pin must deserialize");
+
+    assert_eq!(pin.state, "MAHARASHTRA");
+    assert_eq!(pin.city_list, vec!["Raigarh(MH)", "Mumbai"]);
 }
 
 #[test]

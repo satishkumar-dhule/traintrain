@@ -19,12 +19,25 @@ async fn observability_returns_real_metrics() {
     );
 
     let origins = body["origins"].as_array().unwrap();
-    assert_eq!(origins.len(), 5);
+    assert_eq!(origins.len(), 7);
     let names: Vec<&str> = origins
         .iter()
         .map(|o| o["name"].as_str().unwrap())
         .collect();
-    assert_eq!(names, ["Railyatri", "etrain", "NTES", "IRCTC", "Paytm"]);
+    // The two AskDISHA origins are listed only while the module is enabled
+    // (on by default in tests).
+    assert_eq!(
+        names,
+        [
+            "Railyatri",
+            "etrain",
+            "NTES",
+            "IRCTC",
+            "Paytm",
+            "AskDISHA API",
+            "AskDISHA CDN"
+        ]
+    );
     for origin in origins {
         assert!(origin["latency"].as_u64().is_some());
         assert!(origin["status"].as_str().is_some());

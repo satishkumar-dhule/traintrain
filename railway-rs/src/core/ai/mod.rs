@@ -8,7 +8,7 @@
 
 pub mod client;
 
-pub use client::{AiClient, AiEvent, ChatMessage};
+pub use client::{AiClient, AiEvent, AssembledToolCall, ChatMessage};
 
 #[cfg(test)]
 mod tests;

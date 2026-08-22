@@ -86,6 +86,7 @@ pub fn map_response(norm: &Value) -> Result<LiveStatusResponse, AppError> {
                 code: str_at(s, "code"),
                 scheduled_arrival: scheduled.clone(),
                 actual_arrival: actual.clone(),
+                platform: str_at(s, "platform"),
                 delay_minutes: s
                     .get("delay_minutes")
                     .and_then(Value::as_i64)
@@ -143,6 +144,7 @@ pub fn map_response(norm: &Value) -> Result<LiveStatusResponse, AppError> {
                                 code: str_at(s, "code"),
                                 scheduled_arrival: scheduled.clone(),
                                 actual_arrival: actual.clone(),
+                                platform: str_at(s, "platform"),
                                 delay_minutes: s
                                     .get("delay_minutes")
                                     .and_then(Value::as_i64)
@@ -162,6 +164,7 @@ pub fn map_response(norm: &Value) -> Result<LiveStatusResponse, AppError> {
             TrainInstance {
                 start_date: str_at(&i, "start_date"),
                 position: str_at(&i, "position"),
+                platform_number: str_at(&i, "platform_number"),
                 stops: inst_stops,
             }
         })
@@ -172,6 +175,7 @@ pub fn map_response(norm: &Value) -> Result<LiveStatusResponse, AppError> {
         train_number: Some(str_at(norm, "train_number")),
         train_name: Some(str_at(norm, "train_name")),
         current_location_info: Some(location),
+        platform_number: (!platform_number.is_empty()).then_some(platform_number),
         train_start_date: (!train_start_date.is_empty()).then_some(train_start_date),
         instances: (!instances.is_empty()).then_some(instances),
         data_source: Some(src.to_string()),
@@ -222,24 +226,37 @@ mod tests {
             "dest_stn_name": "NEW DELHI",
             "next_station_code": "BVI",
             "next_station_name": "BORIVALI",
+            "platform_number": "3",
             "at_src": "false",
             "at_dstn": "false",
             "data_source": "NTES",
             "stops": [
-                {"name": "MUMBAI CENTRAL", "code": "MMCT", "arrival": "17:40", "actual_arrival": "17:40"},
-                {"name": "BORIVALI", "code": "BVI", "arrival": "18:05", "actual_arrival": "18:15"},
-                {"name": "NEW DELHI", "code": "NDLS", "arrival": "08:32", "actual_arrival": ""}
+                {"name": "MUMBAI CENTRAL", "code": "MMCT", "arrival": "17:40", "actual_arrival": "17:40", "platform": "1"},
+                {"name": "BORIVALI", "code": "BVI", "arrival": "18:05", "actual_arrival": "18:15", "platform": "2"},
+                {"name": "NEW DELHI", "code": "NDLS", "arrival": "08:32", "actual_arrival": "", "platform": "4"}
             ]
         });
         let resp = map_response(&norm).unwrap();
         assert_eq!(resp.data_source.as_deref(), Some("NTES"));
+        assert_eq!(
+            resp.platform_number.as_deref(),
+            Some("3"),
+            "next-station platform surfaces structurally"
+        );
         let stations = resp.stations.unwrap();
         assert_eq!(stations[0].status, "departed");
         assert_eq!(stations[1].status, "expected");
         assert_eq!(stations[2].status, "scheduled");
         assert_eq!(stations[1].actual_arrival, "18:15");
         assert_eq!(stations[2].actual_arrival, "");
-        assert!(resp.current_location_info.unwrap().contains("BORIVALI"));
+        assert_eq!(stations[0].platform, "1");
+        assert_eq!(stations[2].platform, "4");
+        let location = resp.current_location_info.unwrap();
+        assert!(location.contains("BORIVALI"));
+        assert!(
+            location.contains("Expected platform 3"),
+            "prose platform stays for backward compat: {location}"
+        );
     }
 
     #[test]
@@ -305,6 +322,70 @@ mod tests {
         assert_eq!(instances[0].start_date, "02-May-2026");
         assert_eq!(instances[0].position, "Yet to start from its source");
         assert_eq!(instances[1].start_date, "01-May-2026");
+    }
+
+    #[test]
+    fn map_response_instances_carry_platform_numbers() {
+        let norm = json!({
+            "train_number": "12951",
+            "platform_number": "2",
+            "at_src": "false",
+            "at_dstn": "false",
+            "data_source": "NTES",
+            "instances": [
+                {
+                    "start_date": "02-May-2026",
+                    "position": "Running",
+                    "platform_number": "5",
+                    "stops": [
+                        {"name": "MUMBAI CENTRAL", "code": "MMCT", "arrival": "17:40", "actual_arrival": "17:40", "platform": "1"},
+                        {"name": "BORIVALI", "code": "BVI", "arrival": "18:05", "actual_arrival": "", "platform": "5"}
+                    ]
+                },
+                {"start_date": "01-May-2026", "position": "Yet to start from its source"}
+            ],
+            "stops": [
+                {"name": "MUMBAI CENTRAL", "code": "MMCT", "arrival": "17:40", "actual_arrival": "17:40", "platform": "1"}
+            ]
+        });
+        let resp = map_response(&norm).unwrap();
+        let instances = resp.instances.unwrap();
+        assert_eq!(instances.len(), 2);
+        assert_eq!(
+            instances[0].platform_number, "5",
+            "per-instance next-station platform surfaces verbatim"
+        );
+        let inst_stops = instances[0].stops.as_ref().unwrap();
+        assert_eq!(inst_stops[0].platform, "1");
+        assert_eq!(inst_stops[1].platform, "5");
+    }
+
+    #[test]
+    fn map_response_absent_platform_serializes_to_none_and_empty() {
+        // Railyatri never carries platforms; nothing may be invented.
+        let norm = json!({
+            "train_number": "12951",
+            "at_src": "false",
+            "at_dstn": "false",
+            "data_source": "Railyatri",
+            "stops": [
+                {"name": "MUMBAI CENTRAL", "code": "MMCT", "arrival": "17:40", "actual_arrival": ""}
+            ]
+        });
+        let resp = map_response(&norm).unwrap();
+        assert!(resp.platform_number.is_none());
+        // Serialize before the partial move of `stations`.
+        let wire = serde_json::to_value(&resp).unwrap();
+        let stations = resp.stations.unwrap();
+        assert_eq!(
+            stations[0].platform, "",
+            "missing stop platform stays empty"
+        );
+        assert!(
+            wire.get("platform_number").is_none(),
+            "absent platform is omitted from the wire model"
+        );
+        assert_eq!(wire["stations"][0]["platform"], "");
     }
 
     #[test]

@@ -5,7 +5,6 @@
   import * as Card from '$lib/components/ui/card/index.js'
   import { Button } from '$lib/components/ui/button/index.js'
   import { Label } from '$lib/components/ui/label/index.js'
-  import { Badge } from '$lib/components/ui/badge/index.js'
   import { Skeleton } from '$lib/components/ui/skeleton/index.js'
   import * as Alert from '$lib/components/ui/alert/index.js'
 import AutoCompleteInput from '$lib/components/AutoCompleteInput.svelte'
@@ -13,6 +12,9 @@ import ArrowDownUpIcon from 'lucide-svelte/icons/arrow-down-up'
 import RouteIcon from 'lucide-svelte/icons/route'
 import DataTable from '$lib/components/DataTable.svelte'
 import EmptyState from '$lib/components/EmptyState.svelte'
+import RecentSearches from '$lib/components/RecentSearches.svelte'
+import { loadRecent, rememberRecent, clearStored } from '$lib/recent.js'
+import { TrainNumberBadge, RunsOnBadges } from '$lib/components/badges/index.js'
 
   let { src = '', dst = '' } = $props()
 
@@ -25,6 +27,17 @@ import EmptyState from '$lib/components/EmptyState.svelte'
   let result = $state(null)
 
   let key = ''
+
+  const RECENT_KEY = 'rc-journeys-recent'
+  let recent = $state(loadRecent(RECENT_KEY))
+
+  function pickRecent(r) {
+    const [s, d] = String(r?.id ?? '').split('|')
+    if (!s || !d) return
+    from = s
+    to = d
+    commit()
+  }
 
   function norm(v) {
     return String(v ?? '').trim().toUpperCase()
@@ -104,6 +117,11 @@ import EmptyState from '$lib/components/EmptyState.svelte'
       if (res.ok) {
         result = res.data
         phase = 'ok'
+        recent = rememberRecent(
+          RECENT_KEY,
+          { id: `${s}|${d}`, label: `${s} → ${d}` },
+          (r) => r && typeof r?.id === 'string',
+        )
       } else {
         phase = 'error'
         errorMsg = res.error || `HTTP ${res.status}`
@@ -114,22 +132,13 @@ import EmptyState from '$lib/components/EmptyState.svelte'
 
 {#snippet trainCell(t)}
   <span class="flex items-center gap-2">
-    <Badge variant="secondary">{t.number}</Badge>
+    <TrainNumberBadge number={t.number} name={t.name} />
     <span>{t.name}</span>
   </span>
 {/snippet}
 
 {#snippet runsCell(t)}
-  <span class="flex flex-wrap items-center gap-1">
-    {#each t.runs_on ?? [] as active, di (di)}
-      <Badge
-        variant={active ? 'secondary' : 'outline'}
-        class={`flex h-5 w-5 items-center justify-center px-1 text-[10px]${active ? '' : ' opacity-40'}`}
-      >
-        {DAY_LETTERS[di] ?? ''}
-      </Badge>
-    {/each}
-  </span>
+  <RunsOnBadges days={t.runs_on ?? []} />
 {/snippet}
 
 <div class="flex flex-col gap-4">
@@ -209,6 +218,16 @@ import EmptyState from '$lib/components/EmptyState.svelte'
       </Card.Content>
     </Card.Root>
   {:else if phase === 'idle'}
+    {#if recent.length > 0}
+      <RecentSearches
+        items={recent}
+        onpick={pickRecent}
+        onclear={() => {
+          clearStored(RECENT_KEY)
+          recent = []
+        }}
+      />
+    {/if}
     <EmptyState
       icon={RouteIcon}
       title="Pick two stations"

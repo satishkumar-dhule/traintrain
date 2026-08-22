@@ -107,10 +107,12 @@
       last.content += evt.text ?? ''
     } else if (evt.type === 'reasoning') {
       last.reasoning = (last.reasoning ?? '') + (evt.text ?? '')
+    } else if (evt.type === 'tools') {
+      last.tools = [...(last.tools ?? []), ...(evt.names ?? [])]
     } else if (evt.type === 'done') {
       last.tokens = evt.completion_tokens ?? 0
     } else if (evt.type === 'error') {
-      streamError = evt.error || 'The assistant hit an upstream error.'
+      streamError = evt.message || evt.error || 'The assistant hit an upstream error.'
       if (!last.content && !last.reasoning) turns.pop()
     }
   }
@@ -125,7 +127,7 @@
       content: t.content,
     }))
     turns.push({ role: 'user', content: text })
-    turns.push({ role: 'assistant', content: '', reasoning: '', tokens: null })
+    turns.push({ role: 'assistant', content: '', reasoning: '', tokens: null, tools: [] })
     streaming = true
     try {
       const res = await fetch('/rail-api/ai/chat', {
@@ -215,6 +217,15 @@
                     ? 'bg-muted'
                     : ''}"
                 >
+                  {#if t.tools?.length}
+                    <div class="mb-1.5 flex flex-wrap gap-1">
+                      {#each t.tools as name}
+                        <span
+                          class="rounded-full border bg-muted px-2 py-0.5 text-[11px] text-muted-foreground"
+                        >checked live data: {name}</span>
+                      {/each}
+                    </div>
+                  {/if}
                   {#if t.reasoning}
                     <details class="mb-1.5 text-xs text-muted-foreground">
                       <summary class="cursor-pointer select-none">Thinking…</summary>

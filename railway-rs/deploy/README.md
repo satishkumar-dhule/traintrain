@@ -75,7 +75,7 @@ or produce a Docker image following your existing image build process.
 | `RAILWAY_SOURCE_PAYTM_BASE`       | `https://travel.paytm.com`                        | Base URL of the Paytm Travel upstream source         |
 
 All variables are optional. `RAILWAY_HTTP_TIMEOUT` and `RAILWAY_CACHE_TTL` are
-parsed as seconds. The app needs no API keys: it reads only public, free
+parsed as seconds. The app needs no AI API keys: it reads only public, free
 sources.
 
 ## Operations
@@ -122,4 +122,4 @@ sudo systemctl status railway-rs
 
 Note: the service runs with `ProtectSystem=strict` and `ReadWritePaths=/opt/railway-rs`,
 so any cache/data writes are confined to `/opt/railway-rs`. The application
-needs no API keys and uses only public, free data sources.
+needs no AI API keys and uses only public, free data sources. The optional AI assistant (/rail-api/ai/*) calls the OpenCode Zen gateway keyless on free models by default; set RAILWAY_AI_MODEL / RAILWAY_AI_API_KEY to change it and RAILWAY_AI_ENABLED=false to disable.

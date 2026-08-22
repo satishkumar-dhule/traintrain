@@ -113,3 +113,33 @@ async fn both_sources_down_is_bad_gateway_mentioning_all() {
         "error should mention Railyatri: {err}"
     );
 }
+
+#[tokio::test]
+async fn corover_is_final_fallback_with_distance_and_day() {
+    let app = TestApp::spawn().await;
+
+    // NTES unreachable (no mock route) and Railyatri 5xx: the Ask DISHA
+    // `trnscheduleEnq` branch must win and normalize into the same wire
+    // shape (real captured upstream body from the live fixture).
+    app.mocks["railyatri"].route_error("/time-table/12951", StatusCode::INTERNAL_SERVER_ERROR);
+    let fixture = std::fs::read_to_string("testdata/askdisha/schedule_12951.json").unwrap();
+    let payload: serde_json::Value = serde_json::from_str(&fixture).unwrap();
+    app.mocks["corover"].route_json("/dishaAPI/bot/trnscheduleEnq/12951", payload);
+
+    let (status, body) = app.get("/rail-api/schedule?train=12951").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["data_source"], "CoRover");
+    assert_eq!(body["source"], "CoRover");
+    assert_eq!(body["train_number"], "12951");
+
+    let stops = body["stops"].as_array().unwrap();
+    assert_eq!(stops.len(), 8);
+    assert_eq!(stops[0]["code"], "MMCT");
+    assert_eq!(stops[0]["distance_km"], 0.0);
+    assert_eq!(stops[0]["day"], 1);
+    assert_eq!(stops[4]["distance_km"], 653.0);
+    assert_eq!(stops[4]["day"], 2);
+
+    // Cache key is shared with the other sources.
+    assert!(app.state.cache.get("schedule:12951").is_some());
+}

@@ -4,7 +4,6 @@
   import * as Card from '$lib/components/ui/card/index.js'
   import { Button } from '$lib/components/ui/button/index.js'
   import { Label } from '$lib/components/ui/label/index.js'
-  import { Badge } from '$lib/components/ui/badge/index.js'
   import * as Select from '$lib/components/ui/select/index.js'
   import { Skeleton } from '$lib/components/ui/skeleton/index.js'
   import * as Alert from '$lib/components/ui/alert/index.js'
@@ -12,6 +11,9 @@ import AutoCompleteInput from '$lib/components/AutoCompleteInput.svelte'
 import CalendarX2Icon from 'lucide-svelte/icons/calendar-x-2'
 import DataTable from '$lib/components/DataTable.svelte'
 import EmptyState from '$lib/components/EmptyState.svelte'
+import RecentSearches from '$lib/components/RecentSearches.svelte'
+import { ExceptionKindBadge, StatusBadge } from '$lib/components/badges/index.js'
+import { loadRecent, rememberRecent, clearStored } from '$lib/recent.js'
 
   let { number = '', kind = '' } = $props()
 
@@ -30,6 +32,25 @@ import EmptyState from '$lib/components/EmptyState.svelte'
   let data = $state(null)
   let seq = 0
 
+  const RECENT_KEY = 'rc-exceptions-recent'
+  let recent = $state(loadRecent(RECENT_KEY))
+
+  function rememberException(n, k) {
+    recent = rememberRecent(
+      RECENT_KEY,
+      { id: `${n}|${k}`, label: n, sub: KIND_LABELS[k] ?? k },
+      (r) => r && typeof r?.id === 'string',
+    )
+  }
+
+  function pickRecent(r) {
+    const [n, k] = String(r?.id ?? '').split('|')
+    if (!n || !KINDS.includes(k)) return
+    query = n
+    selectedKind = k
+    search()
+  }
+
   function norm(v) {
     try {
       return decodeURIComponent(String(v ?? '')).trim()
@@ -46,12 +67,6 @@ import EmptyState from '$lib/components/EmptyState.svelte'
     return `${m[3]}-${MONTHS[Number(m[2]) - 1] ?? m[2]}-${m[1]}`
   }
 
-  function kindVariant(v) {
-    if (v === 'cancelled') return 'destructive'
-    if (v === 'rescheduled') return 'secondary'
-    return 'outline'
-  }
-
   async function load(n, k) {
     seq += 1
     const my = seq
@@ -64,6 +79,7 @@ import EmptyState from '$lib/components/EmptyState.svelte'
     if (res.ok) {
       data = res.data
       phase = 'ok'
+      rememberException(n, k)
     } else {
       data = null
       phase = 'error'
@@ -116,7 +132,7 @@ import EmptyState from '$lib/components/EmptyState.svelte'
 {/snippet}
 
 {#snippet kindCell(e)}
-  <Badge variant={kindVariant(e.kind)}>{e.kind || 'unknown'}</Badge>
+  <ExceptionKindBadge kind={e.kind} />
 {/snippet}
 
 <section class="grid gap-6" class:idle-center={phase === 'idle'}>
@@ -155,6 +171,17 @@ import EmptyState from '$lib/components/EmptyState.svelte'
     </Card.Content>
   </Card.Root>
 
+  {#if phase === 'idle' && recent.length > 0}
+    <RecentSearches
+      items={recent}
+      onpick={pickRecent}
+      onclear={() => {
+        clearStored(RECENT_KEY)
+        recent = []
+      }}
+    />
+  {/if}
+
   {#if phase === 'loading'}
     <Card.Root>
       <Card.Content class="grid gap-2" aria-busy="true">
@@ -185,7 +212,7 @@ import EmptyState from '$lib/components/EmptyState.svelte'
             {entries.length} exception{entries.length === 1 ? '' : 's'}{route ? ` · ${route}` : ''}
           </Card.Description>
         </div>
-        <Badge variant="secondary">{KIND_LABELS[data.type] ?? KIND_LABELS[kind] ?? kind}</Badge>
+        <StatusBadge tone="neutral">{KIND_LABELS[data.type] ?? KIND_LABELS[kind] ?? kind}</StatusBadge>
       </Card.Header>
       <Card.Content class="grid gap-4">
         {#if entries.length > 0}

@@ -5,13 +5,20 @@
   import { Button } from '$lib/components/ui/button/index.js'
   import { Input } from '$lib/components/ui/input/index.js'
   import { Label } from '$lib/components/ui/label/index.js'
-  import { Badge } from '$lib/components/ui/badge/index.js'
   import { Skeleton } from '$lib/components/ui/skeleton/index.js'
   import * as Alert from '$lib/components/ui/alert/index.js'
   import ArrowRight from 'lucide-svelte/icons/arrow-right'
   import Ticket from 'lucide-svelte/icons/ticket'
-  import DataTable from '$lib/components/DataTable.svelte'
-  import EmptyState from '$lib/components/EmptyState.svelte'
+import DataTable from '$lib/components/DataTable.svelte'
+import EmptyState from '$lib/components/EmptyState.svelte'
+import RecentSearches from '$lib/components/RecentSearches.svelte'
+import {
+  TrainNumberBadge,
+  StationCodeBadge,
+  PnrStatusBadge,
+  DataSourceBadge,
+  StatusBadge
+} from '$lib/components/badges/index.js'
 
   const RECENT_KEY = 'rc-pnr-recent'
 
@@ -113,18 +120,6 @@
     return v && v !== '-' && v !== '--' ? v : '—'
   }
 
-  function statusKind(s) {
-    const t = String(s ?? '')
-      .trim()
-      .toUpperCase()
-    if (!t || t === '-' || t === '--') return null
-    const head = t.split(/[\s/-]/)[0]
-    if (head === 'CNF') return 'cnf'
-    if (head === 'RAC') return 'rac'
-    if (head === 'WL' || head === 'WAITLIST' || head === 'WAITLISTED') return 'wl'
-    return null
-  }
-
   const passengers = $derived(Array.isArray(data?.passengers) ? data.passengers : [])
 
   const cols = [
@@ -147,18 +142,7 @@
 {/snippet}
 
 {#snippet bookingCell(p)}
-  {@const kind = statusKind(p.booking_status)}
-  {#if kind === 'cnf'}
-    <Badge variant="default" class="border-emerald-600/40 text-emerald-600 dark:text-emerald-400">
-      {fmt(p.booking_status)}
-    </Badge>
-  {:else if kind === 'rac'}
-    <Badge variant="secondary">{fmt(p.booking_status)}</Badge>
-  {:else if kind === 'wl'}
-    <Badge variant="outline">{fmt(p.booking_status)}</Badge>
-  {:else}
-    <span class="text-muted-foreground">{fmt(p.booking_status)}</span>
-  {/if}
+  <PnrStatusBadge status={p.booking_status} />
 {/snippet}
 
 <section class="grid gap-6" class:idle-center={phase === 'idle'}>
@@ -189,25 +173,13 @@
     </Card.Content>
   </Card.Root>
 
-  {#if recent.length > 0}
-    <div class="flex flex-wrap items-center gap-2">
-      <span class="flex items-center gap-1.5 text-xs text-muted-foreground">Recent lookups</span>
-      {#each recent as r (r)}
-        <a
-          href={`/pnr/${r}`}
-          class="inline-flex h-6 items-center rounded-full border px-2.5 font-mono text-xs transition-colors hover:bg-muted hover:text-foreground"
-          onclick={(e) => {
-            e.preventDefault()
-            useRecent(r)
-          }}
-        >
-          {r}
-        </a>
-      {/each}
-      <Button variant="ghost" size="xs" class="h-6 text-xs text-muted-foreground" onclick={clearRecent}>
-        Clear all
-      </Button>
-    </div>
+  {#if phase === 'idle' && recent.length > 0}
+    <RecentSearches
+      title="Recent lookups"
+      items={recent.map((r) => ({ id: r, label: r }))}
+      onpick={(item) => useRecent(item.id)}
+      onclear={clearRecent}
+    />
   {/if}
 
   {#if phase === 'captcha' && captcha}
@@ -260,17 +232,15 @@
     <Card.Root>
       <Card.Header class="gap-3 space-y-0">
         <div class="flex flex-wrap items-center justify-between gap-2">
-          <Card.Title>
-            <span class="font-mono">{data.train_number ?? '—'}</span> · {data.train_name ?? ''}
+          <Card.Title class="flex flex-wrap items-center gap-2">
+            <TrainNumberBadge number={data.train_number} name={data.train_name} />
+            <span>{data.train_name ?? ''}</span>
           </Card.Title>
-          <div class="flex shrink-0 flex-wrap items-center gap-1.5">
-            {#if data.freshness}<Badge variant="secondary">{data.freshness}</Badge>{/if}
-            {#if data.data_source}<Badge variant="outline">{data.data_source}</Badge>{/if}
-          </div>
+          <DataSourceBadge source={data.data_source} freshness={data.freshness} />
         </div>
         <div class="flex flex-wrap items-center gap-x-5 gap-y-3 rounded-lg border bg-muted/40 px-4 py-3">
           <div class="grid min-w-28 gap-0.5">
-            <span class="font-mono text-sm font-semibold">{fmt(data.from?.code)}</span>
+            <StationCodeBadge code={data.from?.code} name={data.from?.name} class="text-sm" />
             <span class="truncate text-xs text-muted-foreground">{fmt(data.from?.name)}</span>
             <span class="text-xs text-muted-foreground">
               {fmt(data.from?.time)}{#if data.from?.day}&nbsp;· day {data.from.day}{/if}
@@ -278,13 +248,13 @@
           </div>
           <ArrowRight class="size-4 shrink-0 text-muted-foreground" />
           <div class="grid min-w-28 gap-0.5">
-            <span class="font-mono text-sm font-semibold">{fmt(data.to?.code)}</span>
+            <StationCodeBadge code={data.to?.code} name={data.to?.name} class="text-sm" />
             <span class="truncate text-xs text-muted-foreground">{fmt(data.to?.name)}</span>
             <span class="text-xs text-muted-foreground">
               {fmt(data.to?.time)}{#if data.to?.day}&nbsp;· day {data.to.day}{/if}
             </span>
           </div>
-          <Badge variant="secondary" class="ml-auto shrink-0">journey {fmt(data.journey_date)}</Badge>
+          <StatusBadge tone="info" class="ml-auto shrink-0">journey {fmt(data.journey_date)}</StatusBadge>
         </div>
       </Card.Header>
       <Card.Content>

@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::time::Duration;
 
 use futures::Stream;
@@ -11,6 +11,10 @@ use crate::core::error::AppError;
 pub struct ChatMessage {
     pub role: String,
     pub content: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<serde_json::Value>>,
 }
 
 impl ChatMessage {
@@ -18,6 +22,8 @@ impl ChatMessage {
         Self {
             role: "system".into(),
             content: content.into(),
+            tool_call_id: None,
+            tool_calls: None,
         }
     }
 
@@ -25,6 +31,8 @@ impl ChatMessage {
         Self {
             role: "user".into(),
             content: content.into(),
+            tool_call_id: None,
+            tool_calls: None,
         }
     }
 
@@ -32,8 +40,38 @@ impl ChatMessage {
         Self {
             role: "assistant".into(),
             content: content.into(),
+            tool_call_id: None,
+            tool_calls: None,
         }
     }
+
+    /// Assistant turn requesting tool executions (raw OpenAI tool_calls shape).
+    pub fn assistant_with_tool_calls(tool_calls: Vec<serde_json::Value>) -> Self {
+        Self {
+            role: "assistant".into(),
+            content: String::new(),
+            tool_call_id: None,
+            tool_calls: Some(tool_calls),
+        }
+    }
+
+    /// Result of one local tool execution.
+    pub fn tool_result(tool_call_id: impl Into<String>, content: impl Into<String>) -> Self {
+        Self {
+            role: "tool".into(),
+            content: content.into(),
+            tool_call_id: Some(tool_call_id.into()),
+            tool_calls: None,
+        }
+    }
+}
+
+/// A fully-assembled tool request from the model (streamed fragments merged).
+#[derive(Debug, Clone, PartialEq)]
+pub struct AssembledToolCall {
+    pub id: String,
+    pub name: String,
+    pub arguments: String,
 }
 
 /// A decoded piece of a streamed completion.
@@ -44,6 +82,8 @@ pub enum AiEvent {
     Reasoning(String),
     /// Answer text fragment.
     Delta(String),
+    /// The model requested local tool executions (all fragments merged).
+    ToolCalls(Vec<AssembledToolCall>),
     /// Terminal event with token usage when the upstream reported it.
     Done {
         prompt_tokens: u64,
@@ -130,11 +170,25 @@ impl AiClient {
         &self,
         messages: &[ChatMessage],
     ) -> Result<impl Stream<Item = Result<AiEvent, AppError>>, AppError> {
-        let body = serde_json::json!({
+        self.chat_stream_with_tools(messages, &[]).await
+    }
+
+    /// Like [`chat_stream`] but advertising local function tools; when the
+    /// model requests one, the stream yields an assembled
+    /// [`AiEvent::ToolCalls`] just before the terminal [`AiEvent::Done`].
+    pub async fn chat_stream_with_tools(
+        &self,
+        messages: &[ChatMessage],
+        tools: &[serde_json::Value],
+    ) -> Result<impl Stream<Item = Result<AiEvent, AppError>>, AppError> {
+        let mut body = serde_json::json!({
             "model": self.model,
             "messages": messages,
             "stream": true,
         });
+        if !tools.is_empty() {
+            body["tools"] = serde_json::Value::Array(tools.to_vec());
+        }
         let mut req = self.http.post(self.chat_url()).json(&body);
         if let Some(key) = &self.api_key {
             req = req.bearer_auth(key);
@@ -157,10 +211,39 @@ impl AiClient {
     /// Convenience for single-shot use (insights): collect the full answer,
     /// discarding reasoning fragments and returning `(text, prompt_tokens,
     /// completion_tokens)`.
+    ///
+    /// The free Zen tier intermittently fails a completion outright
+    /// (`network_error` finish reason or instant close) even though a retry
+    /// succeeds. Insights are idempotent, so failures and empty answers are
+    /// retried with a short backoff before surfacing; the streaming relay
+    /// cannot do this without duplicating partial output, and deliberately
+    /// does not. Never returns an empty answer: the last upstream error wins.
     pub async fn chat_complete(
         &self,
         messages: &[ChatMessage],
     ) -> Result<(String, u64, u64), AppError> {
+        const ATTEMPTS: usize = 3;
+        let mut last_err = None;
+        for attempt in 0..ATTEMPTS {
+            if attempt > 0 {
+                tokio::time::sleep(Duration::from_millis(700 * attempt as u64)).await;
+            }
+            match self.try_complete(messages).await {
+                Ok(out) => return Ok(out),
+                Err(e) => {
+                    tracing::warn!(
+                        attempt = attempt + 1,
+                        error = %e.message(),
+                        "ai single-shot completion failed"
+                    );
+                    last_err = Some(e);
+                }
+            }
+        }
+        Err(last_err.unwrap_or_else(|| AppError::internal("no completion attempt made")))
+    }
+
+    async fn try_complete(&self, messages: &[ChatMessage]) -> Result<(String, u64, u64), AppError> {
         use futures::StreamExt;
         let mut stream = Box::pin(self.chat_stream(messages).await?);
         let mut text = String::new();
@@ -169,11 +252,19 @@ impl AiClient {
             match ev? {
                 AiEvent::Delta(t) => text.push_str(&t),
                 AiEvent::Reasoning(_) => {}
+                // Insights never advertise tools, but stay total anyway.
+                AiEvent::ToolCalls(_) => {}
                 AiEvent::Done {
                     prompt_tokens,
                     completion_tokens,
                 } => usage = (prompt_tokens, completion_tokens),
             }
+        }
+        if text.trim().is_empty() {
+            return Err(AppError::source_unavailable(
+                "zen",
+                "upstream returned an empty completion",
+            ));
         }
         Ok((text, usage.0, usage.1))
     }
@@ -304,7 +395,18 @@ fn find_frame_end(buf: &[u8]) -> Option<usize> {
 pub(crate) enum Parsed {
     Empty,
     Error(AppError),
-    Events(Vec<AiEvent>),
+    /// Content events plus raw streamed tool-call fragments to merge.
+    Frames(Vec<AiEvent>, Vec<ToolFrag>),
+}
+
+/// One incremental piece of a streamed tool call. `index` orders parallel
+/// calls; id/name usually arrive on the first fragment only, arguments in
+/// pieces that must be concatenated.
+pub(crate) struct ToolFrag {
+    pub index: u64,
+    pub id: Option<String>,
+    pub name: Option<String>,
+    pub args_delta: String,
 }
 
 pub(crate) fn parse_data_frame(frame: &str) -> Parsed {
@@ -328,8 +430,19 @@ pub(crate) fn parse_data_frame(frame: &str) -> Parsed {
     }
 
     let mut events = Vec::new();
+    let mut tools = Vec::new();
     if let Some(choices) = v.get("choices").and_then(|c| c.as_array()) {
         for choice in choices {
+            // Observed free-tier failure: the stream ends instantly with
+            // finish_reason "network_error", no content, no usage. That is a
+            // failed completion, not an empty answer - fail it loudly so
+            // single-shot callers can retry.
+            if choice.get("finish_reason").and_then(|f| f.as_str()) == Some("network_error") {
+                return Parsed::Error(AppError::source_unavailable(
+                    "zen",
+                    "upstream ended the completion early (network_error)",
+                ));
+            }
             let Some(delta) = choice.get("delta") else {
                 continue;
             };
@@ -341,6 +454,25 @@ pub(crate) fn parse_data_frame(frame: &str) -> Parsed {
             if let Some(c) = delta.get("content").and_then(|t| t.as_str()) {
                 if !c.is_empty() {
                     events.push(AiEvent::Delta(c.to_string()));
+                }
+            }
+            if let Some(calls) = delta.get("tool_calls").and_then(|t| t.as_array()) {
+                for call in calls {
+                    let index = call.get("index").and_then(|i| i.as_u64()).unwrap_or(0);
+                    let function = call.get("function");
+                    tools.push(ToolFrag {
+                        index,
+                        id: call.get("id").and_then(|i| i.as_str()).map(String::from),
+                        name: function
+                            .and_then(|f| f.get("name"))
+                            .and_then(|n| n.as_str())
+                            .map(String::from),
+                        args_delta: function
+                            .and_then(|f| f.get("arguments"))
+                            .and_then(|a| a.as_str())
+                            .unwrap_or("")
+                            .to_string(),
+                    });
                 }
             }
         }
@@ -355,10 +487,10 @@ pub(crate) fn parse_data_frame(frame: &str) -> Parsed {
             });
         }
     }
-    if events.is_empty() {
+    if events.is_empty() && tools.is_empty() {
         Parsed::Empty
     } else {
-        Parsed::Events(events)
+        Parsed::Frames(events, tools)
     }
 }
 
@@ -376,7 +508,31 @@ struct StreamState {
     pending: VecDeque<AiEvent>,
     /// Usage event observed before `[DONE]`; emitted once at termination.
     terminal: Option<AiEvent>,
+    /// Streamed tool-call fragments merged by index (BTreeMap = index order).
+    tool_acc: BTreeMap<u64, ToolAccum>,
     finished: bool,
+}
+
+/// Merge accumulator for one streamed tool call.
+#[derive(Default)]
+struct ToolAccum {
+    id: String,
+    name: String,
+    arguments: String,
+}
+
+impl ToolAccum {
+    fn assemble(self, fallback_id: String) -> AssembledToolCall {
+        AssembledToolCall {
+            id: if self.id.is_empty() {
+                fallback_id
+            } else {
+                self.id
+            },
+            name: self.name,
+            arguments: self.arguments,
+        }
+    }
 }
 
 impl StreamState {
@@ -387,6 +543,34 @@ impl StreamState {
                 other => self.pending.push_back(other),
             }
         }
+    }
+
+    fn note_tool_frags(&mut self, frags: Vec<ToolFrag>) {
+        for frag in frags {
+            let entry = self.tool_acc.entry(frag.index).or_default();
+            if let Some(id) = frag.id {
+                entry.id = id;
+            }
+            if let Some(name) = frag.name {
+                entry.name = name;
+            }
+            entry.arguments.push_str(&frag.args_delta);
+        }
+    }
+
+    /// Move assembled tool calls into the pending queue (index order), just
+    /// before the terminal Done event is produced.
+    fn flush_tools_to_pending(&mut self) {
+        if self.tool_acc.is_empty() {
+            return;
+        }
+        let calls = std::mem::take(&mut self.tool_acc)
+            .into_iter()
+            .enumerate()
+            .map(|(i, (_, acc))| acc.assemble(format!("call_{i}")))
+            .collect();
+        // Insert BEFORE any queued terminal-ish items but AFTER content.
+        self.pending.push_back(AiEvent::ToolCalls(calls));
     }
 
     /// Mark terminated and produce the termination event: reported usage when
@@ -400,7 +584,7 @@ impl StreamState {
     }
 }
 
-fn decode_stream<S>(stream: S) -> impl Stream<Item = Result<AiEvent, AppError>>
+pub(crate) fn decode_stream<S>(stream: S) -> impl Stream<Item = Result<AiEvent, AppError>>
 where
     S: Stream<Item = Result<bytes::Bytes, reqwest::Error>> + Send + 'static,
 {
@@ -409,6 +593,7 @@ where
         dec: SseDecoder::new(),
         pending: VecDeque::new(),
         terminal: None,
+        tool_acc: BTreeMap::new(),
         finished: false,
     };
     futures::stream::unfold(init, |mut st| async move {
@@ -423,6 +608,10 @@ where
                     return Some((Err(e), st));
                 }
                 Ok(Some(Frame::Done)) => {
+                    st.flush_tools_to_pending();
+                    if let Some(ev) = st.pending.pop_front() {
+                        return Some((Ok(ev), st));
+                    }
                     let ev = st.finish();
                     return Some((Ok(ev), st));
                 }
@@ -432,8 +621,9 @@ where
                         st.finish();
                         return Some((Err(e), st));
                     }
-                    Parsed::Events(evs) => {
+                    Parsed::Frames(evs, frags) => {
                         st.note_events(evs);
+                        st.note_tool_frags(frags);
                         continue;
                     }
                 },
@@ -458,6 +648,10 @@ where
                         // Tail decode failures are non-fatal at EOF; fall
                         // through to the graceful termination event.
                     }
+                    st.flush_tools_to_pending();
+                    if let Some(ev) = st.pending.pop_front() {
+                        return Some((Ok(ev), st));
+                    }
                     let ev = st.finish();
                     return Some((Ok(ev), st));
                 }
@@ -474,8 +668,9 @@ fn dec_tail(st: &mut StreamState) -> Option<Result<(), AppError>> {
         Ok(Some(Frame::Done)) => None,
         Ok(Some(Frame::Data(frame))) => match parse_data_frame(&frame) {
             Parsed::Empty | Parsed::Error(_) => None,
-            Parsed::Events(evs) => {
+            Parsed::Frames(evs, frags) => {
                 st.note_events(evs);
+                st.note_tool_frags(frags);
                 None
             }
         },

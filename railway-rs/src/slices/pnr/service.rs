@@ -551,6 +551,7 @@ mod tests {
             name: "AKOLA JN".into(),
             state: String::new(),
             zone: String::new(),
+            ..StationRecord::default()
         }];
         let e = endpoint("MMCT - MUMBAI CENTRAL", &stations);
         assert_eq!(e.code, "MMCT");

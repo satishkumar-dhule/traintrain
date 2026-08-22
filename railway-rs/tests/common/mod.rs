@@ -30,12 +30,20 @@ pub struct RouteSpec {
     pub set_cookie: Option<String>,
 }
 
+/// Scripted raw responses: `(status, content_type, body)` triples served in
+/// arrival order (AI tool-loop rounds).
+type RawQueue = HashMap<String, VecDeque<(StatusCode, String, String)>>;
+
 struct MockInner {
     addr: OnceLock<SocketAddr>,
     routes: Mutex<HashMap<String, RouteSpec>>,
     /// Scripted sequences of HTML served in arrival order for a path prefix
     /// (e.g. a two-call upstream flow where both calls share one URL).
     queues: Mutex<HashMap<String, VecDeque<String>>>,
+    /// Scripted sequences of fully raw responses — used for multi-round flows
+    /// like the AI tool loop where the same endpoint must return different
+    /// event-stream payloads in order.
+    raw_queues: Mutex<RawQueue>,
     /// Every request recorded as `(path, body)` so tests can assert what the
     /// app actually sent upstream (e.g. the NTES sub-service payloads).
     calls: Mutex<Vec<(String, String)>>,
@@ -55,6 +63,7 @@ impl MockServer {
                 addr: OnceLock::new(),
                 routes: Mutex::new(HashMap::new()),
                 queues: Mutex::new(HashMap::new()),
+                raw_queues: Mutex::new(HashMap::new()),
                 calls: Mutex::new(Vec::new()),
             }),
         }
@@ -160,6 +169,20 @@ impl MockServer {
         );
     }
 
+    /// Serve a scripted sequence of raw `(status, content_type, body)`
+    /// responses for a path prefix, one per matching request in arrival
+    /// order (AI tool-loop rounds). When the queue empties the prefix is
+    /// dropped and the normal route table applies again.
+    pub fn route_raw_seq(&self, path_prefix: &str, responses: Vec<(StatusCode, &str, String)>) {
+        self.inner.raw_queues.lock().unwrap().insert(
+            path_prefix.to_string(),
+            responses
+                .into_iter()
+                .map(|(s, ct, b)| (s, ct.to_string(), b))
+                .collect::<VecDeque<_>>(),
+        );
+    }
+
     pub fn route_error(&self, path_prefix: &str, status: StatusCode) {
         self.route(
             path_prefix,
@@ -216,30 +239,33 @@ async fn mock_handler(State(m): State<MockServer>, req: Request<Body>) -> Respon
         .unwrap_or_default();
     let body_str = String::from_utf8_lossy(&body_bytes).into_owned();
     m.inner.calls.lock().unwrap().push((path.clone(), body_str));
-    // A scripted queue wins over the route table (a broad prefix like
+    // Scripted queues win over the route table (a broad prefix like
     // `/mntes/` would otherwise shadow a queued `/mntes/TrnMap` flow).
-    let (status, content_type, set_cookie, body) = match pop_queue(&m.inner, &path) {
-        Some(next) => (
-            StatusCode::OK,
-            "text/html".to_string(),
-            None,
-            Body::from(next),
-        ),
-        None => match m.lookup(&path) {
-            Some(spec) => {
-                let body = if spec.content_type.starts_with("application/json") {
-                    Body::from(serde_json::to_vec(&spec.body).unwrap())
-                } else {
-                    Body::from(spec.body.as_str().unwrap_or_default().to_string())
-                };
-                (spec.status, spec.content_type, spec.set_cookie, body)
-            }
-            None => {
-                return Response::builder()
-                    .status(StatusCode::NOT_FOUND)
-                    .body(Body::from("mock: no route for this path"))
-                    .unwrap();
-            }
+    let (status, content_type, set_cookie, body) = match pop_raw_queue(&m.inner, &path) {
+        Some((status, content_type, raw)) => (status, content_type, None, Body::from(raw)),
+        None => match pop_queue(&m.inner, &path) {
+            Some(next) => (
+                StatusCode::OK,
+                "text/html".to_string(),
+                None,
+                Body::from(next),
+            ),
+            None => match m.lookup(&path) {
+                Some(spec) => {
+                    let body = if spec.content_type.starts_with("application/json") {
+                        Body::from(serde_json::to_vec(&spec.body).unwrap())
+                    } else {
+                        Body::from(spec.body.as_str().unwrap_or_default().to_string())
+                    };
+                    (spec.status, spec.content_type, spec.set_cookie, body)
+                }
+                None => {
+                    return Response::builder()
+                        .status(StatusCode::NOT_FOUND)
+                        .body(Body::from("mock: no route for this path"))
+                        .unwrap();
+                }
+            },
         },
     };
     let mut builder = Response::builder()
@@ -288,7 +314,16 @@ impl TestApp {
     /// Spawn with a caller-provided config (e.g. custom data dir).
     pub async fn spawn_with_config(mut config: Config) -> Self {
         let mut mocks = HashMap::new();
-        for name in ["railyatri", "etrain", "ntes", "ir", "irctc", "paytm", "zen"] {
+        for name in [
+            "railyatri",
+            "etrain",
+            "ntes",
+            "ir",
+            "irctc",
+            "paytm",
+            "zen",
+            "corover",
+        ] {
             let m = MockServer::new();
             m.spawn().await;
             mocks.insert(name.to_string(), m);
@@ -301,6 +336,7 @@ impl TestApp {
         config.irctc_base = mocks["irctc"].base_url();
         config.paytm_base = mocks["paytm"].base_url();
         config.ai_base = mocks["zen"].base_url();
+        config.corover_base = mocks["corover"].base_url();
 
         let state = AppState::from_config(config).expect("state builds");
         let app = web::router(state.clone(), state.config.static_dir.clone());
@@ -388,4 +424,24 @@ impl TestApp {
             .to_string();
         (status, ct)
     }
+}
+
+/// Pop the next scripted raw response for the longest matching queue prefix.
+fn pop_raw_queue(inner: &MockInner, path: &str) -> Option<(StatusCode, String, String)> {
+    let mut queues = inner.raw_queues.lock().unwrap();
+    let mut best: Option<String> = None;
+    for prefix in queues.keys() {
+        if path.starts_with(prefix.as_str()) {
+            match &best {
+                Some(bp) if bp.len() > prefix.len() => {}
+                _ => best = Some(prefix.clone()),
+            }
+        }
+    }
+    let prefix = best?;
+    let next = queues.get_mut(&prefix)?.pop_front()?;
+    if queues.get(&prefix).is_none_or(VecDeque::is_empty) {
+        queues.remove(&prefix);
+    }
+    Some(next)
 }

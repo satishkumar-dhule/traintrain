@@ -2,13 +2,13 @@
   import { api } from '$lib/api.js'
   import { navigate } from '$lib/router.svelte.js'
   import * as Card from '$lib/components/ui/card/index.js'
-  import { Badge } from '$lib/components/ui/badge/index.js'
   import { Skeleton } from '$lib/components/ui/skeleton/index.js'
   import { Input } from '$lib/components/ui/input/index.js'
   import { Label } from '$lib/components/ui/label/index.js'
   import { Separator } from '$lib/components/ui/separator/index.js'
   import { Button } from '$lib/components/ui/button/index.js'
   import AutoCompleteInput from '$lib/components/AutoCompleteInput.svelte'
+  import { StationCodeBadge } from '$lib/components/badges/index.js'
   import TrainFront from 'lucide-svelte/icons/train-front'
   import Building2 from 'lucide-svelte/icons/building-2'
   import RouteIcon from 'lucide-svelte/icons/route'
@@ -445,7 +445,7 @@
             onclick={() => navigate(`/station/${encodeURIComponent(st.code)}`)}
           >
             <span class="min-w-0 flex-1 truncate text-sm">{st.name}</span>
-            <Badge variant="outline" class="shrink-0 font-mono text-[10px]">{st.code}</Badge>
+            <StationCodeBadge code={st.code} name={st.name} link={false} size="xs" />
           </button>
         {/each}
       </div>

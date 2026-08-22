@@ -100,7 +100,12 @@ pub struct ScheduleStop {
     pub name: String,
     pub arrival: String,
     pub departure: String,
-    pub day: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub day: Option<u8>,
+    /// Cumulative km from the route origin; only the Ask DISHA (CoRover)
+    /// source carries it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub distance_km: Option<f64>,
 }
 
 /// `GET /rail-api/live-status`
@@ -112,6 +117,10 @@ pub struct LiveStatusResponse {
     pub train_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub current_location_info: Option<String>,
+    /// Platform number NTES expects the train to arrive on next
+    /// (next-station platform).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub platform_number: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub train_start_date: Option<String>,
     /// All run dates NTES reports for this train (`vInstanceList[].startDate`),
@@ -132,6 +141,9 @@ pub struct TrainInstance {
     pub start_date: String,
     /// NTES position text for the run (e.g. `Yet to start from its source`).
     pub position: String,
+    /// Platform number NTES expects this run to arrive on next.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub platform_number: String,
     /// Full station-by-station timeline for this run (same shape as
     /// `LiveStop`), so the frontend can render tabs client-side without
     /// re-fetching.  Absent when the source does not carry per-instance
@@ -146,6 +158,9 @@ pub struct LiveStop {
     pub code: String,
     pub scheduled_arrival: String,
     pub actual_arrival: String,
+    /// Platform number reported for this stop by the source (NTES only;
+    /// empty when the source does not carry per-stop platforms).
+    pub platform: String,
     pub delay_minutes: i64,
     pub status: String,
 }
@@ -555,6 +570,22 @@ pub struct Station {
     pub name: String,
     pub city: String,
     pub zone: String,
+    // AskDISHA CDN hydration extras (F1/F2): emitted only when the hydrated
+    // dataset carries a value, so unhydrated rows keep the exact old shape.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name_hi: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name_gu: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub district: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub address: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub train_count: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lat: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lng: Option<f64>,
 }
 
 /// `GET /rail-api/search/trains` (array body)

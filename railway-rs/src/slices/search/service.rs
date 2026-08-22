@@ -1,4 +1,5 @@
-use crate::models::{Suggestion, TrainLite};
+use super::{StationRow, SuggestHit};
+use crate::models::TrainLite;
 use crate::state::AppState;
 
 pub struct Service;
@@ -18,19 +19,35 @@ impl Service {
             .collect()
     }
 
+    /// Real station search over the unified ranking authority, mapped to the
+    /// F2 row shape: hydration optionals flow through, absent values are
+    /// omitted on the wire.
+    pub fn search_stations(state: &AppState, query: &str, limit: usize) -> Vec<StationRow> {
+        state
+            .datasets
+            .search_stations(query, limit)
+            .into_iter()
+            .map(StationRow::from)
+            .collect()
+    }
+
     /// Combined station + train IntelliSense suggestions from the pre-warmed
     /// datasets, interleaved by relevance. Stations are ranked by the same
-    /// unified tiered authority as `Datasets::search_stations`.
-    pub fn suggest(state: &AppState, query: &str, limit: usize) -> Vec<Suggestion> {
+    /// unified tiered authority as `Datasets::search_stations` and carry the
+    /// hydration fields for the autocomplete subtitle.
+    pub fn suggest(state: &AppState, query: &str, limit: usize) -> Vec<SuggestHit> {
         state
             .datasets
             .suggest(query, limit)
             .into_iter()
-            .map(|s| Suggestion {
+            .map(|s| SuggestHit {
                 r#type: s.kind,
                 code: s.code,
                 number: s.number,
                 name: s.name,
+                name_hi: s.name_hi,
+                name_gu: s.name_gu,
+                district: s.district,
             })
             .collect()
     }

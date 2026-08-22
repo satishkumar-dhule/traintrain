@@ -9,7 +9,8 @@
   import Pnr from '$lib/pages/Pnr.svelte'
   import Exceptions from '$lib/pages/Exceptions.svelte'
   import Extras from '$lib/pages/Extras.svelte'
-  import AskDisha from '$lib/pages/AskDisha.svelte'
+  import Assistant from '$lib/pages/Assistant.svelte'
+  import Insights from '$lib/pages/Insights.svelte'
   import System from '$lib/pages/System.svelte'
 
   const segs = $derived(route.path.split('/').filter(Boolean))
@@ -32,8 +33,15 @@
     <Exceptions number={segs[1] ?? ''} kind={segs[2] ?? ''} />
   {:else if segs[0] === 'extras'}
     <Extras view={segs[1] ?? ''} selection={segs[2] ?? ''} />
-  {:else if segs[0] === 'askdisha'}
-    <AskDisha />
+  {:else if segs[0] === 'assistant'}
+    <Assistant seed={segs[1] ? decodeURIComponent(segs[1]) : ''} />
+  {:else if segs[0] === 'insights'}
+    <Insights
+      kind={segs[1] ?? ''}
+      train={segs[2] ?? ''}
+      src={segs[3] ?? ''}
+      dst={segs[4] ?? ''}
+    />
   {:else if segs[0] === 'system'}
     <System />
   {:else}

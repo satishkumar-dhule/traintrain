@@ -54,7 +54,7 @@
   data-slot="status-badge"
   data-tone={tone}
   {href}
-  {title}
+  {...title ? { title } : {}}
   class={cn(
     tone === 'outline' ? '' : STATUS_TONES[tone] ?? STATUS_TONES.neutral,
     sizeClass,

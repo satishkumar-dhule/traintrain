@@ -1,10 +1,15 @@
 //! AI assistant slice: streaming chat relayed to the configured OpenAI-
-//! compatible gateway. The server owns the persona (exactly one system turn,
-//! prepended here); clients speak user/assistant turns only.
+//! compatible gateway through an agentic tool loop. The server owns the
+//! persona (exactly one system turn) and a registry of local rail tools
+//! ([`tools`]); when the model requests one, the loop executes it against
+//! real upstreams in-process and feeds the result back until the model
+//! answers. Clients speak user/assistant turns only.
 
 pub mod service;
+pub mod tools;
 
 use std::convert::Infallible;
+use std::time::Instant;
 
 use axum::extract::State;
 use axum::response::sse::{Event, KeepAlive, Sse};
@@ -13,8 +18,9 @@ use axum::{Json, Router};
 use futures::Stream;
 use futures::StreamExt;
 use serde::Deserialize;
+use serde_json::json;
 
-use crate::core::ai::ChatMessage;
+use crate::core::ai::{AiEvent, AssembledToolCall, ChatMessage};
 use crate::core::error::AppError;
 use crate::state::AppState;
 
@@ -40,6 +46,14 @@ pub struct InboundMessage {
     pub content: String,
 }
 
+/// Bound on model tool rounds per chat request; runaway loops end with an
+/// honest in-band error instead of burning tokens forever.
+const MAX_TOOL_ROUNDS: usize = 4;
+
+/// One model round's decoded event stream (boxed so every round shares one
+/// concrete type across the loop).
+type AiEventStream = std::pin::Pin<Box<dyn Stream<Item = Result<AiEvent, AppError>> + Send>>;
+
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/rail-api/ai/status", get(status_handler))
@@ -51,9 +65,12 @@ async fn status_handler(State(state): State<AppState>) -> Json<AiStatus> {
     Json(service::status(&state))
 }
 
-/// POST /rail-api/ai/chat — validate, prepend the persona, relay Zen's SSE
-/// stream. Pre-stream failures answer as JSON errors; once headers are
-/// committed, errors ride in-band as `{"type":"error"}` events.
+/// POST /rail-api/ai/chat — validate, prepend the persona, then run the
+/// agentic loop: stream each model round straight through to the client,
+/// execute requested tools locally, feed results back, until a plain answer
+/// completes or the round budget runs out. Pre-stream failures answer as
+/// JSON errors; once headers are committed, errors ride in-band as
+/// `{"type":"error"}` events.
 async fn chat_handler(
     State(state): State<AppState>,
     Json(req): Json<ChatRequest>,
@@ -62,9 +79,112 @@ async fn chat_handler(
     let mut messages = service::validate_messages(&req.messages)?;
     messages.insert(0, ChatMessage::system(service::PERSONA));
 
-    let events = state.ai.chat_stream(&messages).await?;
-    let stream = events.map(|item| Ok(service::encode_event(item)));
-    Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
+    // Fail fast: round 1 is established here, before any headers are
+    // committed, so pre-stream failures surface as honest JSON errors.
+    let schemas = tools::schemas();
+    let first = state.ai.chat_stream_with_tools(&messages, &schemas).await?;
+
+    let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(64);
+    tokio::spawn(async move {
+        let mut rounds = 0usize;
+        let mut current: Option<AiEventStream> = Some(Box::pin(first));
+        loop {
+            rounds += 1;
+            if rounds > MAX_TOOL_ROUNDS {
+                let _ = tx
+                    .send(Ok(service::error_frame("too many tool steps")))
+                    .await;
+                break;
+            }
+            let start = Instant::now();
+            let mut stream = match current.take() {
+                Some(s) => s,
+                None => match state.ai.chat_stream_with_tools(&messages, &schemas).await {
+                    Ok(s) => Box::pin(s),
+                    Err(e) => {
+                        tracing::warn!(
+                            error = %e.message(),
+                            round = rounds,
+                            "ai chat round failed"
+                        );
+                        state.metrics.record_source_latency("zen", start.elapsed());
+                        let _ = tx.send(Ok(service::error_frame(&e.message()))).await;
+                        break;
+                    }
+                },
+            };
+            let mut calls: Vec<AssembledToolCall> = Vec::new();
+            let mut usage = (0u64, 0u64);
+            let mut errored = false;
+            while let Some(item) = stream.next().await {
+                match item {
+                    Ok(AiEvent::ToolCalls(c)) => calls = c,
+                    Ok(AiEvent::Done {
+                        prompt_tokens,
+                        completion_tokens,
+                    }) => usage = (prompt_tokens, completion_tokens),
+                    Ok(other) => {
+                        let _ = tx.send(Ok(service::encode_event(Ok(other)))).await;
+                    }
+                    Err(e) => {
+                        errored = true;
+                        let _ = tx.send(Ok(service::encode_event(Err(e)))).await;
+                    }
+                }
+            }
+            drop(stream);
+            state.metrics.record_source_latency("zen", start.elapsed());
+
+            if calls.is_empty() {
+                if !errored {
+                    let _ = tx.send(Ok(service::done_frame(usage.0, usage.1))).await;
+                    tracing::info!(
+                        source = "zen",
+                        model = %state.config.ai_model,
+                        latency_ms = start.elapsed().as_millis() as u64,
+                        prompt_tokens = usage.0,
+                        completion_tokens = usage.1,
+                        rounds,
+                        "ai chat complete"
+                    );
+                }
+                break;
+            }
+
+            let names: Vec<&str> = calls.iter().map(|c| c.name.as_str()).collect();
+            tracing::info!(tools = ?names, round = rounds, "executing ai chat tools");
+            let _ = tx
+                .send(Ok(
+                    Event::default().data(json!({"type": "tools", "names": names}).to_string())
+                ))
+                .await;
+
+            messages.push(ChatMessage::assistant_with_tool_calls(
+                calls.iter().map(openai_tool_call).collect(),
+            ));
+            for call in &calls {
+                let payload = match tools::execute(&state, call).await {
+                    Ok(out) => out,
+                    // Tool failures are data for the model, not HTTP errors.
+                    Err(e) => json!({"error": e.message()}).to_string(),
+                };
+                messages.push(ChatMessage::tool_result(call.id.clone(), payload));
+            }
+        }
+    });
+
+    let rx_stream = futures::stream::unfold(rx, |mut rx| async move {
+        rx.recv().await.map(|item| (item, rx))
+    });
+    Ok(Sse::new(rx_stream).keep_alive(KeepAlive::default()))
+}
+
+fn openai_tool_call(c: &AssembledToolCall) -> serde_json::Value {
+    json!({
+        "id": c.id,
+        "type": "function",
+        "function": {"name": c.name, "arguments": c.arguments}
+    })
 }
 
 /// Shared guard for AI endpoints: disabled-by-config is surfaced as an

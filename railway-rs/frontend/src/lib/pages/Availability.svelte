@@ -5,12 +5,18 @@
   import { Button } from '$lib/components/ui/button/index.js'
   import { Input } from '$lib/components/ui/input/index.js'
   import { Label } from '$lib/components/ui/label/index.js'
-  import { Badge } from '$lib/components/ui/badge/index.js'
   import DataTable from '$lib/components/DataTable.svelte'
   import { Skeleton } from '$lib/components/ui/skeleton/index.js'
   import * as Alert from '$lib/components/ui/alert/index.js'
 import AutoCompleteInput from '$lib/components/AutoCompleteInput.svelte'
 import EmptyState from '$lib/components/EmptyState.svelte'
+import RecentSearches from '$lib/components/RecentSearches.svelte'
+import { loadRecent, rememberRecent, clearStored } from '$lib/recent.js'
+import {
+  TrainNumberBadge,
+  RunsOnBadges,
+  AvailabilityStatusBadge
+} from '$lib/components/badges/index.js'
 import ArrowDownUpIcon from 'lucide-svelte/icons/arrow-down-up'
 import CalendarDaysIcon from 'lucide-svelte/icons/calendar-days'
 
@@ -26,6 +32,28 @@ import CalendarDaysIcon from 'lucide-svelte/icons/calendar-days'
   let errorMsg = $state(null)
   let data = $state(null)
   let committed = null
+
+  const RECENT_KEY = 'rc-availability-recent'
+  const recentValid = (r) => r && typeof r?.id === 'string' && DATE_RE.test(String(r?.date ?? ''))
+  let recent = $state(loadRecent(RECENT_KEY, recentValid))
+
+  function rememberRoute(s, d, dt) {
+    recent = rememberRecent(
+      RECENT_KEY,
+      { id: `${s}|${d}`, label: `${s} → ${d}`, date: dt },
+      recentValid,
+    )
+  }
+
+  function pickRecent(r) {
+    const [s, d] = String(r?.id ?? '').split('|')
+    const dt = String(r?.date ?? '')
+    if (!s || !d || !DATE_RE.test(dt)) return
+    from = s
+    to = d
+    journeyDate = dt
+    runSearch(s, d, dt, `${s}/${d}/${dt}`)
+  }
 
   function today() {
     const d = new Date()
@@ -54,17 +82,6 @@ import CalendarDaysIcon from 'lucide-svelte/icons/calendar-days'
     return t.split(/[\s,|/]+/).filter(Boolean)
   }
 
-  function statusView(status) {
-    const raw = String(status ?? '').trim()
-    const t = raw.toUpperCase()
-    if (!t) return { plain: true, text: '—' }
-    if (t.startsWith('AVAILABLE')) return { variant: 'default', text: raw }
-    if (t.startsWith('RAC')) return { variant: 'secondary', text: raw }
-    if (t.startsWith('WL')) return { variant: 'outline', text: raw }
-    if (t.startsWith('REGRET')) return { variant: 'destructive', text: raw }
-    return { plain: true, text: raw }
-  }
-
   async function runSearch(s, d, dt, key) {
     committed = key
     phase = 'loading'
@@ -76,6 +93,7 @@ import CalendarDaysIcon from 'lucide-svelte/icons/calendar-days'
     if (res.ok) {
       data = res.data
       phase = 'ok'
+      rememberRoute(s, d, dt)
     } else {
       phase = 'error'
       errorMsg = res.error || `HTTP ${res.status}`
@@ -117,7 +135,7 @@ import CalendarDaysIcon from 'lucide-svelte/icons/calendar-days'
 
   const cols = [
     { key: 'class', label: 'Class', cellClass: 'font-mono font-medium', value: (r) => fmt(r?.class) },
-    { key: 'status', label: 'Status', value: (r) => statusView(r?.status).text },
+    { key: 'status', label: 'Status', value: (r) => asText(r?.status) || '—' },
     { key: 'fare', label: 'Fare', cellClass: 'font-mono text-xs', value: (r) => fmt(r?.fare) },
     { key: 'quota', label: 'Quota', cellClass: 'text-xs', value: (r) => fmt(r?.quota) },
     { key: 'prediction', label: 'Prediction', cellClass: 'text-xs', value: (r) => fmt(r?.prediction) },
@@ -125,12 +143,7 @@ import CalendarDaysIcon from 'lucide-svelte/icons/calendar-days'
 </script>
 
 {#snippet statusCell(row)}
-  {@const st = statusView(row?.status)}
-  {#if st.plain}
-    <span class="text-muted-foreground">{st.text}</span>
-  {:else}
-    <Badge variant={st.variant}>{st.text}</Badge>
-  {/if}
+  <AvailabilityStatusBadge status={row?.status} />
 {/snippet}
 
 <section class="grid gap-6" class:idle-center={phase === 'idle'}>
@@ -188,6 +201,17 @@ import CalendarDaysIcon from 'lucide-svelte/icons/calendar-days'
     </Card.Content>
   </Card.Root>
 
+  {#if phase === 'idle' && recent.length > 0}
+    <RecentSearches
+      items={recent}
+      onpick={pickRecent}
+      onclear={() => {
+        clearStored(RECENT_KEY)
+        recent = []
+      }}
+    />
+  {/if}
+
   {#if phase === 'loading'}
     <div class="grid gap-4" aria-busy="true">
       {#each [0, 1, 2] as i (i)}
@@ -230,15 +254,11 @@ import CalendarDaysIcon from 'lucide-svelte/icons/calendar-days'
             <Card.Header class="gap-2">
               <div class="flex flex-wrap items-center justify-between gap-2">
                 <Card.Title class="flex flex-wrap items-center gap-2">
-                  <Badge variant="secondary" class="font-mono">{fmt(tr?.number)}</Badge>
+                  <TrainNumberBadge number={tr?.number} name={tr?.name} />
                   <span>{asText(tr?.name) || 'Unknown train'}</span>
                 </Card.Title>
                 {#if days.length > 0}
-                  <div class="flex flex-wrap items-center gap-1">
-                    {#each days as day (`${day}-${i}`)}
-                      <Badge variant="outline" class="px-1.5 text-[10px] uppercase">{day}</Badge>
-                    {/each}
-                  </div>
+                  <RunsOnBadges days={days} format="short" />
                 {/if}
               </div>
               <Card.Description>

@@ -275,11 +275,16 @@ function renderInstanceStations(inst, ui, ctx) {
   const stations = inst.stops || [];
   if (!stations.length) return ui.card('Stations', ui.notice('No station data for this run.'));
   const showActual = stations.some((s) => s.actual_arrival);
-  const headers = ['Station', 'Code', 'Sch. Arrival'];
+  const showPlatform = stations.some((s) => s && s.platform);
+  const headers = ['Station', 'Code'];
+  if (showPlatform) headers.push('PF');
+  headers.push('Sch. Arrival');
   if (showActual) headers.push('Act. Arrival');
   headers.push('Delay', 'Status');
   const rows = stations.map((s) => {
-    const cells = [s.name, ui.entityLink('station', s.code, s.code, ctx.navigate), ui.fmtTime(s.scheduled_arrival)];
+    const cells = [s.name, ui.entityLink('station', s.code, s.code, ctx.navigate)];
+    if (showPlatform) cells.push(s.platform || '');
+    cells.push(ui.fmtTime(s.scheduled_arrival));
     if (showActual) cells.push(ui.fmtTime(s.actual_arrival));
     cells.push(ui.delay(s.delay_minutes), ui.statusCell(s.status));
     return cells;
@@ -305,11 +310,16 @@ function renderStations(res, ui, ctx) {
   const stations = res.stations || [];
   if (!stations.length) return ui.card('Stations', ui.notice('No station data returned.'));
   const showActual = stations.some((s) => s.actual_arrival);
-  const headers = ['Station', 'Code', 'Sch. Arrival'];
+  const showPlatform = stations.some((s) => s && s.platform);
+  const headers = ['Station', 'Code'];
+  if (showPlatform) headers.push('PF');
+  headers.push('Sch. Arrival');
   if (showActual) headers.push('Act. Arrival');
   headers.push('Delay', 'Status');
   const rows = stations.map((s) => {
-    const cells = [s.name, ui.entityLink('station', s.code, s.code, ctx.navigate), ui.fmtTime(s.scheduled_arrival)];
+    const cells = [s.name, ui.entityLink('station', s.code, s.code, ctx.navigate)];
+    if (showPlatform) cells.push(s.platform || '');
+    cells.push(ui.fmtTime(s.scheduled_arrival));
     if (showActual) cells.push(ui.fmtTime(s.actual_arrival));
     cells.push(ui.delay(s.delay_minutes), ui.statusCell(s.status));
     return cells;

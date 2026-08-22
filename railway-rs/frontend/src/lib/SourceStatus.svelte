@@ -3,9 +3,9 @@
   import { api } from './api.js'
   import { Button } from '$lib/components/ui/button/index.js'
   import * as Card from '$lib/components/ui/card/index.js'
-  import { Badge } from '$lib/components/ui/badge/index.js'
   import { Skeleton } from '$lib/components/ui/skeleton/index.js'
   import * as Alert from '$lib/components/ui/alert/index.js'
+  import { StatusBadge } from '$lib/components/badges/index.js'
   import DataTable from '$lib/components/DataTable.svelte'
 
   let state = $state({ phase: 'loading', data: null, error: null })
@@ -50,9 +50,9 @@
 
 {#snippet reachableCell(s)}
   {#if s.reachable}
-    <Badge>yes</Badge>
+    <StatusBadge tone="success" dot>yes</StatusBadge>
   {:else}
-    <Badge variant="destructive">no</Badge>
+    <StatusBadge tone="danger" dot>no</StatusBadge>
   {/if}
 {/snippet}
 

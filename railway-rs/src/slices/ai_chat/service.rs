@@ -63,6 +63,8 @@ pub fn validate_messages(raw: &[InboundMessage]) -> Result<Vec<ChatMessage>, App
         out.push(ChatMessage {
             role,
             content: trimmed.to_string(),
+            tool_call_id: None,
+            tool_calls: None,
         });
     }
     Ok(out)
@@ -74,18 +76,26 @@ pub fn encode_event(item: Result<AiEvent, AppError>) -> Event {
     let payload = match item {
         Ok(AiEvent::Reasoning(text)) => json!({"type": "reasoning", "text": text}),
         Ok(AiEvent::Delta(text)) => json!({"type": "delta", "text": text}),
-        Ok(AiEvent::Done {
-            prompt_tokens,
-            completion_tokens,
-        }) => json!({
-            "type": "done",
-            "prompt_tokens": prompt_tokens,
-            "completion_tokens": completion_tokens
-        }),
+        // ToolCalls never reach the encoder: the handler intercepts them to
+        // run local tools and emits a `tools` chip frame instead.
+        Ok(AiEvent::ToolCalls(_)) | Ok(AiEvent::Done { .. }) => {
+            json!({"type": "done", "prompt_tokens": 0, "completion_tokens": 0})
+        }
         Err(e) => {
             tracing::warn!(error = %e.message(), "relaying ai stream error in-band");
             json!({"type": "error", "message": e.message()})
         }
     };
     Event::default().data(payload.to_string())
+}
+
+/// Terminal usage frame emitted once per chat request.
+pub fn done_frame(prompt_tokens: u64, completion_tokens: u64) -> Event {
+    Event::default()
+        .data(json!({"type": "done", "prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens}).to_string())
+}
+
+/// In-band error frame for failures after headers are committed.
+pub fn error_frame(message: &str) -> Event {
+    Event::default().data(json!({"type": "error", "message": message}).to_string())
 }

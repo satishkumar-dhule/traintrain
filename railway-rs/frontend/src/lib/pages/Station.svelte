@@ -6,7 +6,6 @@
   import { Button } from '$lib/components/ui/button/index.js'
   import { Input } from '$lib/components/ui/input/index.js'
   import { Label } from '$lib/components/ui/label/index.js'
-  import { Badge } from '$lib/components/ui/badge/index.js'
   import * as Tabs from '$lib/components/ui/tabs/index.js'
   import * as Select from '$lib/components/ui/select/index.js'
   import { Skeleton } from '$lib/components/ui/skeleton/index.js'
@@ -14,6 +13,8 @@
 import AutoCompleteInput from '$lib/components/AutoCompleteInput.svelte'
 import DataTable from '$lib/components/DataTable.svelte'
 import EmptyState from '$lib/components/EmptyState.svelte'
+import RecentSearches from '$lib/components/RecentSearches.svelte'
+import { loadRecent, rememberRecent, clearStored } from '$lib/recent.js'
 import {
   TrainNumberBadge,
   StationCodeBadge,
@@ -24,6 +25,8 @@ import {
 } from '$lib/components/badges/index.js'
   import ActivityIcon from 'lucide-svelte/icons/activity'
   import CalendarClockIcon from 'lucide-svelte/icons/calendar-clock'
+  import MapPinIcon from 'lucide-svelte/icons/map-pin'
+  import XIcon from 'lucide-svelte/icons/x'
 
   let { code = '', view = '' } = $props()
 
@@ -41,8 +44,31 @@ import {
   let ttError = $state(null)
   let timetable = $state(null)
 
+  let stationInfo = $state(null)
+  let infoFetched = ''
+
+  // Nearby: idle -> locating -> loading -> ok | message | gone.
+  // `gone` retires the control entirely when the endpoint answers non-OK
+  // (e.g. the askdisha module is disabled and the route falls through to 404).
+  let nearbyPhase = $state('idle')
+  let nearbyMsg = $state('')
+  let nearbyStations = $state([])
+
   let liveKey = ''
   let ttKey = ''
+
+  const RECENT_KEY = 'rc-station-recent'
+  let recent = $state(loadRecent(RECENT_KEY))
+
+  function rememberStation(c, d) {
+    if (!c) return
+    const name = String(d?.station_name ?? '').trim()
+    recent = rememberRecent(
+      RECENT_KEY,
+      { id: c, label: c, sub: name },
+      (r) => r && typeof r?.id === 'string',
+    )
+  }
 
   const MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
   const DAY_LETTERS = ['M', 'T', 'W', 'T', 'F', 'S', 'S']
@@ -74,6 +100,74 @@ import {
   function daysText(flags) {
     if (!Array.isArray(flags)) return ''
     return flags.map((on, i) => (on ? DAY_LETTERS[i] ?? '' : '-')).join('')
+  }
+
+  const infoNames = $derived(
+    stationInfo
+      ? [stationInfo.name_hi, stationInfo.name_gu]
+          .map((s) => String(s ?? '').trim())
+          .filter(Boolean)
+      : []
+  )
+  const infoMeta = $derived(
+    stationInfo
+      ? [stationInfo.district, stationInfo.state]
+          .map((s) => String(s ?? '').trim())
+          .filter(Boolean)
+          .join(' · ')
+      : ''
+  )
+
+  async function loadStationInfo(c) {
+    if (infoFetched === c) return
+    infoFetched = c
+    // Optional enrichment (hi/gu names, district/state). Absent fields or a
+    // non-OK answer simply render nothing — never blocks the board.
+    const res = await api(`/rail-api/stations/${encodeURIComponent(c)}`)
+    if (infoFetched !== c) return
+    stationInfo = res.ok && res.data && typeof res.data === 'object' ? res.data : null
+  }
+
+  function findNearby() {
+    if (!('geolocation' in navigator)) {
+      nearbyPhase = 'message'
+      nearbyMsg = 'Geolocation is not available in this browser.'
+      return
+    }
+    nearbyPhase = 'locating'
+    navigator.geolocation.getCurrentPosition(
+      async ({ coords }) => {
+        nearbyPhase = 'loading'
+        const res = await api(
+          `/rail-api/askdisha/nearby?lat=${encodeURIComponent(coords.latitude)}&lng=${encodeURIComponent(coords.longitude)}`
+        )
+        if (!res.ok || !Array.isArray(res.data?.stations)) {
+          nearbyPhase = 'gone'
+          return
+        }
+        nearbyStations = res.data.stations
+        nearbyPhase = 'ok'
+      },
+      (err) => {
+        nearbyPhase = 'message'
+        nearbyMsg =
+          err && err.code === 1
+            ? 'Location permission denied — allow location access to find nearby stations.'
+            : (err && err.message) || 'Could not determine your location.'
+      },
+      { timeout: 10000, maximumAge: 60000 },
+    )
+  }
+
+  function dismissNearby() {
+    nearbyPhase = 'idle'
+    nearbyMsg = ''
+    nearbyStations = []
+  }
+
+  function nearbyDistance(km) {
+    const n = Number(km)
+    return Number.isFinite(n) ? `${n.toFixed(1)} km` : null
   }
 
   const liveCols = [
@@ -124,6 +218,7 @@ import {
     if (res.ok) {
       live = res.data
       livePhase = 'ok'
+      rememberStation(c, res.data)
     } else {
       livePhase = 'error'
       liveError = res.error || `HTTP ${res.status}`
@@ -150,6 +245,7 @@ import {
     if (res.ok) {
       timetable = res.data
       ttPhase = 'ok'
+      rememberStation(c, res.data)
     } else {
       ttPhase = 'error'
       ttError = res.error || `HTTP ${res.status}`
@@ -196,6 +292,7 @@ import {
       if (norm(query) !== c) query = c
       if (committedCode !== c) committedCode = c
       if (tab !== v) tab = v
+      loadStationInfo(c)
       if (v === 'timetable') ensureTimetable()
       else ensureLive()
     })
@@ -237,6 +334,12 @@ import {
   <div class="grid gap-1">
     <h1 class="text-2xl font-semibold tracking-tight">Station board</h1>
     <p class="text-sm text-muted-foreground">Live board and full-day timetable for any station.</p>
+    {#if infoNames.length}
+      <p class="text-sm text-muted-foreground">{infoNames.join(' · ')}</p>
+    {/if}
+    {#if infoMeta}
+      <p class="text-xs text-muted-foreground">{infoMeta}</p>
+    {/if}
   </div>
 
   <Card.Root>
@@ -277,8 +380,94 @@ import {
           ? 'Refreshing…'
           : 'Show board'}
       </Button>
+      {#if nearbyPhase !== 'gone'}
+        <div class="grid gap-2">
+          <Label>Nearby</Label>
+          <Button
+            variant="outline"
+            onclick={findNearby}
+            disabled={nearbyPhase === 'locating' || nearbyPhase === 'loading'}
+          >
+            <MapPinIcon />
+            {nearbyPhase === 'locating'
+              ? 'Locating…'
+              : nearbyPhase === 'loading'
+                ? 'Searching…'
+                : 'Nearby stations'}
+          </Button>
+        </div>
+      {/if}
     </Card.Content>
   </Card.Root>
+
+  {#if nearbyPhase === 'message'}
+    <Alert.Root role="status">
+      <Alert.Title>Could not find nearby stations</Alert.Title>
+      <Alert.Description class="flex items-center justify-between gap-3">
+        {nearbyMsg}
+        <Button variant="ghost" size="icon-sm" aria-label="Dismiss" onclick={dismissNearby}>
+          <XIcon />
+        </Button>
+      </Alert.Description>
+    </Alert.Root>
+  {:else if nearbyPhase === 'loading'}
+    <Card.Root>
+      <Card.Content class="grid gap-2">
+        {#each [0, 1, 2] as i (i)}
+          <Skeleton class="h-9 w-full" />
+        {/each}
+      </Card.Content>
+    </Card.Root>
+  {:else if nearbyPhase === 'ok'}
+    <Card.Root>
+      <Card.Header class="flex-row items-center justify-between space-y-0">
+        <div class="grid gap-1">
+          <Card.Title>Nearby stations</Card.Title>
+          <Card.Description>
+            {nearbyStations.length
+              ? `${nearbyStations.length} stations sorted by distance`
+              : 'No stations found around your location.'}
+          </Card.Description>
+        </div>
+        <Button variant="ghost" size="icon-sm" aria-label="Dismiss nearby list" onclick={dismissNearby}>
+          <XIcon />
+        </Button>
+      </Card.Header>
+      {#if nearbyStations.length}
+        <Card.Content class="grid gap-1">
+          {#each nearbyStations as s (s.code)}
+            <button
+              type="button"
+              class="flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-sm hover:bg-muted"
+              onclick={() => onPickStation({ code: s.code })}
+            >
+              <span class="flex min-w-0 items-baseline">
+                <span class="font-mono text-xs font-medium">{s.code}</span>
+                <span class="mx-1.5 text-muted-foreground">·</span>
+                <span class="truncate font-medium">{s.name}</span>
+              </span>
+              {#if nearbyDistance(s.distance_km)}
+                <span class="shrink-0 font-mono text-xs text-muted-foreground">
+                  {nearbyDistance(s.distance_km)}
+                </span>
+              {/if}
+            </button>
+          {/each}
+        </Card.Content>
+      {/if}
+    </Card.Root>
+  {/if}
+
+  {#if !committedCode && recent.length > 0}
+    <RecentSearches
+      items={recent}
+      onpick={(r) => onPickStation({ code: r.label })}
+      onclear={() => {
+        clearStored(RECENT_KEY)
+        recent = []
+      }}
+    />
+  {/if}
 
   <Tabs.Root bind:value={tab} onValueChange={onTabChange}>
     <Tabs.List class="w-full justify-start">

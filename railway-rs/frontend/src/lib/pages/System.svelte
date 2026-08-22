@@ -3,10 +3,10 @@
   import { api } from '$lib/api.js'
   import SourceStatus from '$lib/SourceStatus.svelte'
   import * as Card from '$lib/components/ui/card/index.js'
-  import { Badge } from '$lib/components/ui/badge/index.js'
   import { Skeleton } from '$lib/components/ui/skeleton/index.js'
   import * as Alert from '$lib/components/ui/alert/index.js'
   import { Button } from '$lib/components/ui/button/index.js'
+  import { StatusBadge, LogLevelBadge, CountBadge } from '$lib/components/badges/index.js'
   import Activity from 'lucide-svelte/icons/activity'
   import RefreshCw from 'lucide-svelte/icons/refresh-cw'
   import Clock from 'lucide-svelte/icons/clock'
@@ -155,13 +155,6 @@
       bar: 'bg-amber-500'
     }
   ]
-
-  function levelVariant(level) {
-    const l = String(level ?? '').toUpperCase()
-    if (l.includes('ERROR') || l.includes('FATAL')) return 'destructive'
-    if (l.includes('WARN')) return 'outline'
-    return 'secondary'
-  }
 
   function logLine(l) {
     const f = l && typeof l === 'object' ? l.fields ?? {} : {}
@@ -430,14 +423,14 @@
 
 {#snippet originStatusCell(o)}
   {#if o.status === 'up' || o.status === 'reachable'}
-    <Badge>up</Badge>
+    <StatusBadge tone="success" dot>up</StatusBadge>
   {:else}
-    <Badge variant="destructive">{o.status}</Badge>
+    <StatusBadge tone="danger" dot>{o.status}</StatusBadge>
   {/if}
 {/snippet}
 
 {#snippet logLevelCell(l)}
-  <Badge variant={levelVariant(l?.level)}>{String(l?.level ?? 'unknown').toLowerCase()}</Badge>
+  <LogLevelBadge level={l?.level} />
 {/snippet}
 
 <section class="grid gap-6">
@@ -601,7 +594,7 @@
                   <li class="flex items-center gap-3">
                     <span class="w-5 text-right font-mono text-xs text-muted-foreground">{i + 1}.</span>
                     <span class="min-w-0 flex-1 truncate font-mono text-xs">{String(p[0])}</span>
-                    <Badge variant="secondary">{Number(p[1]).toLocaleString()}</Badge>
+                    <CountBadge value={Number(p[1])} />
                   </li>
                 {/each}
               </ol>

@@ -176,3 +176,133 @@ async fn status_reports_configuration_truth() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["enabled"], false);
 }
+
+// ---------- agentic tool loop ----------
+
+/// NTES trains-between table as the tool's inner service expects to parse it
+/// (Secunderabad → Pune, one row).
+const TB_TOOL_HTML: &str = r#"<table>
+<tr><th colspan="9">2 Trains found from SC - SECUNDERABAD to PUNE - PUNE JN</th></tr>
+<tr class="w3-round">
+  <td colspan=3>
+    <span><b>17013</b>&nbsp;&nbsp;HUBLI EXPRESS</span><br>
+    <span>Daily</span>
+    <span class="w3-round w3-blue" onclick="onTrainStatus('17013',document.getElementsByName('frmTBS')[0],'')">See Train Status >></span>
+    <span style="text-align: left;width: 25%;"><b>21:35</b><br>Secunderabad<br>SC</span>
+    <div style="text-align: center; width: 50%;">--11:45 Hrs.--</div>
+    <span style="text-align: right; width: 25%;"><b>09:20</b><br>Pune<br><b>PUNE</b></span>
+  </td>
+</tr>
+</table>"#;
+
+fn sse_tool_call_round(name: &str, args: &str) -> String {
+    let escaped = args.replace('"', "\\\"");
+    format!(
+        "data: {{\"choices\":[{{\"delta\":{{\"tool_calls\":[{{\"index\":0,\"id\":\"call_tb\",\"type\":\"function\",\"function\":{{\"name\":\"{name}\",\"arguments\":\"{escaped}\"}}}}]}}}}]}}\n\ndata: [DONE]\n\n"
+    )
+}
+
+#[tokio::test]
+async fn tool_loop_executes_trains_between_and_streams_final_answer() {
+    let app = TestApp::spawn().await;
+    app.mock("ntes").ntes_web(TB_TOOL_HTML);
+
+    let round1 = sse_tool_call_round("trains_between", "{\"src\":\"SC\",\"dst\":\"PUNE\"}");
+    let round2 = concat!(
+        "data: {\"choices\":[{\"delta\":{\"content\":\"HUBLI EXPRESS (17013) runs Secunderabad to Pune.\"}}]}\n\n",
+        "data: {\"usage\":{\"prompt_tokens\":210,\"completion_tokens\":18}}\n\n",
+        "data: [DONE]\n\n"
+    );
+    app.mock("zen").route_raw_seq(
+        "/chat/completions",
+        vec![
+            (StatusCode::OK, "text/event-stream", round1),
+            (StatusCode::OK, "text/event-stream", round2.to_string()),
+        ],
+    );
+
+    let (status, body) = app
+        .post_raw(
+            CHAT_PATH,
+            json!({"messages":[{"role":"user","content":"trains from Hyderabad to Pune?"}]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        body.contains("\"type\":\"tools\""),
+        "tools chip frame missing: {body}"
+    );
+    assert!(body.contains("trains_between"));
+    assert!(body.contains("17013"), "final answer not streamed: {body}");
+    assert!(body.contains("\"type\":\"done\""));
+
+    // Two zen rounds; the second carries the local tool result.
+    let zen_calls = app.mock("zen").calls();
+    assert_eq!(zen_calls.len(), 2, "expected exactly two model rounds");
+    let second = &zen_calls[1].1;
+    assert!(
+        second.contains("\"role\":\"tool\""),
+        "tool result not fed back: {second}"
+    );
+    assert!(
+        second.contains("17013"),
+        "grounded data missing from tool result"
+    );
+
+    // The inner service really hit the NTES mock.
+    assert!(!app.mock("ntes").calls().is_empty(), "ntes never called");
+}
+
+#[tokio::test]
+async fn tool_failure_is_fed_back_and_model_recovers() {
+    let app = TestApp::spawn().await;
+    let round1 = sse_tool_call_round("live_status", "{\"train\":\"12AB\"}");
+    let round2 = concat!(
+        "data: {\"choices\":[{\"delta\":{\"content\":\"That train number looked invalid.\"}}]}\n\n",
+        "data: [DONE]\n\n"
+    );
+    app.mock("zen").route_raw_seq(
+        "/chat/completions",
+        vec![
+            (StatusCode::OK, "text/event-stream", round1),
+            (StatusCode::OK, "text/event-stream", round2.to_string()),
+        ],
+    );
+
+    let (status, body) = app.post_raw(CHAT_PATH, chat_payload()).await;
+    assert_eq!(status, StatusCode::OK);
+    // The request still answers 200 SSE; the tool error rode in-band to the
+    // model and the final prose arrived.
+    assert!(body.contains("invalid"), "recovery answer missing: {body}");
+    assert!(body.contains("\"type\":\"done\""));
+
+    let zen_calls = app.mock("zen").calls();
+    assert_eq!(zen_calls.len(), 2);
+    assert!(
+        zen_calls[1].1.contains("not a valid 5-digit train number"),
+        "tool error payload not fed back: {}",
+        zen_calls[1].1
+    );
+}
+
+#[tokio::test]
+async fn runaway_tool_loop_is_capped_after_four_rounds() {
+    let app = TestApp::spawn().await;
+    serve_sse(
+        &app,
+        &sse_tool_call_round("average_delay", "{\"train\":\"12951\"}"),
+    );
+
+    let (status, body) = app
+        .post_raw(
+            CHAT_PATH,
+            json!({"messages":[{"role":"user","content":"delay?"}]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        body.contains("too many tool steps"),
+        "cap error missing: {body}"
+    );
+    assert_eq!(app.mock("zen").calls().len(), 4);
+}

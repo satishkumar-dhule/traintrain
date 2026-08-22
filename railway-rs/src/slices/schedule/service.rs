@@ -2,6 +2,7 @@ use std::time::Instant;
 
 use serde_json::Value;
 
+use crate::core::corover::{self, SOURCE_API};
 use crate::core::error::AppError;
 use crate::core::railyatri;
 use crate::models::{ScheduleResponse, ScheduleStop};
@@ -13,8 +14,9 @@ impl Service {
     /// Resolve the full schedule (route + running days) for a train number.
     ///
     /// NTES (`enquiry.indianrail.gov.in`) is the primary source; Railyatri's
-    /// SSR page is the fallback when NTES is unreachable or malformed. The
-    /// winning source is reported honestly in `data_source`.
+    /// SSR page is the fallback when NTES is unreachable or malformed; Ask
+    /// DISHA (`trnscheduleEnq` via the CoRover guest API) is the final
+    /// fallback. The winning source is reported honestly in `data_source`.
     pub async fn get_schedule(state: &AppState, train: &str) -> Result<ScheduleResponse, AppError> {
         let key = format!("schedule:{train}");
 
@@ -53,13 +55,27 @@ impl Service {
                 Ok(resp)
             }
             Err(AppError::NotFound(msg)) => Err(AppError::not_found(msg)),
-            Err(ry_err) => Err(AppError::source_unavailable(
-                "all-sources",
-                format!(
-                    "schedule for {train} failed: NTES: {ntes_failure} | Railyatri: {}",
-                    ry_err.message()
-                ),
-            )),
+            Err(ry_err) => match corover_schedule(state, train).await {
+                Ok(resp) => {
+                    tracing::warn!(
+                        %train,
+                        source = "CoRover",
+                        %ntes_failure,
+                        railyatri_failure = %ry_err.message(),
+                        "schedule resolved from CoRover after NTES and Railyatri failures"
+                    );
+                    state.cache.set(&key, serde_json::to_value(&resp)?);
+                    Ok(resp)
+                }
+                Err(cov_err) => Err(AppError::source_unavailable(
+                    "all-sources",
+                    format!(
+                        "schedule for {train} failed: NTES: {ntes_failure} | Railyatri: {} | CoRover: {}",
+                        ry_err.message(),
+                        cov_err.message()
+                    ),
+                )),
+            },
         }
     }
 }
@@ -93,7 +109,8 @@ fn ntes_schedule_response(
                 s,
                 &["departureTime", "departuretime", "departure", "depTime"],
             ),
-            day: int_field(s, &["day", "stopDay"]).unwrap_or(1),
+            day: Some(u8::try_from(int_field(s, &["day", "stopDay"]).unwrap_or(1)).unwrap_or(1)),
+            distance_km: None,
         })
         .filter(|s| !s.code.is_empty() || !s.name.is_empty())
         .collect();
@@ -169,7 +186,8 @@ async fn railyatri_schedule(state: &AppState, train: &str) -> Result<ScheduleRes
             name: s["name"].as_str().unwrap_or_default().to_string(),
             arrival: s["arrival"].as_str().unwrap_or_default().to_string(),
             departure: s["departure"].as_str().unwrap_or_default().to_string(),
-            day: s["day"].as_i64().unwrap_or(1),
+            day: Some(u8::try_from(s["day"].as_i64().unwrap_or(1)).unwrap_or(1)),
+            distance_km: None,
         })
         .collect();
 
@@ -197,6 +215,70 @@ async fn railyatri_schedule(state: &AppState, train: &str) -> Result<ScheduleRes
 
 fn non_empty(v: &Value) -> Option<String> {
     v.as_str().filter(|s| !s.is_empty()).map(String::from)
+}
+
+/// Fetch and normalize the Ask DISHA `trnscheduleEnq` schedule (final
+/// fallback of the chain). No-op when the module is disabled (`state.askdisha`
+/// is `None`) - reports a source-unavailable error without any outbound call.
+async fn corover_schedule(state: &AppState, train: &str) -> Result<ScheduleResponse, AppError> {
+    let client = state
+        .askdisha
+        .as_deref()
+        .ok_or_else(|| AppError::source_unavailable(SOURCE_API, "askdisha module disabled"))?;
+
+    let started = Instant::now();
+    let raw = client.trnschedule_enq(train, None, None).await?;
+    state
+        .metrics
+        .record_source_latency(SOURCE_API, started.elapsed());
+
+    corover_schedule_response(train, &raw, state.config.cache_ttl.as_secs())
+}
+
+/// Normalize the CoRover schedule payload into the same wire model the NTES /
+/// Railyatri branches emit. `distance` / `dayCount` map onto
+/// [`ScheduleStop::distance_km`] / [`ScheduleStop::day`]; the core parser has
+/// already turned `"--"` sentinels and unparseable values into `None`.
+fn corover_schedule_response(
+    train: &str,
+    data: &corover::ScheduleResponse,
+    cache_ttl: u64,
+) -> Result<ScheduleResponse, AppError> {
+    if data.station_list.is_empty() {
+        return Err(AppError::source_unavailable(
+            SOURCE_API,
+            "no stops in schedule",
+        ));
+    }
+
+    let stops: Vec<ScheduleStop> = data
+        .station_list
+        .iter()
+        .map(|s| ScheduleStop {
+            code: s.station_code.clone(),
+            name: s.station_name.clone(),
+            arrival: s.arrival_time.clone().unwrap_or_default(),
+            departure: s.departure_time.clone().unwrap_or_default(),
+            day: s.day_count,
+            distance_km: s.distance,
+        })
+        .collect();
+
+    Ok(ScheduleResponse {
+        train_number: Some(if data.train_number.is_empty() {
+            train.to_string()
+        } else {
+            data.train_number.clone()
+        }),
+        train_name: data.train_name.clone().filter(|n| !n.is_empty()),
+        route_description: None,
+        running_days: None,
+        stops: Some(stops),
+        source: Some("CoRover".to_string()),
+        cache_ttl: Some(cache_ttl),
+        notice: Some("Live data from Ask DISHA (CoRover).".to_string()),
+        data_source: Some("CoRover".to_string()),
+    })
 }
 
 fn field(v: &Value, keys: &[&str]) -> String {
@@ -236,7 +318,9 @@ mod tests {
         assert_eq!(stops.len(), 2);
         assert_eq!(stops[0].code, "MMCT");
         assert_eq!(stops[0].departure, "17:40");
-        assert_eq!(stops[1].day, 2);
+        // NTES always knows the day-of-run; distance is never carried.
+        assert_eq!(stops[1].day, Some(2));
+        assert_eq!(stops[1].distance_km, None);
     }
 
     #[test]
@@ -244,5 +328,77 @@ mod tests {
         let data = json!({ "trainNo": "12951", "trainScheduleList": [] });
         let err = ntes_schedule_response("12951", &data, 120).unwrap_err();
         assert!(matches!(err, AppError::SourceUnavailable { source, .. } if source == "NTES"));
+    }
+
+    #[test]
+    fn corover_normalizer_maps_distance_and_daycount_onto_wire_model() {
+        let raw = std::fs::read_to_string("testdata/askdisha/schedule_12951.json")
+            .expect("fixture testdata/askdisha/schedule_12951.json must exist");
+        let parsed: corover::ScheduleResponse =
+            serde_json::from_str(&raw).expect("corover schedule fixture parses");
+
+        let resp = corover_schedule_response("12951", &parsed, 120).expect("normalizes");
+        assert_eq!(resp.data_source.as_deref(), Some("CoRover"));
+        assert_eq!(resp.source.as_deref(), Some("CoRover"));
+        assert_eq!(resp.train_number.as_deref(), Some("12951"));
+        assert_eq!(resp.cache_ttl, Some(120));
+
+        let stops = resp.stops.expect("stops present");
+        assert_eq!(stops.len(), 8);
+        // Origin: distance 0 km, day 1.
+        assert_eq!(stops[0].code, "MMCT");
+        assert_eq!(stops[0].distance_km, Some(0.0));
+        assert_eq!(stops[0].day, Some(1));
+        assert_eq!(stops[0].departure, "17:00");
+        // Cumulative km + day rollover survive the mapping.
+        assert_eq!(stops[4].code, "RTM");
+        assert_eq!(stops[4].distance_km, Some(653.0));
+        assert_eq!(stops[4].day, Some(2));
+        assert_eq!(stops.last().unwrap().distance_km, Some(1384.0));
+    }
+
+    #[test]
+    fn corover_normalizer_defaults_train_number_and_rejects_empty_stops() {
+        let bare = corover::ScheduleResponse {
+            train_number: String::new(),
+            train_name: None,
+            station_from: None,
+            station_to: None,
+            runs_mon: false,
+            runs_tue: false,
+            runs_wed: false,
+            runs_thu: false,
+            runs_fri: false,
+            runs_sat: false,
+            runs_sun: false,
+            error_message: None,
+            station_list: Vec::new(),
+        };
+        let err = corover_schedule_response("12951", &bare, 120).unwrap_err();
+        assert!(
+            matches!(err, AppError::SourceUnavailable { source, .. } if source == corover::SOURCE_API)
+        );
+
+        let mut with_stop = bare.clone();
+        with_stop.train_number = "12951".to_string();
+        with_stop.station_list.push(corover::ScheduleStop {
+            station_code: "MMCT".to_string(),
+            station_name: "MUMBAI CENTRAL".to_string(),
+            arrival_time: Some("--".to_string()),
+            departure_time: None,
+            route_number: None,
+            halt_time: None,
+            distance: None,
+            day_count: None,
+        });
+        let resp = corover_schedule_response("99999", &with_stop, 120).unwrap();
+        assert_eq!(resp.train_number.as_deref(), Some("12951"));
+        let stops = resp.stops.unwrap();
+        // "--" / absent times degrade to the same empty-string shape NTES
+        // emits; enrichment stays None.
+        assert_eq!(stops[0].arrival, "--");
+        assert_eq!(stops[0].departure, "");
+        assert_eq!(stops[0].distance_km, None);
+        assert_eq!(stops[0].day, None);
     }
 }

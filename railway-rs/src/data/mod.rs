@@ -1,5 +1,8 @@
 //! Shared datasets loaded from `data/` at startup (real data only):
-//! - `stations.json`        - 8,958 real Indian Railway stations
+//! - `stations.json`        - 8,958 real Indian Railway stations, enriched
+//!   offline with optional AskDISHA CDN fields (`name_hi`/`name_gu`/
+//!   `district`/`address`/`train_count`/`lat`/`lng`) by the F1 hydrator
+//!   (`src/bin/hydrate_stations.rs`, pure merge in [`merge_hydration`])
 //! - `trains.json`          - 10,609 real trains (fetched from the NTES master list)
 //! - `station_coords.txt`   - 8,773 `CODE\tLAT\tLNG` coordinates (from NTES's own
 //!   `station_map_data.js`), used by the train-on-map slice.
@@ -22,17 +25,172 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::core::error::AppError;
 
-#[derive(Debug, Clone, Deserialize)]
+/// One row of `data/stations.json`. `code`/`name`/`state`/`zone` come from the
+/// NTES master dataset; the remaining optional fields are AskDISHA CDN
+/// hydration (F1, `src/bin/hydrate_stations.rs`) and are absent (`None`)
+/// whenever the upstream capture does not know them or leaves them blank.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct StationRecord {
     pub code: String,
     pub name: String,
     pub state: String,
     pub zone: String,
+    /// Hindi name from the AskDISHA capture, when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name_hi: Option<String>,
+    /// Gujarati name from the AskDISHA capture, when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name_gu: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub district: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub address: Option<String>,
+    /// Upstream `trainCount` (kept as string, e.g. `"244"`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub train_count: Option<String>,
+    /// Latitude; upstream emits `""`/`null`/non-numeric for stations without
+    /// coordinates -> `None` (lenient parse, see [`de_lenient_f64`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lat: Option<f64>,
+    /// Longitude; see [`Self::lat`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lng: Option<f64>,
+}
+
+/// One row of the AskDISHA CDN `stationupdated.json` capture
+/// (`testdata/askdisha/stationupdated_full.json`). Only the fields the
+/// hydration merge consumes are declared; upstream sends more (`utterances`,
+/// `state`, ...) which serde ignores. Upstream `state` is deliberately not
+/// modelled: local `state`/`zone` always win (contract F1).
+#[derive(Debug, Clone, Deserialize)]
+pub struct HydrationRow {
+    pub code: String,
+    #[serde(default)]
+    pub name_hi: Option<String>,
+    #[serde(default)]
+    pub name_gu: Option<String>,
+    #[serde(default)]
+    pub district: Option<String>,
+    #[serde(default)]
+    pub address: Option<String>,
+    #[serde(default, rename = "trainCount")]
+    pub train_count: Option<String>,
+    #[serde(default, deserialize_with = "de_lenient_f64")]
+    pub latitude: Option<f64>,
+    #[serde(default, deserialize_with = "de_lenient_f64")]
+    pub longitude: Option<f64>,
+}
+
+/// Report returned by [`merge_hydration`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct HydrationReport {
+    /// Distinct upstream codes merged into a local record.
+    pub hydrated: usize,
+    /// Distinct upstream codes seen (duplicate fixture codes collapse).
+    pub total: usize,
+    /// Upstream codes with no local station, in first-seen order.
+    pub unmatched: Vec<String>,
+}
+
+/// Pure F1 hydration merge: enrich `local` records with the optional
+/// AskDISHA fields, keyed by station code (case-insensitive, trimmed).
+///
+/// Collision policy:
+/// - local authority always wins - `code`, `name`, `state` and `zone` are
+///   never modified, even when upstream disagrees;
+/// - blank/whitespace upstream strings count as absent -> `None`;
+/// - coordinates parse leniently (`""`/`null`/non-numeric -> `None`);
+/// - duplicate upstream codes collapse, last row wins;
+/// - deterministic: the same inputs always produce identical records, so
+///   re-running the hydrator over its own output is a no-op.
+pub fn merge_hydration(
+    mut local: Vec<StationRecord>,
+    upstream: &[HydrationRow],
+) -> (Vec<StationRecord>, HydrationReport) {
+    // Deduplicate upstream codes (last row wins), keeping first-seen order so
+    // the unmatched report is stable.
+    let mut index: HashMap<String, usize> = HashMap::new();
+    let mut unique: Vec<&HydrationRow> = Vec::new();
+    for row in upstream {
+        let key = row.code.trim().to_uppercase();
+        if key.is_empty() {
+            continue;
+        }
+        match index.get(&key) {
+            Some(&i) => unique[i] = row,
+            None => {
+                index.insert(key, unique.len());
+                unique.push(row);
+            }
+        }
+    }
+    let total = unique.len();
+
+    let mut hydrated = 0usize;
+    let mut matched: HashMap<String, ()> = HashMap::new();
+    for record in local.iter_mut() {
+        let key = record.code.trim().to_uppercase();
+        let row = match index.get(&key).map(|&i| unique[i]) {
+            Some(row) => row,
+            None => continue,
+        };
+        record.name_hi = clean_opt(row.name_hi.as_deref());
+        record.name_gu = clean_opt(row.name_gu.as_deref());
+        record.district = clean_opt(row.district.as_deref());
+        record.address = clean_opt(row.address.as_deref());
+        record.train_count = clean_opt(row.train_count.as_deref());
+        record.lat = row.latitude.filter(|v| v.is_finite());
+        record.lng = row.longitude.filter(|v| v.is_finite());
+        matched.insert(key, ());
+        hydrated += 1;
+    }
+
+    let unmatched = unique
+        .iter()
+        .filter_map(|row| {
+            let key = row.code.trim().to_uppercase();
+            (!matched.contains_key(&key)).then(|| row.code.trim().to_string())
+        })
+        .collect();
+
+    let report = HydrationReport {
+        hydrated,
+        total,
+        unmatched,
+    };
+    (local, report)
+}
+
+/// Trim an optional string, treating blank as absent.
+fn clean_opt(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
+/// Lenient optional `f64` for bulk captures: `null`, blank strings,
+/// non-numeric strings and unexpected types all become `None` instead of
+/// failing the whole file. Mirrors the tolerance of
+/// `core/corover.rs::de_opt_f64`, pushed one step further because a single
+/// bad row must never abort a hydration run. Non-finite parses (`NaN`,
+/// infinities) are dropped too - they have no JSON representation.
+fn de_lenient_f64<'de, D>(deserializer: D) -> Result<Option<f64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let parsed = match <Value as Deserialize>::deserialize(deserializer)? {
+        Value::Null => None,
+        Value::Number(n) => n.as_f64(),
+        Value::String(s) => s.trim().parse::<f64>().ok(),
+        _ => None,
+    };
+    Ok(parsed.filter(|v| v.is_finite()))
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -51,6 +209,37 @@ pub struct Suggestion {
     /// Train number (trains only).
     pub number: Option<String>,
     pub name: String,
+    /// Hydrated AskDISHA fields carried by station hits only (F2 subtitle
+    /// passthrough); trains always carry `None`.
+    pub name_hi: Option<String>,
+    pub name_gu: Option<String>,
+    pub district: Option<String>,
+}
+
+impl Suggestion {
+    fn station(s: &StationRecord) -> Self {
+        Self {
+            kind: "station",
+            code: Some(s.code.clone()),
+            number: None,
+            name: s.name.clone(),
+            name_hi: s.name_hi.clone(),
+            name_gu: s.name_gu.clone(),
+            district: s.district.clone(),
+        }
+    }
+
+    fn train(number: &str, name: &str) -> Self {
+        Self {
+            kind: "train",
+            code: None,
+            number: Some(number.to_string()),
+            name: name.to_string(),
+            name_hi: None,
+            name_gu: None,
+            district: None,
+        }
+    }
 }
 
 /// Pre-warmed lowercase station index (built once at load).
@@ -230,29 +419,13 @@ impl Datasets {
         let mut scored: Vec<(i64, Suggestion)> = Vec::new();
 
         for (idx, s) in self.rank_stations(query).into_iter().enumerate() {
-            scored.push((
-                1000 - idx as i64,
-                Suggestion {
-                    kind: "station",
-                    code: Some(s.code.clone()),
-                    number: None,
-                    name: s.name.clone(),
-                },
-            ));
+            scored.push((1000 - idx as i64, Suggestion::station(s)));
         }
         let q = query.trim().to_lowercase();
         let tokens: Vec<&str> = q.split_whitespace().collect();
         for (t, lc) in self.trains.iter().zip(self.train_lc.iter()) {
             if let Some(score) = train_score(&t.number, &lc.name, &tokens) {
-                scored.push((
-                    score,
-                    Suggestion {
-                        kind: "train",
-                        code: None,
-                        number: Some(t.number.clone()),
-                        name: t.name.clone(),
-                    },
-                ));
+                scored.push((score, Suggestion::train(&t.number, &t.name)));
             }
         }
 
@@ -595,5 +768,181 @@ mod tests {
     fn load_coords_missing_file_is_empty() {
         let path = std::path::Path::new("/definitely/not/here/coords.txt");
         assert!(load_coords(path).is_empty());
+    }
+
+    fn hydration_row(json: serde_json::Value) -> HydrationRow {
+        serde_json::from_value(json).unwrap()
+    }
+
+    /// Local authority: `code`/`name`/`state`/`zone` survive the merge even
+    /// when upstream knows the station; only the optional fields are set.
+    #[test]
+    fn hydration_keeps_local_identity_fields() {
+        let local = vec![StationRecord {
+            code: "NDLS".into(),
+            name: "NEW DELHI".into(),
+            state: "Delhi".into(),
+            zone: "NR".into(),
+            ..Default::default()
+        }];
+        let upstream = vec![hydration_row(serde_json::json!({
+            "code": "ndls",
+            "name": "SOME OTHER NAME",
+            "name_hi": "नई दिल्ली",
+            "district": "Central",
+            "state": "Upstream State",
+            "trainCount": "244"
+        }))];
+        let (records, report) = merge_hydration(local, &upstream);
+        assert_eq!(report.hydrated, 1);
+        assert_eq!(report.total, 1);
+        assert!(report.unmatched.is_empty());
+        let ndls = &records[0];
+        assert_eq!(ndls.code, "NDLS");
+        assert_eq!(ndls.name, "NEW DELHI");
+        assert_eq!(ndls.state, "Delhi", "local state always wins");
+        assert_eq!(ndls.zone, "NR", "local zone always wins");
+        assert_eq!(ndls.name_hi.as_deref(), Some("नई दिल्ली"));
+        assert_eq!(ndls.district.as_deref(), Some("Central"));
+        assert_eq!(ndls.train_count.as_deref(), Some("244"));
+    }
+
+    #[test]
+    fn hydration_reports_unmatched_codes() {
+        let local = vec![StationRecord {
+            code: "NDLS".into(),
+            name: "NEW DELHI".into(),
+            state: "Delhi".into(),
+            zone: "NR".into(),
+            ..Default::default()
+        }];
+        let upstream = vec![
+            hydration_row(serde_json::json!({ "code": "NDLS" })),
+            hydration_row(serde_json::json!({ "code": "ZZZZ" })),
+            hydration_row(serde_json::json!({ "code": "YYYY" })),
+        ];
+        let (records, report) = merge_hydration(local, &upstream);
+        assert_eq!(report.hydrated, 1);
+        assert_eq!(report.total, 3);
+        assert_eq!(report.unmatched, vec!["ZZZZ", "YYYY"]);
+        assert!(records[0].name_hi.is_none());
+    }
+
+    /// Tolerance: blank strings count as absent, coordinates parse leniently
+    /// (`""`/null/non-numeric -> None), numeric strings are accepted and
+    /// non-finite parses are dropped.
+    #[test]
+    fn hydration_tolerates_blank_fields_and_bad_coordinates() {
+        let code = |c: &str| c.to_string();
+        let local: Vec<StationRecord> = ["AA", "BB", "CC", "DD"]
+            .iter()
+            .map(|c| StationRecord {
+                code: code(c),
+                name: "X".into(),
+                state: String::new(),
+                zone: String::new(),
+                ..Default::default()
+            })
+            .collect();
+        let upstream = vec![
+            hydration_row(serde_json::json!({
+                "code": "aa", "name_hi": "", "district": "  ",
+                "latitude": "", "longitude": null
+            })),
+            hydration_row(serde_json::json!({
+                "code": "BB", "address": "",
+                "latitude": "not-a-number", "longitude": "28.64"
+            })),
+            hydration_row(serde_json::json!({
+                "code": "cc", "trainCount": "0", "latitude": "NaN"
+            })),
+        ];
+        let (records, report) = merge_hydration(local, &upstream);
+        assert_eq!(report.hydrated, 3);
+        assert!(records[0].name_hi.is_none());
+        assert!(records[0].district.is_none());
+        assert_eq!(records[0].lat, None);
+        assert_eq!(records[0].lng, None);
+        assert!(records[1].address.is_none());
+        assert_eq!(records[1].lat, None, "non-numeric string -> None");
+        assert_eq!(records[1].lng, Some(28.64), "numeric string accepted");
+        assert_eq!(records[2].train_count.as_deref(), Some("0"));
+        assert_eq!(records[2].lat, None, "non-finite parse dropped");
+    }
+
+    /// Duplicate upstream codes collapse (last row wins).
+    #[test]
+    fn hydration_collapses_duplicate_upstream_codes() {
+        let local = sample_stations();
+        let upstream = vec![
+            hydration_row(serde_json::json!({ "code": "NDLS", "district": "Wrong" })),
+            hydration_row(serde_json::json!({ "code": "NDLS", "district": "Central" })),
+        ];
+        let (records, report) = merge_hydration(local, &upstream);
+        assert_eq!(report.total, 1);
+        assert_eq!(report.hydrated, 1);
+        assert_eq!(records[0].district.as_deref(), Some("Central"));
+    }
+
+    /// Idempotence: merging over already-hydrated data reproduces byte-identical
+    /// JSON, so re-running the hydrator is a no-op.
+    #[test]
+    fn hydration_is_idempotent() {
+        let local = sample_stations();
+        let upstream = vec![
+            hydration_row(serde_json::json!({
+                "code": "NDLS", "name_hi": "नई दिल्ली", "district": "Central",
+                "latitude": 28.6426, "longitude": 77.2197
+            })),
+            hydration_row(serde_json::json!({ "code": "BCT", "address": "Mumbai" })),
+        ];
+        let (once, _) = merge_hydration(local.clone(), &upstream);
+        let first = serde_json::to_vec(&once).unwrap();
+        let (twice, report) = merge_hydration(once, &upstream);
+        let second = serde_json::to_vec(&twice).unwrap();
+        assert_eq!(first, second, "re-run must be byte-identical");
+        assert_eq!(report.hydrated, 2);
+    }
+
+    /// Old four-field `stations.json` rows must keep loading unchanged, and
+    /// hydrated records serialize without the absent optional keys.
+    #[test]
+    fn station_record_roundtrips_old_four_field_json() {
+        let old = serde_json::json!([
+            { "code": "NDLS", "name": "New Delhi", "state": "Delhi", "zone": "NR" }
+        ]);
+        let records: Vec<StationRecord> = serde_json::from_value(old).unwrap();
+        assert_eq!(records.len(), 1);
+        let r = &records[0];
+        assert!(r.name_hi.is_none());
+        assert!(r.name_gu.is_none());
+        assert!(r.district.is_none());
+        assert!(r.address.is_none());
+        assert!(r.train_count.is_none());
+        assert!(r.lat.is_none());
+        assert!(r.lng.is_none());
+
+        // Absent optionals are omitted on Serialize, so the wire shape of an
+        // unhydrated row stays exactly the old four fields.
+        let wire = serde_json::to_string(&r).unwrap();
+        assert_eq!(
+            wire,
+            r#"{"code":"NDLS","name":"New Delhi","state":"Delhi","zone":"NR"}"#
+        );
+
+        // A fully hydrated record round-trips losslessly.
+        let hydrated = StationRecord {
+            name_hi: Some("नई दिल्ली".into()),
+            name_gu: Some("નઈ દિલ્લી".into()),
+            district: Some("Central".into()),
+            address: Some("Paharganj, New Delhi".into()),
+            train_count: Some("244".into()),
+            lat: Some(28.6426),
+            lng: Some(77.2197),
+            ..r.clone()
+        };
+        let bytes = serde_json::to_vec(&hydrated).unwrap();
+        let back: StationRecord = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(back, hydrated);
     }
 }

@@ -14,6 +14,12 @@
 import FilterIcon from 'lucide-svelte/icons/filter'
 import DataTable from '$lib/components/DataTable.svelte'
 import EmptyState from '$lib/components/EmptyState.svelte'
+import {
+  TrainNumberBadge,
+  StationCodeBadge,
+  RunsOnBadges,
+  DataSourceBadge
+} from '$lib/components/badges/index.js'
 
   let { view = '', selection = '' } = $props()
 
@@ -214,31 +220,29 @@ import EmptyState from '$lib/components/EmptyState.svelte'
 </script>
 
 {#snippet hNumberCell(t)}
-  <Badge variant="outline" class="font-mono">{fmt(t.number)}</Badge>
+  <TrainNumberBadge number={t.number} name={t.name} />
 {/snippet}
 
 {#snippet hRouteCell(t)}
   {@const src = stopOf(t, 'source', 'source')}
   {@const dst = stopOf(t, 'destination', 'dest')}
-  <div class="flex flex-wrap items-center gap-x-2 font-mono text-xs">
-    <span title={src.name}>{src.code || '—'}{src.time ? ` · ${src.time}` : ''}</span>
+  <div class="flex flex-wrap items-center gap-x-2 text-xs">
+    <span class="flex items-center gap-1.5">
+      <StationCodeBadge code={src.code} name={src.name} size="xs" />
+      {#if src.time}<span class="font-mono text-muted-foreground">{src.time}</span>{/if}
+    </span>
     <span class="text-muted-foreground">→</span>
-    <span title={dst.name}>{dst.code || '—'}{dst.time ? ` · ${dst.time}` : ''}</span>
+    <span class="flex items-center gap-1.5">
+      <StationCodeBadge code={dst.code} name={dst.name} size="xs" />
+      {#if dst.time}<span class="font-mono text-muted-foreground">{dst.time}</span>{/if}
+    </span>
   </div>
 {/snippet}
 
 {#snippet pDaysCell(t)}
   {@const days = dayFlags(t.days_of_run)}
   {#if days.any}
-    <div class="flex gap-1">
-      {#each DAY_LETTERS as letter, di (di)}
-        {#if days.flags[di]}
-          <Badge variant="secondary" class="px-1.5 text-[10px]">{letter}</Badge>
-        {:else}
-          <Badge variant="outline" class="px-1.5 text-[10px] opacity-40">{letter}</Badge>
-        {/if}
-      {/each}
-    </div>
+    <RunsOnBadges flags={days.flags} />
   {:else}
     <span class="text-xs text-muted-foreground">{fmt(t.days_of_run)}</span>
   {/if}
@@ -294,7 +298,7 @@ import EmptyState from '$lib/components/EmptyState.svelte'
             </div>
             <div class="flex flex-wrap items-center justify-end gap-2">
               {#if str(selection).trim()}<Badge variant="outline">keyword: {selection}</Badge>{/if}
-              {#if hSource}<Badge variant="secondary">{hSource}</Badge>{/if}
+              <DataSourceBadge source={hSource} />
             </div>
           </Card.Header>
           <Card.Content>
@@ -335,7 +339,7 @@ import EmptyState from '$lib/components/EmptyState.svelte'
               <Card.Title>Parcel special trains</Card.Title>
               <Card.Description>{pTotal} train{pTotal === 1 ? '' : 's'} currently listed</Card.Description>
             </div>
-            {#if pSource}<Badge variant="secondary">{pSource}</Badge>{/if}
+            <DataSourceBadge source={pSource} />
           </Card.Header>
           <Card.Content>
             <DataTable

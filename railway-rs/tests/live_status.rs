@@ -184,6 +184,31 @@ async fn ntes_is_primary_source_when_reachable() {
         stations[2]["actual_arrival"], "",
         "not reached -> no actual"
     );
+
+    // Structured platform passthrough: the parser is private, so pin the
+    // top-level value against what the fixture yields for the expected stop
+    // (web.rs pins norm["platform_number"] == stops[2].platform for this
+    // fixture) instead of hardcoding it here.
+    let next = &stations[2];
+    assert_eq!(
+        body["platform_number"], next["platform"],
+        "top-level platform must be the next stop's platform"
+    );
+    assert!(
+        !body["platform_number"].as_str().unwrap().is_empty(),
+        "fixture carries a next-station platform"
+    );
+    assert_eq!(next["code"], "MTC");
+    assert!(
+        !next["platform"].as_str().unwrap().is_empty(),
+        "expected stop carries the fixture's real platform"
+    );
+    assert!(
+        stations
+            .iter()
+            .any(|s| !s["platform"].as_str().unwrap_or_default().is_empty()),
+        "at least one stop row surfaces a non-empty platform"
+    );
 }
 
 #[tokio::test]

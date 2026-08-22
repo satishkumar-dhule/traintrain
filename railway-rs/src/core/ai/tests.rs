@@ -19,7 +19,7 @@ fn events_from(raw: &str) -> Vec<Result<AiEvent, crate::core::error::AppError>> 
             Some(Frame::Data(frame)) => match parse_data_frame(&frame) {
                 Parsed::Empty => continue,
                 Parsed::Error(e) => out.push(Err(e)),
-                Parsed::Events(evs) => out.extend(evs.into_iter().map(Ok)),
+                Parsed::Frames(evs, _) => out.extend(evs.into_iter().map(Ok)),
             },
             None => break,
         }
@@ -87,7 +87,7 @@ fn usage_chunk_becomes_terminal_with_tokens() {
     let mut got = Vec::new();
     while let Some(Frame::Data(f)) = dec.pop_frame().unwrap() {
         match parse_data_frame(&f) {
-            Parsed::Events(evs) => got.extend(evs),
+            Parsed::Frames(evs, _) => got.extend(evs),
             Parsed::Empty => {}
             Parsed::Error(e) => panic!("unexpected error: {e}"),
         }
@@ -115,6 +115,30 @@ fn zen_error_frame_is_typed_source_unavailable() {
             assert_eq!(source, "zen");
             assert!(reason.contains("FreeUsageLimitError"), "{reason}");
             assert!(reason.contains("Rate limit exceeded."), "{reason}");
+        }
+        other => panic!("expected source_unavailable, got {other:?}"),
+    }
+}
+
+/// Verbatim free-tier failure captured from production: the stream ends
+/// instantly with finish_reason "network_error", no content, no usage.
+#[tokio::test]
+async fn network_error_finish_reason_is_a_hard_stream_error() {
+    use super::client::decode_stream;
+    use futures::StreamExt;
+
+    let raw = concat!(
+        "data: {\"choices\":[{\"index\":0,\"finish_reason\":\"network_error\",\"delta\":{\"role\":\"assistant\",\"content\":\"\"}}]}\n\n",
+        "data: [DONE]\n\n"
+    );
+    let vals: Vec<_> = decode_stream(futures::stream::iter(vec![Ok(bytes::Bytes::from(raw))]))
+        .collect::<Vec<_>>()
+        .await;
+    assert_eq!(vals.len(), 1, "stream must terminate on the failed frame");
+    match &vals[0] {
+        Err(crate::core::error::AppError::SourceUnavailable { source, reason }) => {
+            assert_eq!(source, "zen");
+            assert!(reason.contains("network_error"), "{reason}");
         }
         other => panic!("expected source_unavailable, got {other:?}"),
     }
@@ -167,7 +191,7 @@ fn flush_tail_handles_missing_done() {
     assert!(dec.pop_frame().unwrap().is_none());
     match dec.flush_tail().unwrap() {
         Some(Frame::Data(f)) => {
-            assert!(matches!(parse_data_frame(&f), Parsed::Events(_)));
+            assert!(matches!(parse_data_frame(&f), Parsed::Frames(..)));
         }
         other => panic!("expected tail data frame, got {other:?}"),
     }
@@ -186,4 +210,107 @@ fn decode_error_body_understands_both_shapes() {
         Some("Incorrect API key")
     );
     assert_eq!(decode_error_body("<html>oops</html>"), None);
+}
+
+// ---------- tool-call streaming (agentic loop) ----------
+
+use super::client::{AssembledToolCall, ChatMessage};
+
+#[tokio::test]
+async fn streamed_tool_fragments_assemble_before_done() {
+    use super::client::decode_stream;
+    use futures::StreamExt;
+
+    let raw = concat!(
+        "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"trains_between\",\"arguments\":\"{\\\"src\\\":\\\"Hyderabad\\\",\"}}]}}]}\n\n",
+        "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"dst\\\":\\\"Pune\\\"}\"}}]}}]}\n\n",
+        "data: [DONE]\n\n"
+    );
+    let stream = decode_stream(futures::stream::iter(vec![Ok(bytes::Bytes::from(raw))]));
+    let vals: Vec<AiEvent> = stream
+        .collect::<Vec<_>>()
+        .await
+        .into_iter()
+        .map(|r| r.unwrap())
+        .collect();
+    assert_eq!(
+        vals,
+        vec![
+            AiEvent::ToolCalls(vec![AssembledToolCall {
+                id: "call_1".into(),
+                name: "trains_between".into(),
+                arguments: "{\"src\":\"Hyderabad\",\"dst\":\"Pune\"}".into(),
+            }]),
+            AiEvent::Done {
+                prompt_tokens: 0,
+                completion_tokens: 0
+            },
+        ]
+    );
+}
+
+#[tokio::test]
+async fn mixed_content_then_tool_calls_keeps_order() {
+    use super::client::decode_stream;
+    use futures::StreamExt;
+
+    let raw = concat!(
+        "data: {\"choices\":[{\"delta\":{\"content\":\"Let me check.\"}}]}\n\n",
+        "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":1,\"id\":\"c2\",\"function\":{\"name\":\"live_status\",\"arguments\":\"{}\"}}]}}]}\n\n",
+        "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c1\",\"function\":{\"name\":\"average_delay\",\"arguments\":\"{\\\"train\\\":\\\"12951\\\"}\"}}]}}]}\n\n",
+        "data: [DONE]\n\n"
+    );
+    let stream = decode_stream(futures::stream::iter(vec![Ok(bytes::Bytes::from(raw))]));
+    let vals: Vec<AiEvent> = stream
+        .collect::<Vec<_>>()
+        .await
+        .into_iter()
+        .map(|r| r.unwrap())
+        .collect();
+    assert_eq!(
+        vals,
+        vec![
+            AiEvent::Delta("Let me check.".into()),
+            // Assembled by index order, not arrival order.
+            AiEvent::ToolCalls(vec![
+                AssembledToolCall {
+                    id: "c1".into(),
+                    name: "average_delay".into(),
+                    arguments: "{\"train\":\"12951\"}".into(),
+                },
+                AssembledToolCall {
+                    id: "c2".into(),
+                    name: "live_status".into(),
+                    arguments: "{}".into(),
+                },
+            ]),
+            AiEvent::Done {
+                prompt_tokens: 0,
+                completion_tokens: 0
+            },
+        ]
+    );
+}
+
+#[test]
+fn chat_message_serializes_tool_fields_only_when_present() {
+    let plain = ChatMessage::user("hi");
+    let j = serde_json::to_value(&plain).unwrap();
+    assert!(j.get("tool_call_id").is_none());
+    assert!(j.get("tool_calls").is_none());
+
+    let mut tool = ChatMessage::assistant(String::new());
+    tool.tool_calls = Some(vec![serde_json::json!({
+        "id": "call_9", "type": "function",
+        "function": {"name": "t", "arguments": "{}"}
+    })]);
+    let j = serde_json::to_value(&tool).unwrap();
+    assert_eq!(j["tool_calls"][0]["id"], "call_9");
+
+    let mut result = ChatMessage::user("data");
+    result.role = "tool".into();
+    result.tool_call_id = Some("call_9".into());
+    let j = serde_json::to_value(&result).unwrap();
+    assert_eq!(j["role"], "tool");
+    assert_eq!(j["tool_call_id"], "call_9");
 }

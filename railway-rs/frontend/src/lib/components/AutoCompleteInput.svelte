@@ -1,6 +1,6 @@
 <script>
   import { api } from '$lib/api.js'
-  import { Badge } from '$lib/components/ui/badge/index.js'
+  import { TrainNumberBadge, StationCodeBadge } from '$lib/components/badges/index.js'
 
   let {
     id = null,
@@ -203,9 +203,16 @@
         }}
         onmouseenter={() => (active = i)}
       >
-        <span class="truncate">{r.name}</span>
-        {#if r.code}<Badge variant="outline" class="shrink-0 font-mono">{r.code}</Badge>
-        {:else if r.number}<Badge variant="outline" class="shrink-0 font-mono">{r.number}</Badge>{/if}
+        <div class="min-w-0">
+          <div class="truncate">{r.name}</div>
+          {#if r.name_hi || r.name_gu}
+            <div class="truncate text-xs text-muted-foreground">
+              {r.name_hi || r.name_gu}{r.district ? ` · ${r.district}` : ''}
+            </div>
+          {/if}
+        </div>
+        {#if r.code}<StationCodeBadge code={r.code} name={r.name} link={false} size="xs" />
+        {:else if r.number}<TrainNumberBadge number={r.number} name={r.name} link={false} size="xs" />{/if}
       </button>
     {/each}
   </div>

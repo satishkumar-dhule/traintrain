@@ -1,8 +1,9 @@
 <script>
   import { route, navigate } from '$lib/router.svelte.js'
-  import { theme, setTheme, initTheme } from '$lib/theme.svelte.js'
+  import { initTheme } from '$lib/theme.svelte.js'
   import { palette, togglePalette } from '$lib/palette.svelte.js'
   import PowerSearch from '$lib/components/PowerSearch.svelte'
+  import DisplaySettings from '$lib/components/DisplaySettings.svelte'
   import House from 'lucide-svelte/icons/house'
   import TrainFront from 'lucide-svelte/icons/train-front'
   import Building2 from 'lucide-svelte/icons/building-2'
@@ -12,11 +13,9 @@
   import CalendarDays from 'lucide-svelte/icons/calendar-days'
   import TriangleAlert from 'lucide-svelte/icons/triangle-alert'
   import Package from 'lucide-svelte/icons/package'
-  import BotMessageSquare from 'lucide-svelte/icons/bot-message-square'
+  import Sparkles from 'lucide-svelte/icons/sparkles'
+  import Lightbulb from 'lucide-svelte/icons/lightbulb'
   import Search from 'lucide-svelte/icons/search'
-  import Sun from 'lucide-svelte/icons/sun'
-  import Moon from 'lucide-svelte/icons/moon'
-  import Monitor from 'lucide-svelte/icons/monitor'
 
   let { children } = $props()
 
@@ -31,11 +30,10 @@
     { href: '/pnr', label: 'PNR Status', icon: Ticket },
     { href: '/exceptions', label: 'Exceptions', icon: TriangleAlert },
     { href: '/extras', label: 'Heritage & Parcel', icon: Package },
-    { href: '/askdisha', label: 'Ask DISHA', icon: BotMessageSquare },
+    { href: '/assistant', label: 'Ask Train Bro', icon: Sparkles },
+    { href: '/insights', label: 'Insights', icon: Lightbulb },
     { href: '/system', label: 'System', icon: Activity }
   ]
-
-  const themeIcons = { system: Monitor, light: Sun, dark: Moon }
 
   function isActive(item) {
     if (item.exact) return route.path === '/'
@@ -98,19 +96,7 @@
         <span>Search everything</span>
         <kbd class="ml-auto rounded border bg-muted px-1.5 font-mono text-[10px]">⌘K</kbd>
       </button>
-      <button
-        type="button"
-        class="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-        onclick={() => {
-          const order = ['system', 'light', 'dark']
-          const next = order[(order.indexOf(theme.mode) + 1) % order.length]
-          setTheme(next)
-        }}
-        aria-label={`Theme: ${theme.mode}`}
-      >
-        <svelte:component this={themeIcons[theme.mode] ?? Monitor} class="size-4" />
-        <span class="capitalize">{theme.mode} theme</span>
-      </button>
+      <DisplaySettings />
     </div>
   </aside>
 
@@ -131,18 +117,7 @@
     >
       <Search class="size-4" />
     </button>
-    <button
-      type="button"
-      class="rounded-md p-2 text-muted-foreground hover:bg-accent"
-      onclick={() => {
-        const order = ['system', 'light', 'dark']
-        const next = order[(order.indexOf(theme.mode) + 1) % order.length]
-        setTheme(next)
-      }}
-      aria-label={`Theme: ${theme.mode}`}
-    >
-      <svelte:component this={themeIcons[theme.mode] ?? Monitor} class="size-4" />
-    </button>
+    <DisplaySettings placement="down" compact />
     <button
       type="button"
       class="rounded-md px-2 py-1 text-sm text-muted-foreground hover:bg-accent"

@@ -131,6 +131,33 @@ impl CoroverClient {
         self.get_json_retry(&url, SOURCE_CDN).await
     }
 
+    /// Stations near a coordinate: `GET /dishaAPI/bot/stationsByLocation/{lat}/{lng}`.
+    ///
+    /// Rows arrive nearest-first with their great-circle `distance` in km;
+    /// callers may still re-sort / cap as they see fit.
+    pub async fn stations_by_location(
+        &self,
+        lat: f64,
+        lng: f64,
+    ) -> Result<Vec<NearbyStation>, AppError> {
+        let url = format!(
+            "{}/dishaAPI/bot/stationsByLocation/{lat}/{lng}",
+            self.corover_base
+        );
+        self.get_json_retry(&url, SOURCE_API).await
+    }
+
+    /// Pin-code lookup: `GET /dishaAPI/bot/pin/{pincode}` (state + city list).
+    /// Route-level regex validation of the pincode lives with the callers.
+    pub async fn pin_lookup(&self, pin: &str) -> Result<PinLookup, AppError> {
+        let url = format!(
+            "{}/dishaAPI/bot/pin/{}",
+            self.corover_base,
+            urlencoding::encode(pin)
+        );
+        self.get_json_retry(&url, SOURCE_API).await
+    }
+
     /// GET `url`, retry once on transient failures (timeout / connect error /
     /// 5xx), then decode the body as `T`. Every failure is mapped onto
     /// [`AppError::SourceUnavailable`] tagged with `source` so the API layer
@@ -252,6 +279,50 @@ where
     }
 }
 
+/// Deserialize an optional `f64` where the upstream `trnscheduleEnq` stops
+/// report cumulative route distance as a numeric string (`"1384"`) and use
+/// `"--"` / `"-"` / empty / null as "no value". Unlike [`de_opt_f64`] this is
+/// deliberately lenient: distance/dayCount are enrichment-only fields, so an
+/// unparseable value degrades to `None` instead of failing the whole schedule
+/// parse.
+fn de_opt_f64_sentinel<'de, D>(deserializer: D) -> Result<Option<f64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    match <serde_json::Value as Deserialize>::deserialize(deserializer)? {
+        serde_json::Value::Null => Ok(None),
+        serde_json::Value::Number(n) => Ok(n.as_f64()),
+        serde_json::Value::String(s) => {
+            let t = s.trim();
+            if t.is_empty() || t == "-" || t == "--" {
+                return Ok(None);
+            }
+            Ok(t.parse::<f64>().ok())
+        }
+        _ => Ok(None),
+    }
+}
+
+/// [`de_opt_f64_sentinel`] counterpart for the `dayCount` stop field
+/// (`"1"`, `"2"`, ... with the same `"--"` sentinels upstream).
+fn de_opt_u8_sentinel<'de, D>(deserializer: D) -> Result<Option<u8>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    match <serde_json::Value as Deserialize>::deserialize(deserializer)? {
+        serde_json::Value::Null => Ok(None),
+        serde_json::Value::Number(n) => Ok(n.as_i64().and_then(|v| u8::try_from(v).ok())),
+        serde_json::Value::String(s) => {
+            let t = s.trim();
+            if t.is_empty() || t == "-" || t == "--" {
+                return Ok(None);
+            }
+            Ok(t.parse::<u8>().ok())
+        }
+        _ => Ok(None),
+    }
+}
+
 /// One row of `searchStation` typeahead output.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -296,6 +367,14 @@ pub struct ScheduleStop {
     pub route_number: Option<String>,
     #[serde(default)]
     pub halt_time: Option<String>,
+    /// Cumulative km from the route origin (`distance` upstream, numeric
+    /// string with `"--"` sentinels). Enrichment-only: `None` when absent or
+    /// unparseable.
+    #[serde(default, deserialize_with = "de_opt_f64_sentinel")]
+    pub distance: Option<f64>,
+    /// Day-of-run counter (`dayCount` upstream, same sentinel behavior).
+    #[serde(default, deserialize_with = "de_opt_u8_sentinel")]
+    pub day_count: Option<u8>,
 }
 
 /// `trnscheduleEnq` response. Run-day flags arrive as `"Y"`/`"N"` strings and
@@ -329,6 +408,36 @@ pub struct ScheduleResponse {
     pub error_message: Option<String>,
     #[serde(default)]
     pub station_list: Vec<ScheduleStop>,
+}
+
+/// One row of `stationsByLocation` output (station + its km distance from
+/// the queried coordinate). Upstream keys are the same snake_case spellings
+/// as [`StationRow`] plus `distance`; rows arrive nearest-first.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NearbyStation {
+    pub name: String,
+    pub code: String,
+    #[serde(default)]
+    pub utterances: Vec<String>,
+    #[serde(default, alias = "nameHi")]
+    pub name_hi: Option<String>,
+    #[serde(default, alias = "nameGu")]
+    pub name_gu: Option<String>,
+    #[serde(default)]
+    pub district: Option<String>,
+    #[serde(default)]
+    pub state: Option<String>,
+    #[serde(default)]
+    pub distance: Option<f64>,
+}
+
+/// `bot/pin/{pincode}` response body (only the fields callers need; the
+/// upstream `stateList`/`serverId`/`timeStamp` extras are ignored).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PinLookup {
+    pub state: String,
+    #[serde(default, rename = "cityList", alias = "city_list")]
+    pub city_list: Vec<String>,
 }
 
 /// CDN `getSettings.json` feature flags (43-byte document upstream).
@@ -509,6 +618,111 @@ mod tests {
         assert!(bad.is_err());
     }
 
+    #[test]
+    fn parses_schedule_stops_with_distance_and_daycount() {
+        let parsed: ScheduleResponse = serde_json::from_str(
+            r#"{
+                "trainNumber": "12951",
+                "trainRunsOnMon": "Y",
+                "stationList": [
+                    {
+                        "stationCode": "MMCT",
+                        "stationName": "MUMBAI CENTRAL",
+                        "arrivalTime": "--",
+                        "departureTime": "17:00",
+                        "haltTime": "--",
+                        "distance": "0",
+                        "dayCount": "1"
+                    },
+                    {
+                        "stationCode": "RTM",
+                        "stationName": "RATLAM JN",
+                        "arrivalTime": "00:25",
+                        "departureTime": "00:28",
+                        "distance": 653,
+                        "dayCount": "2"
+                    },
+                    {
+                        "stationCode": "NDLS",
+                        "stationName": "NEW DELHI",
+                        "arrivalTime": "08:32",
+                        "departureTime": "--",
+                        "distance": "--",
+                        "dayCount": "--"
+                    },
+                    { "stationCode": "BRC", "stationName": "VADODARA JN" }
+                ]
+            }"#,
+        )
+        .expect("schedule with enrichment fields parses");
+
+        let stops = &parsed.station_list;
+        assert_eq!(stops.len(), 4);
+        // Numeric strings parse into numbers.
+        assert_eq!(stops[0].distance, Some(0.0));
+        assert_eq!(stops[0].day_count, Some(1));
+        // Native JSON numbers are accepted too.
+        assert_eq!(stops[1].distance, Some(653.0));
+        assert_eq!(stops[1].day_count, Some(2));
+        // "--" sentinels and fully-absent fields degrade to None instead of
+        // failing the whole schedule parse.
+        assert_eq!(stops[2].distance, None);
+        assert_eq!(stops[2].day_count, None);
+        assert_eq!(stops[3].distance, None);
+        assert_eq!(stops[3].day_count, None);
+
+        // Round-trip keeps the parsed values on the camelCase wire keys.
+        let json = serde_json::to_string(&parsed).expect("serializes");
+        assert!(json.contains(r#""distance":0.0"#));
+        assert!(json.contains(r#""dayCount":2"#));
+    }
+
+    #[test]
+    fn nearby_fixture_parses_ten_rows_nearest_first_with_km_distances() {
+        let raw = std::fs::read_to_string("testdata/askdisha/nearby_mumbai.json")
+            .expect("fixture testdata/askdisha/nearby_mumbai.json must exist");
+        let rows: Vec<NearbyStation> = serde_json::from_str(&raw).expect("nearby parses");
+
+        assert_eq!(rows.len(), 10);
+        let first = &rows[0];
+        assert_eq!(first.code, "CLA");
+        assert_eq!(first.name, "KURLA JN");
+        assert_eq!(first.distance, Some(1.21));
+        assert_eq!(first.state.as_deref(), Some("Maharashtra"));
+        assert_eq!(first.district.as_deref(), Some("Mumbai Suburban"));
+        // Capture is already nearest-first upstream.
+        assert!(rows
+            .windows(2)
+            .all(|w| w[0].distance.unwrap_or(f64::INFINITY)
+                <= w[1].distance.unwrap_or(f64::INFINITY)));
+
+        // Tolerance: a row without localized names / distance still parses
+        // (all optional fields default to None).
+        let sparse: NearbyStation =
+            serde_json::from_str(r#"{ "name": "SOME STN", "code": "SOME", "utterances": [] }"#)
+                .expect("sparse nearby row parses");
+        assert_eq!(sparse.name_hi, None);
+        assert_eq!(sparse.name_gu, None);
+        assert_eq!(sparse.distance, None);
+        assert!(sparse.utterances.is_empty());
+    }
+
+    #[test]
+    fn pin_fixture_parses_state_and_two_cities() {
+        let raw = std::fs::read_to_string("testdata/askdisha/pin_400001.json")
+            .expect("fixture testdata/askdisha/pin_400001.json must exist");
+        let pin: PinLookup = serde_json::from_str(&raw).expect("pin lookup parses");
+
+        assert_eq!(pin.state, "MAHARASHTRA");
+        assert_eq!(pin.city_list, vec!["Raigarh(MH)", "Mumbai"]);
+
+        // cityList absent -> empty vec, not a parse error.
+        let bare: PinLookup =
+            serde_json::from_str(r#"{ "state": "DELHI" }"#).expect("bare pin parses");
+        assert_eq!(bare.state, "DELHI");
+        assert!(bare.city_list.is_empty());
+    }
+
     #[derive(Deserialize)]
     struct YnProbe {
         #[serde(deserialize_with = "super::de_yn_bool")]
@@ -574,6 +788,22 @@ mod tests {
         assert_eq!(
             format!("{}/askdisha-bucket/getSettings.json", client.cdn_base),
             "https://cdn.corover.ai/askdisha-bucket/getSettings.json"
+        );
+
+        assert_eq!(
+            format!(
+                "{}/dishaAPI/bot/stationsByLocation/{}/{}",
+                client.corover_base, 19.07, 72.87
+            ),
+            "https://api.disha.corover.ai/dishaAPI/bot/stationsByLocation/19.07/72.87"
+        );
+        assert_eq!(
+            format!(
+                "{}/dishaAPI/bot/pin/{}",
+                client.corover_base,
+                urlencoding::encode("400001")
+            ),
+            "https://api.disha.corover.ai/dishaAPI/bot/pin/400001"
         );
     }
 }

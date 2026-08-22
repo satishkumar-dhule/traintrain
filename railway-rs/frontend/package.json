@@ -5,11 +5,14 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "prebuild": "node scripts/check-component-imports.mjs",
     "build": "vite build",
+    "check:imports": "node scripts/check-component-imports.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
     "clsx": "^2.1.1",
+    "leaflet": "^1.9.4",
     "lucide-svelte": "^1.0.1",
     "svelte": "^5",
     "tailwind-merge": "^3.6.0"

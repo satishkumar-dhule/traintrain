@@ -3,7 +3,7 @@
   import * as Command from '$lib/components/ui/command/index.js'
   import { api } from '$lib/api.js'
   import { navigate } from '$lib/router.svelte.js'
-  import { toggleTheme } from '$lib/theme.svelte.js'
+  import { theme, setTheme, contrast, setContrast } from '$lib/theme.svelte.js'
   import { palette, closePalette } from '$lib/palette.svelte.js'
 
   let q = $state('')
@@ -86,8 +86,19 @@
     closePalette()
   }
 
-  function pickTheme() {
-    toggleTheme()
+  const displayThemes = [
+    ['system', 'System theme'],
+    ['light', 'Light theme'],
+    ['dark', 'Dark theme']
+  ]
+  const displayContrasts = [
+    ['off', 'Normal contrast'],
+    ['high', 'High contrast'],
+    ['invert', 'Invert contrast']
+  ]
+
+  function pickDisplay(fn, value) {
+    fn(value)
     closePalette()
   }
 </script>
@@ -113,7 +124,14 @@
           <Command.Group heading="Stations">
             {#each stations as s (s.code)}
               <Command.Item value={`station-${s.code}`} onSelect={() => go(`/station/${s.code}`)}>
-                <span>{s.name} · {s.code}</span>
+                <div class="min-w-0">
+                  <div class="truncate">{s.name} · {s.code}</div>
+                  {#if s.name_hi || s.name_gu}
+                    <div class="truncate text-xs text-muted-foreground">
+                      {s.name_hi || s.name_gu}{s.district ? ` · ${s.district}` : ''}
+                    </div>
+                  {/if}
+                </div>
               </Command.Item>
             {/each}
           </Command.Group>
@@ -133,9 +151,18 @@
               <span>{a.label}</span>
             </Command.Item>
           {/each}
-          <Command.Item value="action-toggle-theme" onSelect={pickTheme}>
-            <span>Toggle theme</span>
-          </Command.Item>
+        </Command.Group>
+        <Command.Group heading="Display">
+          {#each displayThemes as [value, label] (value)}
+            <Command.Item value={`display-theme-${value}`} onSelect={() => pickDisplay(setTheme, value)}>
+              <span>{theme.mode === value ? '✓ ' : ''}{label}</span>
+            </Command.Item>
+          {/each}
+          {#each displayContrasts as [value, label] (value)}
+            <Command.Item value={`display-contrast-${value}`} onSelect={() => pickDisplay(setContrast, value)}>
+              <span>{contrast.mode === value ? '✓ ' : ''}{label}</span>
+            </Command.Item>
+          {/each}
         </Command.Group>
       </Command.List>
     </Command.Root>

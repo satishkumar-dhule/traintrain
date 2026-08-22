@@ -5,6 +5,7 @@
     number,
     name = '',
     link = true,
+    size = 'sm',
     class: className = '',
     ...rest
   } = $props();
@@ -17,6 +18,7 @@
 <StatusBadge
   tone="neutral"
   {href}
+  {size}
   title={name ? `${label} · ${name}` : label}
   class="font-mono tabular-nums tracking-tight {className}"
   aria-label="Train {label}"

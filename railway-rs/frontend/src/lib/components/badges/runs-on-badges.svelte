@@ -63,19 +63,20 @@
 
   let {
     days,
+    flags = null, // pre-parsed bool[7]; wins over `days` when supplied
     format = 'letter', // 'letter' | 'short'
     class: className = '',
     ...rest
   } = $props();
 
-  const flags = $derived(dayFlags(days));
+  const resolved = $derived(flags ?? dayFlags(days));
   const labels = $derived(format === 'short' ? DAY_SHORT : DAY_LETTERS);
   const activeNames = $derived(
-    flags ? DAY_NAMES.filter((_, i) => flags[i]) : []
+    resolved ? DAY_NAMES.filter((_, i) => resolved[i]) : []
   );
 </script>
 
-{#if flags}
+{#if resolved}
   <span
     class={cn('inline-flex flex-wrap items-center gap-1', className)}
     role="img"
@@ -86,12 +87,12 @@
   >
     {#each labels as label, i (i)}
       <Badge
-        variant={flags[i] ? 'secondary' : 'outline'}
+        variant={resolved[i] ? 'secondary' : 'outline'}
         class={cn(
           'h-5 min-w-5 justify-center px-1.5 font-medium text-[10px]',
-          !flags[i] && 'text-muted-foreground opacity-40'
+          !resolved[i] && 'text-muted-foreground opacity-40'
         )}
-        title={`${DAY_NAMES[i]}: ${flags[i] ? 'runs' : 'no run'}`}
+        title={`${DAY_NAMES[i]}: ${resolved[i] ? 'runs' : 'no run'}`}
         aria-hidden="true"
       >
         {label}

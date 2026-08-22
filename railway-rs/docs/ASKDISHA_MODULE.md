@@ -1,58 +1,82 @@
-# AskDISHA Module — Interface Contract (v1, 2026-08-22)
+# AskDISHA Module — Interface Contract & Plan (v2, 2026-08-22)
 
-Single source of truth for the pluggable `askdisha` module. All agents implement
+Single source of truth for the **v2 embedded integration** of the CoRover/AskDISHA
+backends. Supersedes v1 (standalone-tab design — retired). All agents implement
 against THIS document. Upstream research: `docs/ASKDISHA_DATA_CALLS.md`.
 
-## Wave-0 probe verdicts (binding)
+## 0. Pivot rationale
 
-| Upstream call | Verdict | Consequence |
+v1 shipped a standalone Ask DISHA tab. Product decision (user): **no separate
+section**. The corover origin is instead embedded as a *data source + unique
+feature provider* inside existing sections; UI adapts only genuinely unique
+capabilities.
+
+## 1. Probe verdicts (binding evidence, all live-verified 2026-08-22)
+
+| Upstream | Verdict | Consequence |
 |---|---|---|
-| `POST /dishaAPI/bot/sendQuery/{lang}` | **401** even with valid dSession + full browser headers + cookie bootstrap | Chat proxy DROPPED. No `/query` endpoint. No RSA/dSession code. |
-| `GET /dishaAPI/bot/trnscheduleEnq/{train}?journeyDate=&startingStationCode=` | **200 headerless**, rich JSON | ✅ schedule fallback endpoint |
-| `GET /dishaAPI/bot/searchStation/{q}` | **200 headerless** | ✅ station search endpoint |
-| CDN `askdisha-bucket/*.json` | open | ✅ faqs/settings endpoints |
+| `GET /bot/searchStation/{q}` | 200 headerless | F2 enrichment source |
+| `GET /bot/stationsByLocation/{lat}/{lng}` | 200 headerless, rows carry `distance` km | F3 nearby feature |
+| `GET /bot/trnscheduleEnq/{train}?journeyDate=&startingStationCode=` | 200 headerless | F4 schedule 3rd fallback |
+| `GET /bot/pin/{pincode}` | 200 → `{state,stateList,cityList,serverId,timeStamp}` | F6 hidden utility |
+| CDN `stationupdated.json` | open, 8,491 rows w/ hi·gu·geo·district·address·trainCount | F1 offline hydration |
+| CDN `{en\|hi\|gu}.json`, `getSettings.json` | open | kept-but-hidden endpoints (D4) |
+| Availability (`avlFarenquiry`,`trnenquiry`,`getAvailability`) | **404 Fastify route-not-found** — endpoints do not exist | availability OUT of scope |
+| `POST /bot/sendQuery/{lang}` (chat/NLU incl. availability calendar) | 401 guest-gated even with dSession+headers+cookies | chat OUT (v1 verdict stands) |
+| `GET /addservices/eticket/{pnr}` | **500 `undefined (reading 'bookingData')` even with REAL PNR ± Ao() headers** — reads caller's logged-in booking list; session-bound, not a public lookup | PNR fallback OUT (was O1) |
+| `popular.json`, `countries.json` | open but low/no value in app | skipped by decision |
 
-## Feature gate
+## 2. Locked product decisions
 
-- `Config.askdisha_enabled: bool` — env `ASKDISHA_ENABLED`, default `false`.
-- `Config.corover_base: String` — env `COROVER_BASE`, default
-  `https://api.disha.corover.ai`. CDN base derived: `https://cdn.corover.ai/askdisha-bucket`.
-- When disabled: router NOT merged in `web.rs`; zero network footprint;
-  frontend page shows disabled empty-state (404 on API).
+- **D1** No separate section: standalone tab deleted (page/nav/route).
+- **D2** Hindi/Gujarati station names render as muted subtitle under English.
+- **D3** `ASKDISHA_ENABLED` defaults to **true**; `ASKDISHA_ENABLED=0` hard-disables
+  every outbound corover call (hydrated dataset still ships in-repo and works).
+- **D4** `/faqs`, `/settings`, `/pin` endpoints stay API-only — zero UI links.
 
-## AppState
-
-- `AppState.askdisha: Option<Arc<CoroverClient>>` — `Some` iff enabled.
-
-## Backend endpoints (`/rail-api/askdisha/*`, all JSON)
-
-| Route | Upstream | Cache key / TTL | Success body | Errors |
-|---|---|---|---|---|
-| `GET /status` | none | none | `{"enabled":true,"sources":["corover-api","corover-cdn"]}` | — |
-| `GET /stations?q=<q>` | `/dishaAPI/bot/searchStation/{q}` | `askdisha:stations:{q.to_lowercase()}` / 6 h | `{"source":"corover-api","cached":bool,"count":n,"stations":[StationRow]}` limit 20 | upstream err → 502 `{"error":...}`; disabled → 404 route absent |
-| `GET /schedule/{train_no}?date=YYYY-MM-DD&from=<code>` | `/dishaAPI/bot/trnscheduleEnq/{train}?journeyDate=&startingStationCode=` | `askdisha:schedule:{train}:{date}:{from}` / 30 min | `{"source":"corover-api","cached":bool,"schedule":ScheduleResponse}` | invalid train (non 1-5 digits) → 400; upstream err → 502 |
-| `GET /faqs?lang=en|hi|gu` | CDN `{lang}.json` | `askdisha:faqs:{lang}` / 24 h | `{"source":"corover-cdn","cached":bool,"faqs":[string]}` | bad lang → 400 |
-| `GET /settings` | CDN `getSettings.json` | `askdisha:settings` / 1 h | `{"source":"corover-cdn","cached":bool,"settings":{"id":1,"isDisabled":false,"booking":true}}` | — |
-
-`date` param: pass through as given; if absent omit query param. `from` optional.
-Query strings to upstream are URL-encoded path segments (station q).
-
-## Rust types (exact names — fixtures test compiles against these)
+## 3. Config & state (delta from v1)
 
 ```rust
-// src/core/corover.rs
-pub struct CoroverClient { /* reqwest::Client, corover_base: String, cdn_base: String */ }
-impl CoroverClient {
-    pub fn new(corover_base: impl Into<String>, cdn_base: impl Into<String>, timeout: Duration) -> Self;
-    pub async fn search_station(&self, q: &str) -> Result<Vec<StationRow>, AppError>;
-    pub async fn trnschedule_enq(&self, train_no: &str, journey_date: Option<&str>, from_code: Option<&str>) -> Result<ScheduleResponse, AppError>;
-    pub async fn fetch_faqs(&self, lang: &str) -> Result<Vec<String>, AppError>;
-    pub async fn fetch_settings(&self) -> Result<SettingsFlag, AppError>;
-}
+Config.askdisha_enabled   // env ASKDISHA_ENABLED — DEFAULT NOW true ("0"/"false"/"no"/"off" ⇒ false)
+Config.corover_base       // unchanged: https://api.disha.corover.ai
+Config.corover_cdn_base   // unchanged: https://cdn.corover.ai (bucket path appended)
+AppState.askdisha         // Option<Arc<CoroverClient>> — Some iff enabled (unchanged)
+```
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct StationRow {
+## 4. Backend surface (final)
+
+Existing slices consume the client directly; the askdisha slice keeps only the
+hidden/utility routes. v1 public `/stations` + `/schedule` routes are REMOVED
+(their data now flows through the stations/schedule slices).
+
+### 4.1 Kept from v1 (unchanged behavior)
+| Route | Cache key / TTL | Notes |
+|---|---|---|
+| `GET /rail-api/askdisha/status` | none | `{"enabled":bool,"sources":["corover-api","corover-cdn"]}` |
+| `GET /rail-api/askdisha/faqs?lang=en\|hi\|gu` | `askdisha:faqs:{lang}` / 24 h | bad lang → 400 `{"error":"invalid language"}`; absent lang = en |
+| `GET /rail-api/askdisha/settings` | `askdisha:settings` / 1 h | flag object passthrough |
+
+### 4.2 New routes (this wave)
+| Route | Upstream | Validation | Cache key / TTL | Success body |
+|---|---|---|---|---|
+| `GET /rail-api/askdisha/nearby?lat=&lng=` | `/bot/stationsByLocation/{lat}/{lng}` | lat∈[-90,90], lng∈[-180,180] else 400 `{"error":"invalid coordinates"}`; missing → 400 `{"error":"missing coordinates"}` | `askdisha:nearby:{lat:.3},{lng:.3}` / 30 min | `{"source":"corover-api","cached":bool,"count":n,"stations":[NearbyRow]}` (cap 50) |
+| `GET /rail-api/askdisha/pin/{pincode}` | `/bot/pin/{pincode}` | `^[1-9][0-9]{5}$` else 400 `{"error":"invalid pincode"}` | `askdisha:pin:{pincode}` / 7 d | `{"source":"corover-api","cached":bool,"state":String,"cityList":[String]}` |
+
+Disabled behavior for both: router not merged ⇒ 404 fall-through (unchanged v1 semantics).
+
+### 4.3 Embedded integrations (no new routes)
+| # | Where | Change |
+|---|---|---|
+| F1 | offline | `src/bin/hydrate_stations.rs`: merge `testdata/askdisha/stationupdated_full.json` into `data/stations.json` by code. Adds optional `name_hi,name_gu,district,address,train_count,lat,lng`. **Local `state`/`zone` always win on conflict.** Prints unmatched-code report; idempotent. |
+| F2 | search + stations slices | Search response rows and `GET /stations/:code` gain the optional fields (passthrough from hydrated `StationRecord`). |
+| F4 | schedule slice | Chain **NTES → Railyatri → Corover**: same normalized `ScheduleResponse`; winning source honest in `data_source` ("CoRover"); `record_source_latency("corover-api")`; cache key `schedule:{train}` reused. Stops may now carry `distance_km:f64` + `day:u8` (absent when NTES/Railyatri win). |
+| — | observability | `record_source_latency` on success per house mechanism; failures = warn-log + honest error (no fabricated metrics). |
+
+## 5. Rust types (exact names — fixtures/tests compile against these)
+
+```rust
+// src/core/corover.rs — client additions (agent B owns this file)
+pub struct NearbyStation {          // upstream row from stationsByLocation
     pub name: String,
     pub code: String,
     #[serde(default)] pub utterances: Vec<String>,
@@ -60,68 +84,72 @@ pub struct StationRow {
     #[serde(default)] pub name_gu: Option<String>,
     #[serde(default)] pub district: Option<String>,
     #[serde(default)] pub state: Option<String>,
-    #[serde(default)] pub train_count: Option<String>,
-    #[serde(default)] pub latitude: Option<f64>,
-    #[serde(default)] pub longitude: Option<f64>,
-    #[serde(default)] pub address: Option<String>,
+    #[serde(default)] pub distance: Option<f64>,     // km, upstream "distance"
+}
+pub struct PinLookup {              // upstream row from bot/pin
+    pub state: String,
+    #[serde(default)] pub city_list: Vec<String>,    // upstream "cityList"
+}
+impl CoroverClient {
+    pub async fn stations_by_location(&self, lat: f64, lng: f64) -> Result<Vec<NearbyStation>, AppError>;
+    pub async fn pin_lookup(&self, pin: &str) -> Result<PinLookup, AppError>;
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ScheduleStop {
-    pub station_code: String,
-    pub station_name: String,
-    #[serde(default)] pub arrival_time: Option<String>,
-    #[serde(default)] pub departure_time: Option<String>,
-    #[serde(default)] pub route_number: Option<String>,
-    #[serde(default)] pub halt_time: Option<String>,
-}
+// src/data/mod.rs — StationRecord gains (all #[serde(default)], skip_serializing_if None on Serialize)
+pub name_hi: Option<String>, pub name_gu: Option<String>,
+pub district: Option<String>, pub address: Option<String>,
+pub train_count: Option<String>,
+pub lat: Option<f64>, pub lng: Option<f64>,
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ScheduleResponse {
-    pub train_number: String,
-    #[serde(default)] pub train_name: Option<String>,
-    #[serde(default)] pub station_from: Option<String>,
-    #[serde(default)] pub station_to: Option<String>,
-    #[serde(rename = "trainRunsOnMon", default)] pub runs_mon: bool, // "Y"/"N" strings -> custom deser or post-process
-    // ... tue..sun same pattern
-    #[serde(default)] pub error_message: Option<String>,
-    #[serde(default)] pub station_list: Vec<ScheduleStop>,
-}
-// NOTE: upstream sends "Y"/"N" strings for runs_on flags. Implement via
-// #[serde(deserialize_with)] helper `de_yn_bool` and serialize back as bool.
+// models.rs — public Station mirrors the same Optionals; ScheduleStop gains:
+pub distance_km: Option<f64>, pub day: Option<u8>,
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SettingsFlag { pub id: i64, pub is_disabled: bool, pub booking: bool }
+// slices/askdisha — response DTOs
+pub struct NearbyRow { pub code,name,name_hi?,name_gu?,distance_km,state?,district? } // distance rounded 1 decimal
 ```
 
-Unknown upstream fields MUST be ignored (no deny_unknown_fields).
+## 6. Frontend (Svelte SPA `frontend/`)
 
-## HTTP conventions
+| File | Change |
+|---|---|
+| `src/lib/pages/AskDisha.svelte` | **DELETE**; remove nav entry + route (App.svelte / Layout.svelte) |
+| `src/lib/components/StationSearch.svelte` | muted second line `हिंदी · District` under English name when fields present |
+| `src/lib/pages/Station.svelte` | header subtitle (hi/gu) + district/state/address meta row; NEW compact “Nearby” button → `navigator.geolocation` → calls `/rail-api/askdisha/nearby` → distance-sorted list; tap row loads that board; permission-denied inline copy; control hidden entirely on fetch failure ≠ permission |
+| `src/lib/pages/Train.svelte` | Distance/Day columns already exist rendering `-` — populate from `distance_km`/`day` when present (no structural change) |
 
-- Reuse house client patterns from `src/core/http.rs` / existing core modules:
-  browser-like UA from `config.user_agent`, timeout from `config.http_timeout`,
-  retry once on transient (5xx/timeout), map errors to `AppError` variants used by
-  other slices. No new crates required.
-- Source tagging: mirror how ntes slice reports sources via `SourceOutcome`
-  (`src/core/source.rs`) using source ids **`corover-api`** and **`corover-cdn`**
-  so the observability tab lists them truthfully.
+## 7. Fixtures & tests
 
-## Fixtures (`testdata/askdisha/`)
+- New captures (Wave 0b): `testdata/askdisha/stationupdated_full.json`,
+  `nearby_mumbai.json`, `pin_400001.json`.
+- Extend `tests/askdisha_fixtures.rs`: nearby parse (distance floats, cap),
+  pin parse, hydration merge unit tests (collision policy, unmatched report).
+- Config tests updated for default-true flip.
+- Schedule chain: follow existing hermetic test style (no live network).
 
-`schedule_12951.json` (real capture), `stations_new.json` (real capture),
-`faqs_en.json` (real capture, truncated ok ≥50 entries),
-`getSettings.json` (43 B real), `unauthorized.json` (401 body sample).
-Integration test `tests/askdisha_fixtures.rs` parses all through the exact structs above.
+## 8. Wave plan & exclusive file ownership
 
-## Frontend contract (`AskDisha.svelte`)
+| Wave | Owner | Exclusive files |
+|---|---|---|
+| 0 (orchestrator) | me | docs (this file), fixtures download/capture, `config.rs` flip+tests, delete AskDisha.svelte/nav/route |
+| 1-A dataset+search | agent | `src/bin/hydrate_stations.rs`, `src/data/mod.rs`, station structs in `models.rs`, `src/slices/search/`, `src/slices/stations/`, `frontend/src/lib/components/StationSearch.svelte`, regenerated `data/stations.json` |
+| 1-B core+schedule | agent | `src/core/corover.rs` (sole owner: adds §5 types+methods), `src/slices/schedule/`, `frontend/src/lib/pages/Train.svelte`, schedule fixtures/tests |
+| 1-C nearby+station | agent | `src/slices/askdisha/` (rework: drop v1 /stations+/schedule routes; add §4.2), `frontend/src/lib/pages/Station.svelte`, nearby/pin fixtures+tests |
+| 2 (orchestrator) | me | gates fmt/clippy/test/vite-build · release rebuild · live verify checklist · observability check · summary |
 
-- Reads only the four GET endpoints above + graceful 404/502 handling.
-- Three panels/tabs: **Stations** (typeahead table: code/name/hi/state),
-  **Schedule** (train no + date + from → stops table, runs-on badges),
-  **FAQs** (lang selector en/hi/gu, client-side filter box).
-- Disabled state: any 404 ⇒ show "Module disabled — set ASKDISHA_ENABLED=1".
-- Follow existing page conventions (`frontend/src/lib/pages/*.svelte`,
-  ui components under `frontend/src/lib/components/ui/`).
+Agents code against §5 signatures verbatim so parallel merges compile.
+
+## 9. Acceptance criteria
+
+1. Gates green: `cargo fmt --all --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`, `npm run build` — zero warnings.
+2. Live default-env: autocomplete shows हिंदी subtitle; `/askdisha/nearby?lat=19.07&lng=72.87` returns km distances; 12951 schedule shows Day/Distance populated whichever source won; `data_source` truthful everywhere; `/askdisha/pin/400001` works.
+3. `ASKDISHA_ENABLED=0`: zero outbound calls (log-verifiable), app fully functional off hydrated dataset, standalone tab absent, utility routes 404.
+4. Observability lists corover sources with real latencies only.
+
+## 10. Risks
+
+| Risk | Mitigation |
+|---|---|
+| Upstream shape drift | fixture-pinned parsers, honest 502s |
+| Hydration degrades zone/state data | local-authority collision policy + unmatched report |
+| Geolocation UX friction | inline denial copy; never blocks board flow |
+| Parallel-agent drift | this contract pins signatures/routes/cache keys |
