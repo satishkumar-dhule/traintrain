@@ -60,23 +60,19 @@ pub fn router(state: AppState, static_dir: PathBuf) -> Router {
             tower::ServiceBuilder::new()
                 .layer(middleware::from_fn(security_headers_mw))
                 .layer(middleware::from_fn(static_log_mw))
-                .service(
-                    ServeDir::new(static_dir).not_found_service(get(move || {
-                        let spa_index_path = spa_index_path.clone();
-                        async move {
-                            match tokio::fs::read(spa_index_path).await {
-                                Ok(bytes) => (
-                                    [(axum::http::header::CONTENT_TYPE, "text/html")],
-                                    bytes,
-                                ),
-                                Err(_) => (
-                                    [(axum::http::header::CONTENT_TYPE, "text/html")],
-                                    b"<!doctype html><title>RailCompanion</title><p>UI bundle missing".to_vec(),
-                                ),
-                            }
+                .service(ServeDir::new(static_dir).fallback(get(move || {
+                    let spa_index_path = spa_index_path.clone();
+                    async move {
+                        match tokio::fs::read(spa_index_path).await {
+                            Ok(bytes) => ([(axum::http::header::CONTENT_TYPE, "text/html")], bytes),
+                            Err(_) => (
+                                [(axum::http::header::CONTENT_TYPE, "text/html")],
+                                b"<!doctype html><title>RailCompanion</title><p>UI bundle missing"
+                                    .to_vec(),
+                            ),
                         }
-                    })),
-                )
+                    }
+                })))
         })
         .with_state(state)
 }

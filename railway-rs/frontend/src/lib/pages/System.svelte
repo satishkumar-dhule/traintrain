@@ -1,22 +1,54 @@
 <script>
+  import { untrack } from 'svelte'
   import { api } from '$lib/api.js'
   import * as Card from '$lib/components/ui/card/index.js'
   import { Badge } from '$lib/components/ui/badge/index.js'
   import * as Table from '$lib/components/ui/table/index.js'
   import { Skeleton } from '$lib/components/ui/skeleton/index.js'
   import * as Alert from '$lib/components/ui/alert/index.js'
+  import { Button } from '$lib/components/ui/button/index.js'
   import Activity from 'lucide-svelte/icons/activity'
+  import RefreshCw from 'lucide-svelte/icons/refresh-cw'
 
   let obs = $state({ phase: 'loading', data: null })
   let logsState = $state({ phase: 'loading', data: null })
+  let auto = $state(false)
+  let busy = $state(false)
+  let note = $state('')
+
+  async function loadAll() {
+    busy = true
+    const [o, l] = await Promise.all([
+      api('/rail-api/observability'),
+      api('/rail-api/logs?limit=25')
+    ])
+    const failures = []
+    if (o.ok) {
+      obs = { phase: 'ok', data: o.data }
+    } else {
+      failures.push(`observability: ${o.error}`)
+      if (obs?.data == null) obs = { phase: 'error', data: null }
+    }
+    if (l.ok) {
+      logsState = { phase: 'ok', data: l.data }
+    } else {
+      failures.push(`logs: ${l.error}`)
+      if (logsState?.data == null) logsState = { phase: 'error', data: null }
+    }
+    note = failures.length ? `last refresh failed · ${failures.join(' · ')}` : ''
+    busy = false
+  }
 
   $effect(() => {
-    api('/rail-api/observability').then((res) => {
-      obs = res.ok ? { phase: 'ok', data: res.data } : { phase: 'error', data: null }
-    })
-    api('/rail-api/logs?limit=25').then((res) => {
-      logsState = res.ok ? { phase: 'ok', data: res.data } : { phase: 'error', data: null }
-    })
+    untrack(() => loadAll())
+  })
+
+  $effect(() => {
+    if (!auto) return
+    const timer = setInterval(() => {
+      untrack(() => loadAll())
+    }, 10000)
+    return () => clearInterval(timer)
   })
 
   function num(v) {
@@ -42,7 +74,9 @@
     if (b < 1024) return `${b} B`
     const kb = b / 1024
     if (kb < 1024) return `${kb.toFixed(1)} KB`
-    return `${(kb / 1024).toFixed(1)} MB`
+    const mb = kb / 1024
+    if (mb < 1024) return `${mb.toFixed(1)} MB`
+    return `${(mb / 1024).toFixed(2)} GB`
   }
 
   function memMb(n) {
@@ -85,27 +119,6 @@
     { key: 'cpu_frac', label: 'CPU', fmt: pctFromFrac }
   ]
 
-  function statusList(raw) {
-    const arr = Array.isArray(raw) ? raw : []
-    const out = []
-    for (const item of arr) {
-      if (Array.isArray(item) && item.length >= 2) {
-        out.push({ code: item[0], count: item[1] })
-      } else if (item && typeof item === 'object') {
-        const code = item.code ?? item.status ?? item.key
-        const count = item.count ?? item.value
-        if (code != null && count != null) {
-          out.push({ code, count })
-        } else {
-          console.warn('[System] unexpected status_codes entry keys:', Object.keys(item))
-        }
-      } else {
-        console.warn('[System] unexpected status_codes entry keys:', Object.keys(item ?? {}))
-      }
-    }
-    return out.sort((a, b) => Number(b.count) - Number(a.count))
-  }
-
   function levelVariant(level) {
     const l = String(level ?? '').toUpperCase()
     if (l.includes('ERROR') || l.includes('FATAL')) return 'destructive'
@@ -142,6 +155,30 @@
     return arr
   }
 
+  function codeClass(code) {
+    if (code >= 200 && code < 300) return 'bg-emerald-500'
+    if (code >= 300 && code < 400) return 'bg-sky-500'
+    if (code >= 400 && code < 500) return 'bg-amber-500'
+    if (code >= 500 && code < 600) return 'bg-red-500'
+    return 'bg-zinc-500'
+  }
+
+  function cacheValue(key, v) {
+    if (/bytes/i.test(String(key))) {
+      const b = num(v)
+      if (b !== null) return humanBytes(b)
+    }
+    if (v === null || v === undefined || v === '') return '—'
+    if (typeof v === 'object') {
+      try {
+        return JSON.stringify(v)
+      } catch {
+        return String(v)
+      }
+    }
+    return String(v)
+  }
+
   const tiles = $derived.by(() => {
     if (obs.phase !== 'ok' || !obs.data || typeof obs.data !== 'object') return []
     const d = obs.data
@@ -163,14 +200,54 @@
       : []
   )
 
-  const codesParsed = $derived.by(() => {
-    if (obs.phase !== 'ok') return { list: [], unexpected: false }
+  const statusBars = $derived.by(() => {
+    if (obs.phase !== 'ok') return []
     const raw = obs.data?.status_codes
-    const list = statusList(raw)
-    const unexpected =
-      list.length === 0 &&
-      ((Array.isArray(raw) && raw.length > 0) || (raw != null && !Array.isArray(raw)))
-    return { list, unexpected }
+    const arr = Array.isArray(raw) ? raw : []
+    const acc = new Map()
+    for (const item of arr) {
+      let code = null
+      let count = null
+      if (Array.isArray(item) && item.length >= 2) {
+        code = item[0]
+        count = item[1]
+      } else if (item && typeof item === 'object') {
+        code = item.code ?? item.status ?? item.key
+        count = item.count ?? item.value
+      }
+      const c = parseInt(String(code), 10)
+      const n = Number(count)
+      if (!Number.isFinite(c) || !Number.isFinite(n) || n <= 0) continue
+      acc.set(c, (acc.get(c) ?? 0) + n)
+    }
+    const total = [...acc.values()].reduce((s, v) => s + v, 0)
+    if (total <= 0) return []
+    return [...acc.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([code, count]) => ({
+        code,
+        count,
+        cls: codeClass(code),
+        pct: (count / total) * 100
+      }))
+  })
+
+  const cacheEntries = $derived.by(() => {
+    if (obs.phase !== 'ok') return []
+    const c = obs.data?.cache
+    if (Array.isArray(c)) {
+      return c
+        .filter((p) => Array.isArray(p) && p.length >= 2)
+        .map((p) => ({ key: String(p[0]), label: String(p[0]).replace(/_/g, ' '), value: cacheValue(p[0], p[1]) }))
+    }
+    if (c && typeof c === 'object') {
+      return Object.entries(c).map(([k, v]) => ({
+        key: k,
+        label: String(k).replace(/_/g, ' '),
+        value: cacheValue(k, v)
+      }))
+    }
+    return []
   })
 
   const logsNewest = $derived(logsState.phase === 'ok' ? sortedLogs(logsState.data?.logs) : [])
@@ -178,11 +255,26 @@
 
 <section class="grid gap-6">
   <div class="grid gap-1">
-    <h1 class="flex items-center gap-2 text-2xl font-semibold tracking-tight">
-      <Activity class="size-5 text-muted-foreground" />
-      System
-    </h1>
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <h1 class="flex items-center gap-2 text-2xl font-semibold tracking-tight">
+        <Activity class="size-5 text-muted-foreground" />
+        System
+      </h1>
+      <div class="flex items-center gap-4">
+        <Button type="button" variant="outline" size="sm" onclick={() => loadAll()} disabled={busy}>
+          <RefreshCw class={`mr-2 size-4${busy ? ' animate-spin' : ''}`} />
+          {busy ? 'Refreshing…' : 'Refresh'}
+        </Button>
+        <label class="mb-0.5 flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
+          <input type="checkbox" bind:checked={auto} class="size-4 accent-[var(--primary)]" />
+          Auto 10s
+        </label>
+      </div>
+    </div>
     <p class="text-sm text-muted-foreground">Runtime metrics and recent request logs — real numbers only.</p>
+    {#if note}
+      <p class="text-xs text-destructive">{note}</p>
+    {/if}
   </div>
 
   {#if obs.phase === 'loading'}
@@ -262,25 +354,51 @@
           <Card.Description>Response counts per HTTP status code.</Card.Description>
         </Card.Header>
         <Card.Content>
-          {#if codesParsed.list.length}
-            <div class="flex flex-wrap gap-2">
-              {#each codesParsed.list as c (`${c.code}-${c.count}`)}
-                <Badge variant={Number(c.code) >= 400 ? 'destructive' : 'secondary'}>
-                  {String(c.code)} × {Number(c.count).toLocaleString()}
-                </Badge>
+          {#if statusBars.length}
+            <div class="flex h-3 w-full overflow-hidden rounded-full" role="img" aria-label="Status code distribution stacked bar">
+              {#each statusBars as s (s.code)}
+                <div
+                  class={`${s.cls} min-w-[2px]`}
+                  style={`width:${Math.max(s.pct, 0.5)}%`}
+                  title={`${s.code} × ${s.count.toLocaleString()} (${s.pct.toFixed(1)}%)`}
+                ></div>
               {/each}
             </div>
-          {:else if codesParsed.unexpected}
-            <Alert.Root variant="destructive">
-              <Alert.Title>Unexpected payload shape</Alert.Title>
-              <Alert.Description>status_codes did not match any known shape — see browser console for logged keys.</Alert.Description>
-            </Alert.Root>
+            <div class="mt-3 flex flex-wrap gap-x-4 gap-y-1">
+              {#each statusBars as s (`legend-${s.code}`)}
+                <span class="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <span class={`inline-block size-2 rounded-sm ${s.cls}`} aria-hidden="true"></span>
+                  <span class="font-mono">{s.code}</span> × {s.count.toLocaleString()}
+                </span>
+              {/each}
+            </div>
           {:else}
             <p class="text-sm text-muted-foreground">No responses recorded yet.</p>
           {/if}
         </Card.Content>
       </Card.Root>
     </div>
+
+    <Card.Root>
+      <Card.Header>
+        <Card.Title class="text-base">Cache</Card.Title>
+        <Card.Description>Live cache counters reported by the server.</Card.Description>
+      </Card.Header>
+      <Card.Content>
+        {#if cacheEntries.length}
+          <dl class="grid gap-x-6 gap-y-2 sm:grid-cols-2 lg:grid-cols-3">
+            {#each cacheEntries as e (e.key)}
+              <div class="flex items-baseline justify-between gap-3 border-b pb-1">
+                <dt class="text-xs uppercase tracking-wide text-muted-foreground">{e.label}</dt>
+                <dd class="truncate font-mono text-sm font-medium" title={e.value}>{e.value}</dd>
+              </div>
+            {/each}
+          </dl>
+        {:else}
+          <p class="text-sm text-muted-foreground">no cache stats reported</p>
+        {/if}
+      </Card.Content>
+    </Card.Root>
 
     {#if obs.data.origins?.length}
       <Card.Root>

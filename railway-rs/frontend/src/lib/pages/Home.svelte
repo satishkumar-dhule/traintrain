@@ -5,10 +5,13 @@
   import { Badge } from '$lib/components/ui/badge/index.js'
   import * as Alert from '$lib/components/ui/alert/index.js'
   import { Skeleton } from '$lib/components/ui/skeleton/index.js'
+  import { Input } from '$lib/components/ui/input/index.js'
+  import { Separator } from '$lib/components/ui/separator/index.js'
   import TrainFront from 'lucide-svelte/icons/train-front'
   import Building2 from 'lucide-svelte/icons/building-2'
   import RouteIcon from 'lucide-svelte/icons/route'
   import Ticket from 'lucide-svelte/icons/ticket'
+  import SearchIcon from 'lucide-svelte/icons/search'
 
   let state = $state({ phase: 'loading', data: null })
   let obs = $state(null)
@@ -45,6 +48,101 @@
     { href: '/journeys', icon: RouteIcon, title: 'Find journeys', desc: 'Trains between any two stations, with run days.' },
     { href: '/pnr', icon: Ticket, title: 'PNR status', desc: 'Passenger reservation status with captcha retry.' }
   ]
+
+  const LETTERS = ['All', ...Array.from({ length: 26 }, (_, i) => String.fromCharCode(65 + i)), '#']
+  const ALL_CAP = 24
+  const DISPLAY_CAP = 48
+
+  let stationIndex = $state([])
+  let idxLoading = $state(true)
+  let idxError = $state('')
+  let query = $state('')
+  let activeLetter = $state('All')
+  let reqSeq = 0
+  let debounceId = null
+
+  function startsWithLetter(text, letter) {
+    const c = (text || '').charAt(0).toUpperCase()
+    if (letter === '#') return c !== '' && !/[A-Z]/.test(c)
+    return c === letter
+  }
+
+  function mergeStations(list) {
+    if (!Array.isArray(list)) return
+    const seen = new Set(stationIndex.map((s) => s.code))
+    const fresh = list.filter((s) => s && s.code && !seen.has(s.code))
+    if (fresh.length === 0) return
+    stationIndex = [...stationIndex, ...fresh].sort((a, b) =>
+      (a.name || '').localeCompare(b.name || '')
+    )
+  }
+
+  async function fetchStations(qs, seq) {
+    const res = await api(`/rail-api/stations?q=${encodeURIComponent(qs)}`)
+    if (seq !== reqSeq) return
+    if (!res.ok) {
+      idxError = res.error || 'station index unavailable'
+      return
+    }
+    idxError = ''
+    mergeStations(res.data)
+  }
+
+  function runFetch(qs) {
+    const seq = ++reqSeq
+    idxLoading = true
+    fetchStations(qs, seq).finally(() => {
+      if (seq === reqSeq) idxLoading = false
+    })
+  }
+
+  function scheduleSearch() {
+    if (debounceId) clearTimeout(debounceId)
+    debounceId = setTimeout(() => {
+      debounceId = null
+      const qs = query.trim()
+      if (!qs) return
+      runFetch(qs)
+    }, 200)
+  }
+
+  function selectLetter(letter) {
+    activeLetter = letter
+    if (query.trim() || letter === 'All') return
+    if (stationIndex.some((s) => startsWithLetter(s.name, letter) || startsWithLetter(s.code, letter))) return
+    runFetch(letter)
+  }
+
+  $effect(() => {
+    const seq = ++reqSeq
+    idxLoading = true
+    Promise.all(LETTERS.slice(1).map((letter) => fetchStations(letter, seq))).then(() => {
+      if (seq === reqSeq) idxLoading = false
+    })
+    return () => {
+      reqSeq++
+      if (debounceId) clearTimeout(debounceId)
+    }
+  })
+
+  const stationView = $derived.by(() => {
+    const ql = query.trim().toLowerCase()
+    let rows = stationIndex
+    if (ql) {
+      rows = rows.filter(
+        (s) =>
+          (s.name || '').toLowerCase().includes(ql) ||
+          (s.city || '').toLowerCase().includes(ql) ||
+          (s.code || '').toLowerCase().includes(ql)
+      )
+    } else if (activeLetter !== 'All') {
+      rows = rows.filter(
+        (s) => startsWithLetter(s.name, activeLetter) || startsWithLetter(s.code, activeLetter)
+      )
+    }
+    const cap = ql || activeLetter !== 'All' ? DISPLAY_CAP : ALL_CAP
+    return { rows: rows.slice(0, cap), hidden: Math.max(0, rows.length - cap), matched: rows.length }
+  })
 </script>
 
 <section class="grid gap-8">
@@ -122,6 +220,77 @@
       </Card.Root>
     {/each}
   </div>
+
+  <Separator />
+
+  <section class="grid gap-3">
+    <div class="flex flex-wrap items-end justify-between gap-2">
+      <div class="grid gap-1">
+        <h2 class="text-xl font-semibold tracking-tight">Stations explorer</h2>
+        <p class="text-sm text-muted-foreground">
+          Browse the station index by letter or search a partial name, city or code.
+        </p>
+      </div>
+      <span class="text-xs text-muted-foreground tabular-nums">{stationView.matched} matched</span>
+    </div>
+
+    <div class="flex flex-wrap gap-1">
+      {#each LETTERS as letter (letter)}
+        <button
+          type="button"
+          aria-pressed={activeLetter === letter}
+          class="inline-flex h-7 min-w-7 items-center justify-center rounded-md border px-1.5 text-xs font-medium transition-colors {activeLetter === letter
+            ? 'border-primary bg-primary text-primary-foreground'
+            : 'hover:bg-muted hover:text-foreground'}"
+          onclick={() => selectLetter(letter)}
+        >
+          {letter}
+        </button>
+      {/each}
+    </div>
+
+    <div class="relative max-w-sm">
+      <SearchIcon
+        class="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
+      />
+      <Input
+        bind:value={query}
+        oninput={scheduleSearch}
+        placeholder="Search name, city or code…"
+        class="pl-8"
+      />
+    </div>
+
+    {#if idxLoading}
+      <div class="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
+        {#each Array(12) as _, i (i)}
+          <Skeleton class="h-11 w-full" />
+        {/each}
+      </div>
+    {:else if stationView.rows.length === 0}
+      {#if idxError && stationIndex.length === 0}
+        <p class="text-sm text-destructive">Station index unavailable — {idxError}</p>
+      {:else}
+        <p class="text-sm text-muted-foreground">No stations matched</p>
+      {/if}
+    {:else}
+      <div class="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
+        {#each stationView.rows as st (st.code)}
+          <button
+            type="button"
+            class="flex min-w-0 items-center justify-between gap-2 rounded-lg border px-3 py-2 text-left transition-colors hover:border-primary/50 hover:bg-muted/50"
+            onclick={() => navigate(`/station/${encodeURIComponent(st.code)}`)}
+          >
+            <span class="min-w-0 flex-1 truncate text-sm">{st.name}</span>
+            <Badge variant="outline" class="shrink-0 font-mono text-[10px]">{st.code}</Badge>
+          </button>
+        {/each}
+      </div>
+      {#if stationView.hidden > 0}
+        <p class="text-xs text-muted-foreground">+{stationView.hidden} more</p>
+      {/if}
+    {/if}
+  </section>
 
   {#if state.phase === 'error'}
     <Alert.Root variant="destructive">

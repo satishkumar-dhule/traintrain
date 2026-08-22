@@ -7,7 +7,7 @@ channel = "stable-25_05"
 expertMode = true
 
 [run]
-command = "cargo run"
+command = "export PATH=\"$HOME/.cargo/bin:$PATH\" && export CARGO_HOME=\"$HOME/.cargo\" && export RAILWAY_PORT=3000 && cargo run --release"
 workdir = "railway-rs"
 
 [packager]

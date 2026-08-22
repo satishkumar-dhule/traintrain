@@ -5,7 +5,10 @@
   import Train from '$lib/pages/Train.svelte'
   import Station from '$lib/pages/Station.svelte'
   import Journeys from '$lib/pages/Journeys.svelte'
+  import Availability from '$lib/pages/Availability.svelte'
   import Pnr from '$lib/pages/Pnr.svelte'
+  import Exceptions from '$lib/pages/Exceptions.svelte'
+  import Extras from '$lib/pages/Extras.svelte'
   import System from '$lib/pages/System.svelte'
 
   const segs = $derived(route.path.split('/').filter(Boolean))
@@ -15,13 +18,19 @@
   {#if segs.length === 0}
     <Home />
   {:else if segs[0] === 'train'}
-    <Train number={segs[1] ?? ''} />
+    <Train number={segs[1] ?? ''} view={segs[2] ?? ''} />
   {:else if segs[0] === 'station'}
-    <Station code={segs[1] ?? ''} />
+    <Station code={segs[1] ?? ''} view={segs[2] ?? ''} />
   {:else if segs[0] === 'journeys'}
-    <Journeys />
+    <Journeys src={segs[1] ?? ''} dst={segs[2] ?? ''} />
+  {:else if segs[0] === 'availability'}
+    <Availability src={segs[1] ?? ''} dst={segs[2] ?? ''} date={segs[3] ?? ''} />
   {:else if segs[0] === 'pnr'}
-    <Pnr />
+    <Pnr pnr={segs[1] ?? ''} />
+  {:else if segs[0] === 'exceptions'}
+    <Exceptions number={segs[1] ?? ''} kind={segs[2] ?? ''} />
+  {:else if segs[0] === 'extras'}
+    <Extras view={segs[1] ?? ''} selection={segs[2] ?? ''} />
   {:else if segs[0] === 'system'}
     <System />
   {:else}

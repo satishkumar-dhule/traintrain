@@ -1,124 +1,126 @@
 <script>
-  import { api } from "$lib/api";
-  import { Button } from "$lib/components/ui/button/index.js";
-  import {
-    Card,
-    CardContent,
-    CardDescription,
-    CardHeader,
-    CardTitle,
-  } from "$lib/components/ui/card/index.js";
-  import { Input } from "$lib/components/ui/input/index.js";
-  import { Badge } from "$lib/components/ui/badge/index.js";
-  import {
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow,
-  } from "$lib/components/ui/table/index.js";
-  import { Skeleton } from "$lib/components/ui/skeleton/index.js";
-  import {
-    Alert,
-    AlertDescription,
-    AlertTitle,
-  } from "$lib/components/ui/alert/index.js";
+  import { untrack } from 'svelte'
+  import { api } from '$lib/api.js'
+  import { navigate, route } from '$lib/router.svelte.js'
+  import * as Card from '$lib/components/ui/card/index.js'
+  import { Button } from '$lib/components/ui/button/index.js'
+  import { Label } from '$lib/components/ui/label/index.js'
+  import { Badge } from '$lib/components/ui/badge/index.js'
+  import * as Table from '$lib/components/ui/table/index.js'
+  import { Skeleton } from '$lib/components/ui/skeleton/index.js'
+  import * as Alert from '$lib/components/ui/alert/index.js'
+  import AutoCompleteInput from '$lib/components/AutoCompleteInput.svelte'
+  import ArrowDownUpIcon from 'lucide-svelte/icons/arrow-down-up'
 
-  const DAY_LETTERS = ["M", "T", "W", "T", "F", "S", "S"];
+  let { src = '', dst = '' } = $props()
 
-  let src = $state("");
-  let dst = $state("");
-  let loading = $state(false);
-  let attempted = $state(false);
-  let result = $state(null);
-  let errorState = $state(null);
-  let searchedSrc = $state("");
-  let searchedDst = $state("");
+  const DAY_LETTERS = ['M', 'T', 'W', 'T', 'F', 'S', 'S']
 
-  let canSearch = $derived(src.trim().length > 0 && dst.trim().length > 0);
-  let trains = $derived(Array.isArray(result?.trains) ? result.trains : []);
+  let from = $state('')
+  let to = $state('')
+  let phase = $state('idle')
+  let errorMsg = $state(null)
+  let result = $state(null)
 
-  function onInputSrc(e) {
-    src = e.currentTarget.value.toUpperCase();
+  let key = ''
+
+  function norm(v) {
+    return String(v ?? '').trim().toUpperCase()
   }
 
-  function onInputDst(e) {
-    dst = e.currentTarget.value.toUpperCase();
+  let fromCode = $derived(norm(from))
+  let toCode = $derived(norm(to))
+  let canSearch = $derived(fromCode.length > 0 && toCode.length > 0)
+  let sameCode = $derived(canSearch && fromCode === toCode)
+  let loading = $derived(phase === 'loading')
+  let trains = $derived(Array.isArray(result?.trains) ? result.trains : [])
+
+  function commit() {
+    const s = norm(from)
+    const d = norm(to)
+    if (!s || !d) return
+    const target = `/journeys/${encodeURIComponent(s)}/${encodeURIComponent(d)}`
+    if (route.path === target) return
+    navigate(target)
   }
 
-  async function search() {
-    attempted = true;
-    if (!canSearch || loading) return;
-    const qSrc = encodeURIComponent(src.trim());
-    const qDst = encodeURIComponent(dst.trim());
-    loading = true;
-    errorState = null;
-    result = null;
-    try {
-      const res = await api(`/rail-api/ntes/trains-between?src=${qSrc}&dst=${qDst}`);
-      if (res.ok) {
-        result = res.data;
-        searchedSrc = src.trim();
-        searchedDst = dst.trim();
-      } else {
-        errorState = { message: res.error ?? "Unknown error", status: res.status };
-      }
-    } finally {
-      loading = false;
+  function swap() {
+    const a = from
+    from = to
+    to = a
+    commit()
+  }
+
+  function onSubmit(e) {
+    e.preventDefault()
+    commit()
+  }
+
+  $effect(() => {
+    const s = norm(src)
+    const d = norm(dst)
+    if (!s || !d) {
+      key = ''
+      phase = 'idle'
+      errorMsg = null
+      result = null
+      return
     }
-  }
-
-  function onKeydown(e) {
-    if (e.key === "Enter") search();
-  }
+    untrack(() => {
+      if (norm(from) !== s) from = s
+      if (norm(to) !== d) to = d
+    })
+    const k = `${s}|${d}`
+    if (k === key) return
+    key = k
+    phase = 'loading'
+    errorMsg = null
+    result = null
+    api(`/rail-api/ntes/trains-between?src=${encodeURIComponent(s)}&dst=${encodeURIComponent(d)}`).then((res) => {
+      if (key !== k) return
+      if (res.ok) {
+        result = res.data
+        phase = 'ok'
+      } else {
+        phase = 'error'
+        errorMsg = res.error || `HTTP ${res.status}`
+      }
+    })
+  })
 </script>
 
-<div class="mx-auto flex w-full max-w-3xl flex-col gap-4 p-4">
-  <Card>
-    <CardHeader>
-      <CardTitle>Trains between stations</CardTitle>
-      <CardDescription>Enter station codes, e.g. NDLS to DLI</CardDescription>
-    </CardHeader>
-    <CardContent class="flex flex-col gap-2">
-      <div class="flex items-end gap-2">
-        <label class="flex w-full min-w-0 flex-col gap-1.5">
-          <span class="text-sm font-medium">From</span>
-          <Input
-            bind:value={src}
-            oninput={onInputSrc}
-            onkeydown={onKeydown}
-            placeholder="NDLS"
-            maxlength="10"
-            disabled={loading}
-            aria-label="From station code"
-          />
-        </label>
-        <label class="flex w-full min-w-0 flex-col gap-1.5">
-          <span class="text-sm font-medium">To</span>
-          <Input
-            bind:value={dst}
-            oninput={onInputDst}
-            onkeydown={onKeydown}
-            placeholder="DLI"
-            maxlength="10"
-            disabled={loading}
-            aria-label="To station code"
-          />
-        </label>
-        <Button onclick={search} disabled={loading || !canSearch}>Search</Button>
-      </div>
-      {#if attempted && !canSearch}
-        <p class="text-xs text-muted-foreground">
-          Enter both a From and a To station code to search.
+<div class="flex flex-col gap-4">
+  <Card.Root>
+    <Card.Header>
+      <Card.Title>Trains between stations</Card.Title>
+      <Card.Description>Enter station codes, e.g. NDLS to DLI</Card.Description>
+    </Card.Header>
+    <Card.Content>
+      <form class="flex flex-wrap items-end gap-2" onsubmit={onSubmit}>
+        <div class="grid min-w-44 flex-1 gap-1.5">
+          <Label for="journeys-from">From</Label>
+          <AutoCompleteInput id="journeys-from" kind="station" placeholder="NDLS" bind:value={from} onpick={commit} />
+        </div>
+        <Button type="button" variant="outline" size="icon" aria-label="Swap stations" onclick={swap} disabled={loading}>
+          <ArrowDownUpIcon />
+        </Button>
+        <div class="grid min-w-44 flex-1 gap-1.5">
+          <Label for="journeys-to">To</Label>
+          <AutoCompleteInput id="journeys-to" kind="station" placeholder="DLI" bind:value={to} onpick={commit} />
+        </div>
+        <Button type="submit" disabled={loading || !canSearch}>Search</Button>
+      </form>
+      {#if sameCode}
+        <p class="mt-2 text-xs text-muted-foreground">
+          From and To are the same station — pick two different codes for a meaningful search.
         </p>
       {/if}
-    </CardContent>
-  </Card>
+    </Card.Content>
+  </Card.Root>
 
   {#if loading}
-    <Card>
-      <CardContent class="space-y-3 pt-6">
+    <Card.Root>
+      <Card.Content class="space-y-3 pt-6">
         {#each [0, 1, 2] as row (row)}
           <div class="flex items-center gap-4">
             <Skeleton class="h-5 w-16" />
@@ -132,65 +134,63 @@
             </div>
           </div>
         {/each}
-      </CardContent>
-    </Card>
-  {:else if errorState}
-    <Alert destructive>
-      <AlertTitle>Could not load trains</AlertTitle>
-      <AlertDescription>
-        {errorState.message}{errorState.status ? ` (status ${errorState.status})` : ""}
-      </AlertDescription>
-    </Alert>
+      </Card.Content>
+    </Card.Root>
+  {:else if phase === 'error'}
+    <Alert.Root variant="destructive">
+      <Alert.Title>Could not load trains</Alert.Title>
+      <Alert.Description>{errorMsg}</Alert.Description>
+    </Alert.Root>
   {:else if result}
-    <Card>
-      <CardHeader>
-        <CardTitle>Trains {searchedSrc} → {searchedDst}</CardTitle>
-        <CardDescription>{trains.length} trains found</CardDescription>
-      </CardHeader>
-      <CardContent>
+    <Card.Root>
+      <Card.Header>
+        <Card.Title>{norm(src)} → {norm(dst)}</Card.Title>
+        <Card.Description>{trains.length} trains found</Card.Description>
+      </Card.Header>
+      <Card.Content>
         {#if trains.length === 0}
           <p class="text-sm text-muted-foreground">
-            No trains found between {searchedSrc} and {searchedDst}.
+            No trains found between {norm(src)} and {norm(dst)}.
           </p>
         {:else}
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Train</TableHead>
-                <TableHead>Departs</TableHead>
-                <TableHead>Arrives</TableHead>
-                <TableHead>Runs on</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
+          <Table.Root>
+            <Table.Header>
+              <Table.Row>
+                <Table.Head>Train</Table.Head>
+                <Table.Head>Departs</Table.Head>
+                <Table.Head>Arrives</Table.Head>
+                <Table.Head>Runs on</Table.Head>
+              </Table.Row>
+            </Table.Header>
+            <Table.Body>
               {#each trains as t, i (t.number ?? i)}
-                <TableRow>
-                  <TableCell>
+                <Table.Row>
+                  <Table.Cell>
                     <span class="flex items-center gap-2">
                       <Badge variant="secondary">{t.number}</Badge>
                       <span>{t.name}</span>
                     </span>
-                  </TableCell>
-                  <TableCell>{t.departure_time}</TableCell>
-                  <TableCell>{t.arrival_time}</TableCell>
-                  <TableCell>
+                  </Table.Cell>
+                  <Table.Cell>{t.departure_time}</Table.Cell>
+                  <Table.Cell>{t.arrival_time}</Table.Cell>
+                  <Table.Cell>
                     <span class="flex flex-wrap items-center gap-1">
                       {#each t.runs_on ?? [] as active, di (di)}
                         <Badge
-                          variant={active ? "default" : "outline"}
-                          class="flex h-5 w-5 items-center justify-center px-1 text-[10px]"
+                          variant={active ? 'secondary' : 'outline'}
+                          class={`flex h-5 w-5 items-center justify-center px-1 text-[10px]${active ? '' : ' opacity-40'}`}
                         >
-                          {DAY_LETTERS[di] ?? ""}
+                          {DAY_LETTERS[di] ?? ''}
                         </Badge>
                       {/each}
                     </span>
-                  </TableCell>
-                </TableRow>
+                  </Table.Cell>
+                </Table.Row>
               {/each}
-            </TableBody>
-          </Table>
+            </Table.Body>
+          </Table.Root>
         {/if}
-      </CardContent>
-    </Card>
+      </Card.Content>
+    </Card.Root>
   {/if}
 </div>

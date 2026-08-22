@@ -1,4 +1,5 @@
 <script>
+  import { untrack } from 'svelte'
   import { api } from '$lib/api.js'
   import { navigate } from '$lib/router.svelte.js'
   import * as Card from '$lib/components/ui/card/index.js'
@@ -11,13 +12,17 @@
   import * as Select from '$lib/components/ui/select/index.js'
   import { Skeleton } from '$lib/components/ui/skeleton/index.js'
   import * as Alert from '$lib/components/ui/alert/index.js'
+  import AutoCompleteInput from '$lib/components/AutoCompleteInput.svelte'
+  import ActivityIcon from 'lucide-svelte/icons/activity'
+  import CalendarClockIcon from 'lucide-svelte/icons/calendar-clock'
 
-  let { code = '' } = $props()
+  let { code = '', view = '' } = $props()
 
-  let query = $state(code)
+  let query = $state('')
   let hours = $state('2')
   let dateInput = $state('')
   let tab = $state('live')
+  let committedCode = $state('')
 
   let livePhase = $state('idle')
   let liveError = $state(null)
@@ -27,11 +32,14 @@
   let ttError = $state(null)
   let timetable = $state(null)
 
-  const MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
-  const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+  let liveKey = ''
+  let ttKey = ''
 
-  function targetCode() {
-    return String(query || '').trim().toUpperCase()
+  const MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
+  const DAY_LETTERS = ['M', 'T', 'W', 'T', 'F', 'S', 'S']
+
+  function norm(s) {
+    return String(s ?? '').trim().toUpperCase()
   }
 
   function ntesDate(iso) {
@@ -43,59 +51,97 @@
     return `${m[3]}-${MONTHS[mi]}-${m[1]}`
   }
 
-  async function loadLive() {
-    const target = targetCode()
-    if (!target) return
-    livePhase = live && `${live.station}` === `${target}` ? 'refreshing' : 'loading'
+  function fmt(v) {
+    return v && v !== '-' && v !== '--' ? v : '—'
+  }
+
+  async function loadLive(target) {
+    const c = norm(target)
+    if (!c) return
+    const h = String(hours)
+    const k = `${c}|${h}`
+    liveKey = k
+    livePhase = live && `${live.station ?? ''}` === `${c}` ? 'refreshing' : 'loading'
     liveError = null
-    const res = await api(`/rail-api/ntes/live-station?station=${encodeURIComponent(target)}&hours=${hours}`)
+    const res = await api(`/rail-api/ntes/live-station?station=${encodeURIComponent(c)}&hours=${encodeURIComponent(h)}`)
+    if (liveKey !== k) return
     if (res.ok) {
       live = res.data
       livePhase = 'ok'
-      if (`${target}` !== `${code}`) navigate(`/station/${target}`)
+      if (norm(code) !== c) navigate(`/station/${c}/live`)
     } else {
       livePhase = 'error'
       liveError = res.error || `HTTP ${res.status}`
     }
   }
 
-  async function loadTimetable() {
-    const target = targetCode()
-    if (!target) return
-    ttPhase = timetable && `${timetable.station}` === `${target}` ? 'refreshing' : 'loading'
+  function ensureLive() {
+    if (!committedCode) return
+    if (`${committedCode}|${hours}` === liveKey) return
+    loadLive(committedCode)
+  }
+
+  async function loadTimetable(target) {
+    const c = norm(target)
+    if (!c) return
+    const d = ntesDate(dateInput) ?? ''
+    const k = `${c}|${d}`
+    ttKey = k
+    ttPhase = timetable && `${timetable.station ?? ''}` === `${c}` ? 'refreshing' : 'loading'
     ttError = null
-    const d = ntesDate(dateInput)
-    const qs = `station=${encodeURIComponent(target)}${d ? `&date=${encodeURIComponent(d)}` : ''}`
+    const qs = `station=${encodeURIComponent(c)}${d ? `&date=${encodeURIComponent(d)}` : ''}`
     const res = await api(`/rail-api/ntes/station-timetable?${qs}`)
+    if (ttKey !== k) return
     if (res.ok) {
       timetable = res.data
       ttPhase = 'ok'
-      if (`${target}` !== `${code}`) navigate(`/station/${target}`)
+      if (norm(code) !== c) navigate(`/station/${c}/timetable`)
     } else {
       ttPhase = 'error'
       ttError = res.error || `HTTP ${res.status}`
     }
   }
 
+  function ensureTimetable() {
+    if (!committedCode) return
+    const d = ntesDate(dateInput) ?? ''
+    if (`${committedCode}|${d}` === ttKey) return
+    loadTimetable(committedCode)
+  }
+
+  function onPickStation(item) {
+    const c = norm(item && item.code)
+    if (!c) return
+    committedCode = c
+    if (tab === 'live') loadLive(c)
+  }
+
   function showBoard() {
-    if (tab === 'timetable') loadTimetable()
-    else loadLive()
+    const c = norm(query)
+    if (!c) return
+    committedCode = c
+    if (tab === 'timetable') loadTimetable(c)
+    else loadLive(c)
+  }
+
+  function onTabChange(next) {
+    if (!next || next === tab) return
+    tab = next
+    if (committedCode) navigate(`/station/${committedCode}/${next}`)
   }
 
   $effect(() => {
-    if (code) {
-      query = code
-      loadLive()
-    }
+    const c = norm(code)
+    const v = view === 'timetable' ? 'timetable' : 'live'
+    untrack(() => {
+      if (!c) return
+      if (norm(query) !== c) query = c
+      if (committedCode !== c) committedCode = c
+      if (tab !== v) tab = v
+      if (v === 'timetable') ensureTimetable()
+      else ensureLive()
+    })
   })
-
-  function fmt(v) {
-    return v && v !== '-' && v !== '--' ? v : '—'
-  }
-
-  function upper() {
-    query = String(query || '').toUpperCase()
-  }
 </script>
 
 <section class="grid gap-6">
@@ -106,14 +152,14 @@
 
   <Card.Root>
     <Card.Content class="flex flex-wrap items-end gap-3">
-      <div class="grid min-w-40 flex-1 gap-2">
-        <Label for="stn-code">Station code</Label>
-        <Input
+      <div class="grid min-w-56 flex-1 gap-2">
+        <Label for="stn-code">Station</Label>
+        <AutoCompleteInput
           id="stn-code"
+          kind="station"
+          placeholder="Station name or code, e.g. NDLS"
           bind:value={query}
-          oninput={upper}
-          placeholder="e.g. NDLS"
-          onkeydown={(e) => e.key === 'Enter' && showBoard()}
+          onpick={onPickStation}
         />
       </div>
       <div class="grid gap-2">
@@ -133,19 +179,25 @@
         <Label for="stn-date">Date (timetable)</Label>
         <Input id="stn-date" type="date" bind:value={dateInput} class="w-40" />
       </div>
-      <Button onclick={showBoard} disabled={livePhase === 'loading' || livePhase === 'refreshing' || ttPhase === 'loading' || ttPhase === 'refreshing'}>
-        {(livePhase === 'refreshing' && tab === 'live') || (ttPhase === 'refreshing' && tab === 'timetable') ? 'Refreshing…' : 'Show board'}
+      <Button
+        onclick={showBoard}
+        disabled={(tab === 'live' && (livePhase === 'loading' || livePhase === 'refreshing')) ||
+          (tab === 'timetable' && (ttPhase === 'loading' || ttPhase === 'refreshing'))}
+      >
+        {(tab === 'live' && livePhase === 'refreshing') || (tab === 'timetable' && ttPhase === 'refreshing')
+          ? 'Refreshing…'
+          : 'Show board'}
       </Button>
     </Card.Content>
   </Card.Root>
 
-  <Tabs.Root bind:value={tab}>
-    <Tabs.List>
-      <Tabs.Trigger value="live">Live</Tabs.Trigger>
-      <Tabs.Trigger value="timetable">Timetable</Tabs.Trigger>
+  <Tabs.Root bind:value={tab} onValueChange={onTabChange}>
+    <Tabs.List class="w-full justify-start">
+      <Tabs.Trigger value="live"><ActivityIcon class="mr-2 size-4" />Live</Tabs.Trigger>
+      <Tabs.Trigger value="timetable"><CalendarClockIcon class="mr-2 size-4" />Timetable</Tabs.Trigger>
     </Tabs.List>
 
-    <Tabs.Content value="live">
+    <Tabs.Content value="live" class="mt-4 grid gap-4">
       {#if livePhase === 'loading'}
         <div class="grid gap-2" aria-busy="true">
           {#each [0, 1, 2, 3] as i (i)}
@@ -204,12 +256,12 @@
         </Card.Root>
       {:else}
         <div class="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
-          Enter a station code and show the board to see live arrivals &amp; departures.
+          Enter a station and show the board to see live arrivals &amp; departures.
         </div>
       {/if}
     </Tabs.Content>
 
-    <Tabs.Content value="timetable">
+    <Tabs.Content value="timetable" class="mt-4 grid gap-4">
       {#if ttPhase === 'loading'}
         <div class="grid gap-2" aria-busy="true">
           {#each [0, 1, 2, 3] as i (i)}
@@ -228,14 +280,15 @@
               <Card.Title>{timetable.station_name ?? timetable.station ?? '—'} timetable</Card.Title>
               <Card.Description>{timetable.total ?? timetable.trains?.length ?? 0} trains{timetable.date ? ` · ${timetable.date}` : ''}</Card.Description>
             </div>
-            {#if timetable.date}<Badge variant="secondary">{timetable.date}</Badge>{/if}
+            <Badge variant="secondary">{timetable.total ?? timetable.trains?.length ?? 0} total</Badge>
           </Card.Header>
           <Card.Content>
             <Table.Root>
               <Table.Header>
                 <Table.Row>
                   <Table.Head>Train</Table.Head>
-                  <Table.Head>Type</Table.Head>
+                  <Table.Head class="w-28">Type</Table.Head>
+                  <Table.Head class="w-24">Classes</Table.Head>
                   <Table.Head class="w-20">Arr</Table.Head>
                   <Table.Head class="w-20">Dep</Table.Head>
                   <Table.Head>Days</Table.Head>
@@ -248,21 +301,20 @@
                     <Table.Cell>
                       <span class="font-mono text-xs text-muted-foreground">{t.number}</span>
                       <span class="ml-2 font-medium">{t.name}</span>
-                      {#if t.route}<span class="block text-xs text-muted-foreground">{t.route}</span>{/if}
                     </Table.Cell>
-                    <Table.Cell class="text-xs">
+                    <Table.Cell>
                       {#if t.train_type}<Badge variant="outline">{t.train_type}</Badge>{:else}—{/if}
-                      {#if t.classes}<span class="mt-1 block text-xs text-muted-foreground">{t.classes}</span>{/if}
                     </Table.Cell>
+                    <Table.Cell class="text-xs text-muted-foreground">{t.classes || '—'}</Table.Cell>
                     <Table.Cell class="font-mono text-xs">{fmt(t.arrival)}</Table.Cell>
                     <Table.Cell class="font-mono text-xs">{fmt(t.departure)}</Table.Cell>
                     <Table.Cell>
                       <div class="flex flex-wrap gap-1">
-                        {#each DAYS as d, i (d)}
+                        {#each DAY_LETTERS as letter, i (i)}
                           {#if days[i]}
-                            <Badge variant="secondary" class="px-1.5 text-[10px]">{d}</Badge>
+                            <Badge variant="secondary" class="px-1.5 text-[10px]">{letter}</Badge>
                           {:else}
-                            <Badge variant="outline" class="px-1.5 text-[10px] opacity-40">{d}</Badge>
+                            <Badge variant="outline" class="px-1.5 text-[10px] opacity-40">{letter}</Badge>
                           {/if}
                         {/each}
                       </div>
@@ -270,7 +322,7 @@
                   </Table.Row>
                 {:else}
                   <Table.Row>
-                    <Table.Cell colspan={5} class="text-muted-foreground">No scheduled trains found.</Table.Cell>
+                    <Table.Cell colspan={6} class="text-muted-foreground">No scheduled trains found.</Table.Cell>
                   </Table.Row>
                 {/each}
               </Table.Body>
@@ -279,7 +331,7 @@
         </Card.Root>
       {:else}
         <div class="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
-          Enter a station code (and optionally a date) to load the full-day timetable.
+          Enter a station (and optionally a date) to load the full-day timetable.
         </div>
       {/if}
     </Tabs.Content>

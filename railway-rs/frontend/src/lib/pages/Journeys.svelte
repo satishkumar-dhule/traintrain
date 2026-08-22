@@ -1,5 +1,7 @@
 <script>
   import JourneysTable from './JourneysTable.svelte'
+
+  let { src = '', dst = '' } = $props()
 </script>
 
 <section class="grid gap-6">
@@ -7,5 +9,5 @@
     <h1 class="text-2xl font-semibold tracking-tight">Find journeys</h1>
     <p class="text-sm text-muted-foreground">All trains between two stations, with weekly run days.</p>
   </div>
-  <JourneysTable />
+  <JourneysTable {src} {dst} />
 </section>

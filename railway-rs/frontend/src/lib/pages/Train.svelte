@@ -3,7 +3,7 @@
   import { navigate } from '$lib/router.svelte.js'
   import * as Card from '$lib/components/ui/card/index.js'
   import * as Tabs from '$lib/components/ui/tabs/index.js'
-  import { Input } from '$lib/components/ui/input/index.js'
+  import AutoCompleteInput from '$lib/components/AutoCompleteInput.svelte'
   import { Label } from '$lib/components/ui/label/index.js'
   import { Badge } from '$lib/components/ui/badge/index.js'
   import { Button } from '$lib/components/ui/button/index.js'
@@ -14,12 +14,12 @@
   import CalendarClockIcon from 'lucide-svelte/icons/calendar-clock'
   import ChartColumnIcon from 'lucide-svelte/icons/chart-no-axes-column'
 
-  let { number = '' } = $props()
+  let { number = '', view = '' } = $props()
 
-  let query = $state(asText(number))
+  let query = $state('')
   let auto = $state(false)
   let activeTab = $state('status')
-  let committed = $state(asText(number))
+  let committed = $state('')
 
   let phase = $state('idle')
   let errorMsg = $state(null)
@@ -36,32 +36,23 @@
   let avgFor = null
 
   const DAY_LETTERS = ['M', 'T', 'W', 'T', 'F', 'S', 'S']
-
-  function target() {
-    return String(query).trim()
-  }
+  const VIEW_TO_TAB = { status: 'status', schedule: 'schedule', delay: 'avg' }
 
   function asText(v) {
     return String(v ?? '').trim()
   }
 
-  function commitSearch() {
-    committed = target()
-    return committed
-  }
-
-  async function loadStatus(n) {
-    const t = String(n ?? query).trim()
-    if (!t) return
-    if (phase === 'idle' || t !== `${data?.train_number}`) phase = 'loading'
-    else phase = 'refreshing'
+  async function loadStatus(t) {
+    const fresh = `${data?.train_number}` !== `${t}`
+    phase = fresh ? 'loading' : 'refreshing'
     errorMsg = null
     const res = await api(`/rail-api/live-status?train=${encodeURIComponent(t)}`)
     if (`${committed}` !== `${t}`) return
     if (res.ok) {
       data = res.data
       phase = 'ok'
-      if (`${t}` !== `${number}`) navigate(`/train/${t}`)
+      const want = `/train/${t}/${VIEW_TO_TAB[activeTab] ?? 'status'}`
+      if (window.location.pathname !== want) navigate(want)
     } else {
       phase = 'error'
       errorMsg = res.error || `HTTP ${res.status}`
@@ -98,29 +89,44 @@
     }
   }
 
-  function track() {
-    const t = commitSearch()
-    if (t) loadStatus(t)
+  function track(n) {
+    const t = String(n ?? query ?? '').trim()
+    if (!t) return
+    committed = t
+    loadStatus(t)
+  }
+
+  function onTabChange(v) {
+    if (!committed) return
+    navigate(`/train/${committed}/${VIEW_TO_TAB[v] ?? 'status'}`)
   }
 
   $effect(() => {
-    if (number) loadStatus(number)
+    const n = asText(number)
+    const tab = VIEW_TO_TAB[asText(view)] ?? null
+    if (tab && tab !== activeTab) activeTab = tab
+    if (n && `${n}` !== `${committed}`) {
+      query = n
+      committed = n
+      loadStatus(n)
+    }
   })
 
   $effect(() => {
     const t = committed
+    const tab = activeTab
     if (!t) return
-    if (activeTab === 'schedule') {
-      if (`${schFor}` !== `${t}` || schPhase === 'error') loadSchedule(t)
-    } else if (activeTab === 'avg') {
-      if (`${avgFor}` !== `${t}` || avgPhase === 'error') loadAvg(t)
+    if (tab === 'schedule') {
+      if (`${schFor}` !== `${t}`) loadSchedule(t)
+    } else if (tab === 'avg') {
+      if (`${avgFor}` !== `${t}`) loadAvg(t)
     }
   })
 
   $effect(() => {
     if (!auto) return
     const timer = setInterval(() => {
-      if (target()) loadStatus(target())
+      if (committed) loadStatus(committed)
     }, 30000)
     return () => clearInterval(timer)
   })
@@ -163,22 +169,30 @@
 <section class="grid gap-6">
   <div class="grid gap-1">
     <h1 class="text-2xl font-semibold tracking-tight">Live train status</h1>
-    <p class="text-sm text-muted-foreground">Spot any train by number. Data refreshes honestly from the live API.</p>
+    <p class="text-sm text-muted-foreground">Spot any train by number or name. Data refreshes honestly from the live API.</p>
   </div>
 
   <Card.Root>
     <Card.Content class="flex flex-wrap items-end gap-3">
-      <div class="grid min-w-48 flex-1 gap-2">
-        <Label for="train-no">Train number</Label>
-        <Input
+      <div
+        class="grid min-w-48 flex-1 gap-2"
+        onkeydown={(e) => {
+          if (e.key === 'Enter' && !e.defaultPrevented) track()
+        }}
+      >
+        <Label for="train-no">Train</Label>
+        <AutoCompleteInput
           id="train-no"
           bind:value={query}
-          placeholder="e.g. 12951"
-          inputmode="numeric"
-          onkeydown={(e) => e.key === 'Enter' && track()}
+          kind="train"
+          placeholder="Train number or name…"
+          onpick={(item) => {
+            query = String(item.number)
+            track(item.number)
+          }}
         />
       </div>
-      <Button type="button" onclick={track} disabled={phase === 'loading' || phase === 'refreshing'}>
+      <Button type="button" onclick={() => track()} disabled={phase === 'loading' || phase === 'refreshing'}>
         {phase === 'refreshing' ? 'Refreshing…' : 'Track'}
       </Button>
       <label class="mb-0.5 flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
@@ -188,7 +202,7 @@
     </Card.Content>
   </Card.Root>
 
-  <Tabs.Root bind:value={activeTab}>
+  <Tabs.Root bind:value={activeTab} onValueChange={onTabChange}>
     <Tabs.List class="w-full justify-start">
       <Tabs.Trigger value="status"><ActivityIcon class="mr-2 size-4" />Status</Tabs.Trigger>
       <Tabs.Trigger value="schedule"><CalendarClockIcon class="mr-2 size-4" />Schedule</Tabs.Trigger>
@@ -250,7 +264,7 @@
           </Card.Content>
         </Card.Root>
       {:else}
-        <p class="text-sm text-muted-foreground">Enter a train number above and press Track to see live status.</p>
+        <p class="text-sm text-muted-foreground">Enter a train number or name above and press Track to see live status.</p>
       {/if}
     </Tabs.Content>
 
@@ -349,8 +363,8 @@
               <Table.Header>
                 <Table.Row>
                   <Table.Head>Station</Table.Head>
-                  <Table.Head>Arrival</Table.Head>
-                  <Table.Head>Departure</Table.Head>
+                  <Table.Head>arrival_delay</Table.Head>
+                  <Table.Head>departure_delay</Table.Head>
                 </Table.Row>
               </Table.Header>
               <Table.Body>

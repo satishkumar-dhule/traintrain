@@ -1,5 +1,6 @@
 <script>
   import { api } from '$lib/api.js'
+  import { navigate } from '$lib/router.svelte.js'
   import * as Card from '$lib/components/ui/card/index.js'
   import { Button } from '$lib/components/ui/button/index.js'
   import { Input } from '$lib/components/ui/input/index.js'
@@ -12,11 +13,15 @@
 
   const RECENT_KEY = 'rc-pnr-recent'
 
+  let { pnr = '' } = $props()
+
   let query = $state('')
+  let committed = $state('')
   let phase = $state('idle')
   let errorMsg = $state(null)
   let data = $state(null)
   let captcha = $state(null)
+  let captchaPnr = null
   let captchaText = $state('')
 
   function loadRecent() {
@@ -31,8 +36,8 @@
 
   let recent = $state(loadRecent())
 
-  function remember(pnr) {
-    const next = [pnr, ...recent.filter((r) => r !== pnr)].slice(0, 5)
+  function remember(p) {
+    const next = [p, ...recent.filter((r) => r !== p)].slice(0, 5)
     recent = next
     try {
       localStorage.setItem(RECENT_KEY, JSON.stringify(next))
@@ -46,30 +51,46 @@
     } catch {}
   }
 
-  function useRecent(pnr) {
-    query = pnr
-    lookup()
+  function useRecent(p) {
+    if (p === committed) {
+      query = p
+      lookup()
+    } else {
+      navigate(`/pnr/${p}`)
+    }
   }
 
-  const valid = $derived(/^\d{10}$/.test(query.trim()))
+  function asText(v) {
+    return String(v ?? '').trim()
+  }
 
-  async function lookup() {
-    if (!valid) return
+  const valid = $derived(/^\d{10}$/.test(asText(query)))
+  const busy = $derived(phase === 'loading' || phase === 'refreshing')
+
+  async function lookup(target) {
+    const t = asText(target ?? query)
+    if (!/^\d{10}$/.test(t)) return
+    committed = t
     phase = data ? 'refreshing' : 'loading'
     errorMsg = null
-    let path = `/rail-api/pnr?pnr=${query.trim()}`
-    if (captcha?.session_id) {
+    let path = `/rail-api/pnr?pnr=${t}`
+    if (captcha?.session_id && captchaPnr === t) {
       path += `&captcha_session=${encodeURIComponent(captcha.session_id)}&captcha_text=${encodeURIComponent(captchaText.trim())}`
     }
     const res = await api(path)
+    if (`${committed}` !== `${t}`) return
     if (res.ok) {
       data = res.data
       phase = 'ok'
       captcha = null
+      captchaPnr = null
       captchaText = ''
-      remember(query.trim())
+      remember(t)
+      const want = `/pnr/${t}`
+      if (window.location.pathname !== want) navigate(want)
     } else if (res.status === 428 && res.body?.error === 'captcha_required') {
       captcha = res.body
+      captchaPnr = t
       captchaText = ''
       phase = 'captcha'
     } else {
@@ -77,6 +98,14 @@
       errorMsg = res.error || `HTTP ${res.status}`
     }
   }
+
+  $effect(() => {
+    const n = asText(pnr)
+    if (/^\d{10}$/.test(n) && n !== committed) {
+      query = n
+      lookup(n)
+    }
+  })
 
   function fmt(v) {
     return v && v !== '-' && v !== '--' ? v : '—'
@@ -111,14 +140,14 @@
           placeholder="e.g. 1234567890"
           inputmode="numeric"
           maxlength={10}
-          onkeydown={(e) => e.key === 'Enter' && lookup()}
+          onkeydown={(e) => e.key === 'Enter' && !e.defaultPrevented && lookup()}
         />
         {#if query && !valid}
           <p class="text-xs text-muted-foreground">PNR must be exactly 10 digits.</p>
         {/if}
       </div>
-      <Button onclick={lookup} disabled={!valid || phase === 'loading' || phase === 'refreshing'}>
-        Check status
+      <Button type="button" onclick={() => lookup()} disabled={!valid || busy}>
+        {phase === 'refreshing' ? 'Refreshing…' : 'Check status'}
       </Button>
     </Card.Content>
   </Card.Root>
@@ -127,13 +156,16 @@
     <div class="flex flex-wrap items-center gap-2">
       <span class="flex items-center gap-1.5 text-xs text-muted-foreground">Recent lookups</span>
       {#each recent as r (r)}
-        <button
-          type="button"
+        <a
+          href={`/pnr/${r}`}
           class="inline-flex h-6 items-center rounded-full border px-2.5 font-mono text-xs transition-colors hover:bg-muted hover:text-foreground"
-          onclick={() => useRecent(r)}
+          onclick={(e) => {
+            e.preventDefault()
+            useRecent(r)
+          }}
         >
           {r}
-        </button>
+        </a>
       {/each}
       <Button variant="ghost" size="xs" class="h-6 text-xs text-muted-foreground" onclick={clearRecent}>
         Clear all
@@ -163,9 +195,16 @@
         <div class="flex flex-wrap items-end gap-3">
           <div class="grid flex-1 gap-2 sm:max-w-56">
             <Label for="cap-text">Captcha text</Label>
-            <Input id="cap-text" bind:value={captchaText} placeholder="5 characters" />
+            <Input
+              id="cap-text"
+              bind:value={captchaText}
+              placeholder="5 characters"
+              onkeydown={(e) => e.key === 'Enter' && !e.defaultPrevented && lookup()}
+            />
           </div>
-          <Button onclick={lookup} disabled={!captchaText.trim()}>Submit</Button>
+          <Button type="button" onclick={() => lookup()} disabled={!captchaText.trim() || busy}>
+            Submit
+          </Button>
         </div>
       </Card.Content>
     </Card.Root>
@@ -187,7 +226,10 @@
           <Card.Title>
             <span class="font-mono">{data.train_number ?? '—'}</span> · {data.train_name ?? ''}
           </Card.Title>
-          {#if data.data_source}<Badge variant="outline">{data.data_source}</Badge>{/if}
+          <div class="flex shrink-0 flex-wrap items-center gap-1.5">
+            {#if data.freshness}<Badge variant="secondary">{data.freshness}</Badge>{/if}
+            {#if data.data_source}<Badge variant="outline">{data.data_source}</Badge>{/if}
+          </div>
         </div>
         <div class="flex flex-wrap items-center gap-x-5 gap-y-3 rounded-lg border bg-muted/40 px-4 py-3">
           <div class="grid min-w-28 gap-0.5">
@@ -253,5 +295,7 @@
         </Table.Root>
       </Card.Content>
     </Card.Root>
+  {:else}
+    <p class="text-sm text-muted-foreground">Enter a PNR above or pick a recent lookup to see status.</p>
   {/if}
 </section>
