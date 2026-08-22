@@ -40,8 +40,8 @@ function stationHero(code, res, ui, ctx, extra) {
     icon: 'station',
     title,
     subtitle: res.station_name || '',
-    badges: extra.badges || [ui.badge(code, 'blue'), ui.badge(res.data_source || 'unknown', 'slate')],
-    facts: extra.facts || [['Total trains', Array.isArray(res.trains) ? res.trains.length : 0], ['Data source', res.data_source || 'unknown']],
+    badges: extra.badges || [ui.badge(code, 'blue')],
+    facts: extra.facts || [['Total trains', Array.isArray(res.trains) ? res.trains.length : 0]],
     actions: [favBtn, ui.iconBtn('copy', 'Copy link', () => ui.copyLink(hash)), ui.iconBtn('share', 'Share', () => ui.share(hash))],
   });
 }
@@ -118,7 +118,7 @@ function viewLive(container, ctx, params) {
     fillInput(params.station, input);
     pendingHero = stationHero(params.station, {}, ui, ctx, {
       view: 'live',
-      facts: [['Total trains', '—'], ['Window', hours + ' hrs'], ['Data source', '—']],
+      facts: [['Total trains', '—'], ['Window', hours + ' hrs']],
     });
     container.append(pendingHero);
     load();
@@ -148,8 +148,8 @@ function renderLive(res, code, hours, ui, ctx, opts) {
   const trains = Array.isArray(res.trains) ? res.trains : [];
   const hero = stationHero(code, res, ui, ctx, {
     view: 'live',
-    badges: [ui.badge(code, 'blue'), ui.badge('LIVE', 'green'), ui.badge(res.data_source || 'unknown', 'slate')],
-    facts: [['Total trains', trains.length], ['Window', hours + ' hrs'], ['Data source', res.data_source || 'unknown']],
+    badges: [ui.badge(code, 'blue'), ui.liveDot()],
+    facts: [['Total trains', trains.length], ['Window', hours + ' hrs']],
   });
   const rr = ui.refreshRow({
     updatedAt: new Date().toISOString(),
@@ -174,7 +174,7 @@ function renderLive(res, code, hours, ui, ctx, opts) {
 function liveBoard(trains, filter, ui, ctx) {
   const shown = filter === 'arr' ? trains.filter((t) => t.eta) : filter === 'dep' ? trains.filter((t) => t.dep) : trains;
   if (!shown.length) {
-    return ui.card('Live Board', ui.notice('No trains in window.'));
+    return ui.card('Live Board', ui.el('p', { class: 'text-sm muted', text: 'No trains in window.' }));
   }
   const board = ui.el('div', { class: 'board' });
   shown.forEach((t) => {
@@ -266,7 +266,7 @@ function viewTT(container, ctx, params) {
     fillInput(params.station, input);
     pendingHero = stationHero(params.station, {}, ui, ctx, {
       view: 'tt',
-      facts: [['Total trains', '—'], ['Data source', '—']],
+      facts: [['Total trains', '—']],
     });
     container.append(pendingHero);
     submitForm();
@@ -276,7 +276,7 @@ function viewTT(container, ctx, params) {
 function renderTT(res, code, ui, ctx) {
   const hero = stationHero(code, res, ui, ctx, {
     view: 'tt',
-    facts: [['Total trains', res.total || 0], ['Data source', res.data_source || 'unknown']],
+    facts: [['Total trains', res.total || 0]],
   });
   const trains = Array.isArray(res.trains) ? res.trains : [];
   const list = ui.card('Trains',
@@ -291,7 +291,7 @@ function renderTT(res, code, ui, ctx) {
             t.days,
             t.train_type,
           ]))
-      : ui.notice('No trains found.'));
+      : ui.el('p', { class: 'text-sm muted', text: 'No trains found.' }));
   return [hero, list];
 }
 
@@ -337,25 +337,20 @@ function viewHeritage(container, ctx) {
 
 function renderHeritage(res, ui) {
   const trains = Array.isArray(res.trains) ? res.trains : [];
-  const summary = ui.card('Summary',
-    ui.el('div', { class: 'row align-center mt-8' },
-      ui.badge('Total: ' + (res.total ?? 0), 'blue'),
-      res.data_source ? ui.badge('Source: ' + res.data_source, 'slate') : null,
-    ),
-  );
   const list = ui.card('Trains',
+    ui.el('div', { class: 'row align-center' }, ui.badge('Total: ' + (res.total ?? 0), 'blue')),
     trains.length
       ? ui.collapsibleTable(['Train', 'Runs', 'From', 'To', 'Duration'],
           trains.map((t) => [
             `${t.number} ${t.name}`,
             `${t.runs} | ${t.train_type}`,
-            `${t.source_station} (${t.source_code}) ${t.source_time}`,
-            `${t.dest_station} (${t.dest_code}) ${t.dest_time}`,
+            `${t.source_station} (${t.source_code}) ${ui.fmtTime(t.source_time)}`,
+            `${t.dest_station} (${t.dest_code}) ${ui.fmtTime(t.dest_time)}`,
             t.duration,
           ]))
       : ui.emptyState('train', 'No heritage trains', 'Try a different selection.'),
   );
-  return [summary, list];
+  return [list];
 }
 
 /* ---------- parcel ---------- */
@@ -385,13 +380,16 @@ function viewParcel(container, ctx) {
   fetchParcel();
 }
 
+function parcelDate(ui, v) {
+  const m = /^(\d{1,2})-([A-Za-z]{3})-(\d{4})$/.exec(String(v || '').trim());
+  if (!m) return v || '';
+  const months = { jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06', jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12' };
+  const mm = months[m[2].toLowerCase()];
+  return mm ? ui.friendlyDate(`${m[3]}-${mm}-${m[1].padStart(2, '0')}`) : v;
+}
+
 function renderParcel(res, ui) {
   const trains = Array.isArray(res.trains) ? res.trains : [];
-  const source = ui.card('',
-    ui.el('div', { class: 'row align-center mt-8' },
-      res.data_source ? ui.badge('Source: ' + res.data_source, 'slate') : null,
-    ),
-  );
   const list = ui.card('Parcel Special Trains',
     trains.length
       ? ui.collapsibleTable(['No.', 'Train', 'Route', 'Days', 'Validity', 'From', 'To', 'Travel'],
@@ -400,13 +398,13 @@ function renderParcel(res, ui) {
             `${t.number || ''} ${t.name || ''}`,
             t.route || '',
             t.days_of_run || '',
-            `${t.validity_from || ''} → ${t.validity_to || ''}`,
-            `${t.source_code || ''} ${t.source_time || ''}`,
-            `${t.dest_code || ''} ${t.dest_time || ''}`,
+            `${parcelDate(ui, t.validity_from)} \u2192 ${parcelDate(ui, t.validity_to)}`,
+            `${t.source_code || ''} ${ui.fmtTime(t.source_time)}`,
+            `${t.dest_code || ''} ${ui.fmtTime(t.dest_time)}`,
             t.travel_time || '',
           ]))
       : ui.emptyState('train', 'No parcel special trains', 'Try again later.'),
   );
-  return [source, list];
+  return [list];
 }
 })();

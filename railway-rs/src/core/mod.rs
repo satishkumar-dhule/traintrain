@@ -6,6 +6,7 @@ pub mod irctc;
 pub mod metrics;
 pub mod ntes;
 pub mod obs;
+pub mod paytm;
 pub mod railyatri;
 pub mod source;
 

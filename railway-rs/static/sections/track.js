@@ -170,7 +170,7 @@ function viewSpot(container, ctx, train, hero) {
         lastRes = res;
         showInstance(res, currentIdx);
         rr.setUpdated(new Date().toISOString());
-        hero.update(spotSubtitle(res, currentIdx), spotFacts(res, currentIdx));
+        hero.update(spotSubtitle(res, currentIdx), spotFacts(res, currentIdx, ui));
         enrichSpotLabel(ctx, train, res, currentIdx);
         return res;
       });
@@ -183,13 +183,12 @@ function viewSpot(container, ctx, train, hero) {
     const inst = instances[idx] || {};
     const hasStops = Array.isArray(inst.stops) && inst.stops.length;
     const parts = [];
-    const tabCard = renderInstanceTabs(res, idx, ui, switchInstance);
-    if (tabCard) parts.push(tabCard);
     try {
+      const segBar = renderInstanceSeg(res, idx, ui, switchInstance);
       if (hasStops) {
-        parts.push(renderInstancePosition(res, inst, ui), renderInstanceStations(inst, ui, ctx));
+        parts.push(renderInstancePosition(res, inst, ui, segBar), renderInstanceStations(inst, ui, ctx));
       } else {
-        parts.push(renderPosition(res, ui), renderStations(res, ui, ctx));
+        parts.push(renderPosition(res, ui, segBar), renderStations(res, ui, ctx));
       }
     } catch (e) {
       parts.push(ui.errorBox('Render error: ' + (e.message || String(e))));
@@ -211,7 +210,7 @@ function spotSubtitle(res, idx) {
   return res.train_name || inst.position || '';
 }
 
-function spotFacts(res, idx) {
+function spotFacts(res, idx, ui) {
   const instances = res.instances || [];
   const inst = instances[idx] || {};
   const stops = inst.stops || res.stations || [];
@@ -220,9 +219,8 @@ function spotFacts(res, idx) {
     : (res.current_location_info || '—');
   return [
     ['Route', route],
-    ['Run date', inst.start_date || res.train_start_date || '—'],
+    ['Run date', ui.friendlyDate(inst.start_date || res.train_start_date)],
     ['Delay', currentDelayText(stops)],
-    ['Source', res.data_source || 'unknown'],
   ];
 }
 
@@ -245,56 +243,31 @@ function currentDelayText(stops) {
   return 'On Time';
 }
 
-function renderInstanceTabs(res, activeIdx, ui, onSwitch) {
+function renderInstanceSeg(res, activeIdx, ui, onSwitch) {
   const instances = res.instances || [];
-  if (!instances.length) return null;
-
-  const card = ui.el('div', { class: 'card' });
-  card.append(ui.el('div', { class: 'card-title', text: 'Instances (tap a date to switch)' }));
-  const wrap = ui.el('div', { class: 'table-wrap' });
-  const tbl = ui.el('table', { class: 'tbl' });
-  const thead = ui.el('thead');
-  const headRow = ui.el('tr');
-  headRow.append(ui.el('th', { text: 'Start Date' }), ui.el('th', { text: 'Position' }));
-  thead.append(headRow);
-  tbl.append(thead);
-  const tbody = ui.el('tbody');
-  instances.forEach((inst, i) => {
-    const cur = i === activeIdx;
-    const tr = ui.el('tr');
-    if (cur) tr.style.fontWeight = '700';
-    tr.style.cursor = 'pointer';
-    tr.addEventListener('click', () => onSwitch(i));
-    const tdDate = ui.el('td');
-    if (cur) tdDate.append(ui.el('span', { class: 'bold', text: inst.start_date }));
-    else tdDate.textContent = inst.start_date;
-    const tdPos = ui.el('td');
-    if (cur) tdPos.append(ui.badge('Current', 'blue'));
-    tdPos.append(document.createTextNode(inst.position || '-'));
-    tr.append(tdDate, tdPos);
-    tbody.append(tr);
-  });
-  tbl.append(tbody);
-  wrap.append(tbl);
-  card.append(wrap);
-  return card;
+  if (instances.length < 2) return null;
+  const options = instances.map((inst, i) => [
+    i,
+    inst.start_date ? ui.friendlyDate(inst.start_date) : 'Run ' + (i + 1),
+  ]);
+  return ui.seg(options, activeIdx, onSwitch);
 }
 
-function renderInstancePosition(res, inst, ui) {
+function renderInstancePosition(res, inst, ui, segBar) {
   const stops = inst.stops || [];
   let location;
   if (inst.at_dstn === 'true') location = 'Arrived at ' + ((stops[stops.length - 1] || {}).name || 'destination') + '.';
   else if (inst.at_src === 'true') location = 'Train at ' + ((stops[0] || {}).name || 'origin') + ' (origin).';
   else location = inst.position || 'Running; position awaiting update.';
   return ui.card('Current Position',
-    ui.el('div', { class: 'row' },
-      ui.el('span', { class: 'bold', text: res.train_name }),
-      ui.badge(res.train_number, 'blue'),
-    ),
-    ui.journeyProgress(stops, spotCurrentIndex(stops)),
-    ui.el('p', { class: 'text-sm bold', text: location }),
-    inst.start_date ? ui.el('p', { class: 'text-sm muted', text: 'Run date: ' + inst.start_date }) : null,
-    ui.el('div', { class: 'row mt-8' }, ui.badge(res.data_source || 'unknown', 'slate')),
+    ...[segBar,
+      ui.el('div', { class: 'row' },
+        ui.el('span', { class: 'bold', text: res.train_name }),
+        ui.badge(res.train_number, 'blue'),
+      ),
+      ui.journeyProgress(stops, spotCurrentIndex(stops)),
+      ui.el('p', { class: 'text-sm bold', text: location }),
+    ].filter(Boolean),
   );
 }
 
@@ -311,20 +284,20 @@ function renderInstanceStations(inst, ui, ctx) {
     cells.push(ui.delay(s.delay_minutes), ui.statusCell(s.status));
     return cells;
   });
-  return ui.card('Stations', ui.table(headers, rows));
+  return ui.card('Stations', ui.collapsibleTable(headers, rows));
 }
 
-function renderPosition(res, ui) {
+function renderPosition(res, ui, segBar) {
   const stops = res.stations || [];
   return ui.card('Current Position',
-    ui.el('div', { class: 'row' },
-      ui.el('span', { class: 'bold', text: res.train_name }),
-      ui.badge(res.train_number, 'blue'),
-    ),
-    ui.journeyProgress(stops, spotCurrentIndex(stops)),
-    ui.el('p', { class: 'text-sm bold', text: res.current_location_info || 'No current position reported.' }),
-    res.train_start_date ? ui.el('p', { class: 'text-sm muted', text: 'Run date: ' + res.train_start_date }) : null,
-    ui.el('div', { class: 'row mt-8' }, ui.badge(res.data_source || 'unknown', 'slate')),
+    ...[segBar,
+      ui.el('div', { class: 'row' },
+        ui.el('span', { class: 'bold', text: res.train_name }),
+        ui.badge(res.train_number, 'blue'),
+      ),
+      ui.journeyProgress(stops, spotCurrentIndex(stops)),
+      ui.el('p', { class: 'text-sm bold', text: res.current_location_info || 'No current position reported.' }),
+    ].filter(Boolean),
   );
 }
 
@@ -341,7 +314,7 @@ function renderStations(res, ui, ctx) {
     cells.push(ui.delay(s.delay_minutes), ui.statusCell(s.status));
     return cells;
   });
-  return ui.card('Stations', ui.table(headers, rows));
+  return ui.card('Stations', ui.collapsibleTable(headers, rows));
 }
 
 /* ======================================================================
@@ -363,7 +336,6 @@ function viewSchedule(container, ctx, train, hero) {
       hero.update(res.train_name || '', [
         ['Route', route],
         ['Runs on', (res.running_days || []).map((d) => String(d).slice(0, 3).toUpperCase()).join(' ') || '—'],
-        ['Source', res.data_source || 'unknown'],
       ]);
       enrichTrainLabel(ctx, train, res.train_number, res.train_name, from, to);
       ui.render(results, ...renderSchedule(res, ui, ctx));
@@ -392,15 +364,13 @@ function enrichSpotLabel(ctx, train, res, idx) {
 function renderSchedule(s, ui, ctx) {
   const today = new Date().toLocaleString('en-GB', { timeZone: 'Asia/Kolkata', weekday: 'short' }).toUpperCase().slice(0, 3);
   const days = s.running_days || [];
-  const daysCard = ui.card('Running Days',
-    ui.el('div', { class: 'row align-center mt-8' },
+  const stops = s.stops;
+  return [ui.card('Schedule',
+    ui.el('div', { class: 'row align-center', style: 'gap:4px;flex-wrap:wrap;' },
       days.length
         ? days.map((d) => ui.badge(String(d).slice(0, 3).toUpperCase(), d.toUpperCase() === today ? 'green' : 'slate'))
-        : ui.notice('Not available.'),
+        : [ui.notice('Not available.')],
     ),
-  );
-  const stops = s.stops;
-  const stations = ui.card('Stations',
     Array.isArray(stops) && stops.length
       ? ui.collapsibleTable(['Day', 'Code', 'Station', 'Arrival', 'Departure'],
           stops.map((st) => [
@@ -411,11 +381,7 @@ function renderSchedule(s, ui, ctx) {
             ui.fmtTime(st.departure),
           ]))
       : ui.notice('No stops returned.'),
-  );
-  const meta = [];
-  if (s.notice) meta.push(ui.notice(s.notice));
-  if (s.cache_ttl) meta.push(ui.el('p', { class: 'text-sm muted', text: 'Cached for ' + s.cache_ttl + ' seconds.' }));
-  return [daysCard, stations, ui.card('', ...meta)];
+  )];
 }
 
 /* ======================================================================
@@ -437,7 +403,6 @@ function viewDelay(container, ctx, train, hero) {
         hero.update(res.train_name || '', [
           ['Days of run', res.days_of_run || '—'],
           ['Type', res.train_type || '—'],
-          ['Source', res.data_source || 'unknown'],
         ]);
         ui.render(results, ...renderDelay(res, ui));
         return res;
@@ -452,7 +417,7 @@ function renderDelay(res, ui) {
   const stations = res.stations || [];
   const list = ui.card('Stations',
     Array.isArray(stations) && stations.length
-      ? ui.table(['Sr.', 'Station', 'Code', 'Arr. Delay', 'Dep. Delay'],
+      ? ui.collapsibleTable(['Sr.', 'Station', 'Code', 'Arr. Delay', 'Dep. Delay'],
           stations.map((st) => [st.sr || '', st.name || '', st.code || '', delayBadge(st.arrival_delay), delayBadge(st.departure_delay)]))
       : ui.notice('No delay data found.'),
   );
@@ -485,7 +450,7 @@ function viewJourney(container, ctx, train, hero) {
     ui.fetchFlow(results, () => ctx.api.journeyBasis(train, stationCode), { failText: 'Failed to load journey basis' })
       .then((res) => {
         if (!res) return;
-        hero.update(res.train_name || '', [['Source', res.data_source || 'unknown']]);
+        hero.update(res.train_name || '', []);
         ui.render(results, ...renderBasis(res, ui));
       });
   };
@@ -493,7 +458,6 @@ function viewJourney(container, ctx, train, hero) {
   const fetchStations = () => ui.fetchFlow(results, () => ctx.api.journeyStations(train), { failText: 'Failed to load journey stations' })
     .then((res) => {
       if (!res) return null;
-      hero.update('', [['Source', res.data_source || 'unknown']]);
       ui.render(results, ...renderStationPicker(res, ui, showBasis));
       return res;
     });
@@ -505,43 +469,33 @@ function viewJourney(container, ctx, train, hero) {
 function renderStationPicker(res, ui, onPick) {
   const stations = Array.isArray(res.stations) ? res.stations : [];
   if (!stations.length) return [ui.card('Journey Stations', ui.notice('No journey stations returned for this train.'))];
-  const select = ui.el('select', { class: 'input' },
+  const select = ui.el('select', { class: 'input', 'aria-label': 'Journey Station' },
     stations.map((s) => ui.el('option', { value: s.code, text: s.code + ' - ' + s.name })),
   );
-  const go = ui.el('button', { class: 'btn', text: 'Show Journey Basis' });
+  select.style.flex = '1';
+  const go = ui.el('button', { class: 'btn', text: 'Show' });
   go.addEventListener('click', () => onPick(select.value));
   return [ui.card('Journey Stations',
-    ui.el('div', { class: 'row mt-8' },
-      ui.el('span', { class: 'mono', text: res.train_no || '' }),
-      ui.el('span', { class: 'text-sm muted', text: stations.length + ' station(s)' }),
-      ui.badge('Source: ' + (res.data_source || 'unknown'), 'slate'),
-    ),
-    ui.label('Journey Station'), select,
-    ui.el('div', { class: 'row mt-12' }, go),
+    ui.el('div', { class: 'row', style: 'gap:6px;' }, select, go),
   )];
 }
 
 function renderBasis(res, ui) {
+  const js = res.journey_station;
   const cards = [];
   cards.push(ui.card('Journey Basis',
-    ui.el('p', { class: 'text-sm bold', text: res.current_location_info || 'No current position reported.' }),
-    ui.el('div', { class: 'row mt-8' },
-      ui.el('span', { class: 'bold', text: res.train_name }),
-      ui.badge(res.train_number || '', 'blue'),
-      ui.badge('Source: ' + (res.data_source || 'unknown'), 'slate'),
-    ),
+    ...[
+      ui.el('p', { class: 'text-sm bold', text: res.current_location_info || 'No current position reported.' }),
+      js ? ui.el('div', { class: 'mt-8' },
+        ui.el('div', { class: 'row' },
+          ui.el('span', { class: 'bold', text: js.name }),
+          ui.badge(js.code || '', 'blue'),
+          js.day_change ? ui.badge('Day Change', 'amber') : null,
+        ),
+        ui.el('p', { class: 'text-sm muted mt-8', text: 'Seq ' + (js.seq ?? '-') + ' \u00b7 Arrival days: ' + (js.arrival_days || '-') + ' \u00b7 Departure days: ' + (js.departure_days || '-') }),
+      ) : null,
+    ].filter(Boolean),
   ));
-  const js = res.journey_station;
-  if (js) {
-    cards.push(ui.card('Journey Station',
-      ui.el('div', { class: 'row mt-8' },
-        ui.el('span', { class: 'bold', text: js.name }),
-        ui.badge(js.code || '', 'blue'),
-        js.day_change ? ui.badge('Day Change', 'amber') : null,
-      ),
-      ui.el('p', { class: 'text-sm muted mt-8', text: 'Seq ' + (js.seq ?? '-') + ' \u00b7 Arrival days: ' + (js.arrival_days || '-') + ' \u00b7 Departure days: ' + (js.departure_days || '-') }),
-    ));
-  }
   cards.push(stationsCard(res, ui));
   return cards;
 }
@@ -559,7 +513,7 @@ function stationsCard(res, ui) {
     cells.push(ui.delay(s.delay_minutes), ui.statusCell(s.status));
     return cells;
   });
-  return ui.card('Stations', ui.table(headers, rows));
+  return ui.card('Stations', ui.collapsibleTable(headers, rows));
 }
 
 /* ======================================================================
@@ -577,45 +531,31 @@ function viewExceptions(container, ctx, train, hero) {
       hero.update(t.name || '', [
         ['Route', (t.source && t.destination) ? t.source + ' \u2192 ' + t.destination : '—'],
         ['Runs on', (Array.isArray(t.days_of_run) && t.days_of_run.length) ? t.days_of_run.join(' ') : '—'],
-        ['Source', res.data_source || 'unknown'],
       ]);
-      renderExceptions(res, ui, results, ctx);
+      renderExceptions(res, ui, results);
       return res;
     });
   fetchExceptions();
   return fetchExceptions;
 }
 
-function renderExceptions(res, ui, container, ctx) {
+function renderExceptions(res, ui, container) {
   const t = res.train || {};
-  const route = (t.source && t.destination) ? t.source + ' \u2192 ' + t.destination : null;
-  const days = Array.isArray(t.days_of_run) && t.days_of_run.length
-    ? ui.el('div', { class: 'row mt-8' }, t.days_of_run.map((d) => ui.badge(d.toUpperCase(), 'slate')))
-    : null;
-  const headerCard = ui.card('Train',
-    ui.el('div', { class: 'row align-center' },
-      ui.entityLink('train', t.number || '', t.number || '', ctx.navigate),
-      ui.el('span', { class: 'bold', text: t.name || '' }),
-    ),
-    route ? ui.el('p', { class: 'text-sm muted', text: route }) : null,
-    days,
-    ui.el('div', { class: 'row mt-8' },
-      ui.badge(res.data_source || 'unknown', 'slate'),
-      res.cache_ttl ? ui.badge('cached ' + Math.round(res.cache_ttl / 60) + ' min', 'blue') : null,
-    ),
-  );
   const exceptions = Array.isArray(res.exceptions) ? res.exceptions : [];
   let listCard;
-  if (res.message) {
-    listCard = ui.card('Train Exception Info', ui.notice(res.message));
-  } else if (!exceptions.length) {
-    listCard = ui.card('Exceptional Dates', ui.notice('No exceptional details found for train ' + (t.number || '') + '.'));
+  if (!exceptions.length) {
+    listCard = ui.card('Exceptional Dates',
+      ui.notice(res.message || ('No exceptional details found for train ' + (t.number || '') + '.')));
   } else {
     listCard = ui.card('Exceptional Dates',
-      ui.collapsibleTable(['Date', 'Kind', 'Note'], exceptions.map((e) => [e.date, kindBadge(e.kind), e.note || '-'])),
+      ui.collapsibleTable(['Date', 'Kind', 'Note'], exceptions.map((e) => [
+        '<span title="' + mapEsc(e.date || '') + '">' + ui.friendlyDate(e.date) + '</span>',
+        kindBadge(e.kind),
+        e.note || '-',
+      ])),
     );
   }
-  ui.render(container, headerCard, listCard);
+  ui.render(container, listCard);
 }
 
 function kindBadge(kind) {
@@ -631,11 +571,11 @@ function viewMap(container, ctx, train, hero) {
   const ui = ctx.ui;
 
   /* station input is specific to map view */
-  const stationInput = ui.el('input', { class: 'input', autocomplete: 'off', placeholder: 'Station code (optional, e.g. NDLS)' });
+  const stationInput = ui.el('input', { class: 'input', autocomplete: 'off', placeholder: 'Station code (optional, e.g. NDLS)', 'aria-label': 'Station code (optional)' });
+  stationInput.style.flex = '1';
   const submit = ui.el('button', { class: 'btn', text: 'Show Map' });
-  const mapForm = ui.el('div', { class: 'card' },
-    ui.label('Station Code (optional)'), stationInput,
-    ui.el('div', { class: 'row mt-12' }, submit),
+  const mapForm = ui.el('div', { class: 'card-sm' },
+    ui.el('div', { class: 'row', style: 'gap:6px;' }, stationInput, submit),
   );
   const results = ui.el('div', { class: 'mt-12' });
 
@@ -653,9 +593,8 @@ function viewMap(container, ctx, train, hero) {
         if (!res || res.ok === false) { ui.render(results, ui.errorBox(res && res.error ? res.error : 'Failed to load train map.')); return; }
         hero.update(res.train_name || '', [
           ['Route', (res.source || '') + ' \u2192 ' + (res.destination || '')],
-          ['Source', res.data_source || 'unknown'],
         ]);
-        ui.render(results, ...renderMapResults(res, ui, ctx));
+        ui.render(results, ...renderMapResults(res, ui));
       })
       .catch((err) => ui.render(results, ui.errorBox('Failed to load train map: ' + (err.message || String(err)))))
       .finally(() => { submit.disabled = false; });
@@ -668,19 +607,9 @@ function viewMap(container, ctx, train, hero) {
   return submitMap;
 }
 
-function renderMapResults(res, ui, ctx) {
+function renderMapResults(res, ui) {
   const parts = [];
-  parts.push(ui.card('Train',
-    ui.el('div', { class: 'row align-center mt-8' },
-      ui.entityLink('train', res.train_no || '', res.train_no || '', ctx.navigate),
-      ui.el('span', { class: 'bold', text: (res.train_no && res.train_name ? ' ' : '') + (res.train_name || '') }),
-      res.source_code ? ui.badge(res.source_code) : null,
-      res.dest_code ? ui.badge(res.dest_code, 'blue') : null,
-      ui.badge('Data source: ' + (res.data_source || 'unknown'), 'slate'),
-    ),
-    ui.el('p', { class: 'text-sm muted mt-8', text: (res.source || '') + ' \u2192 ' + (res.destination || '') }),
-  ));
-  if (res.current_station) parts.push(...renderMapLive(res, ui));
+  if (res.current_station) parts.push(renderMapLive(res, ui));
   parts.push(renderMapLeaflet(res, ui));
   parts.push(renderMapStations(res, ui));
   return parts;
@@ -688,23 +617,24 @@ function renderMapResults(res, ui, ctx) {
 
 function renderMapLive(res, ui) {
   const current = res.current_station || {};
-  const cards = [ui.card('Live Position',
-    ui.el('div', { class: 'row align-center mt-8' },
-      ui.badge('\u25cf CURRENT: ' + (current.code || '?'), 'blue'),
-    ),
-  )];
   const j = res.journey_station;
-  if (!j) return cards;
-  cards.push(ui.card('Journey Station',
-    [['Station', (j.name || '') + ' (' + (j.code || '') + ')'], ['Label', j.label || ''],
-     ['Expected arrival', j.expected_arrival || '\u2014'], ['Actual arrival', j.actual_arrival || '\u2014'],
-     ['Delay', j.delay_status || '\u2014'], ['Platform', j.platform || '\u2014'],
-    ].map(([k, v]) => ui.el('div', { class: 'row mt-4' },
-      ui.el('span', { class: 'text-sm muted', text: k + ': ' }),
-      ui.el('span', { class: 'text-sm bold', text: v }),
-    )),
-  ));
-  return cards;
+  return ui.card('Live Position',
+    ...[
+      ui.el('div', { class: 'row' },
+        ui.badge('\u25cf CURRENT: ' + (current.code || '?'), 'blue'),
+        j ? ui.el('span', { class: 'bold', text: (j.name || '') + ' (' + (j.code || '') + ')' }) : null,
+        j && j.day_change ? ui.badge('Day Change', 'amber') : null,
+      ),
+      j ? ui.el('div', { class: 'mt-8' },
+        [['Expected arrival', j.expected_arrival], ['Actual arrival', j.actual_arrival],
+         ['Delay', j.delay_status], ['Platform', j.platform],
+        ].filter((pair) => pair[1]).map(([k, v]) => ui.el('div', { class: 'row mt-4' },
+          ui.el('span', { class: 'text-sm muted', text: k + ': ' }),
+          ui.el('span', { class: 'text-sm bold', text: v }),
+        )),
+      ) : null,
+    ].filter(Boolean),
+  );
 }
 
 function renderMapLeaflet(res, ui) {
@@ -763,7 +693,7 @@ function renderMapStations(res, ui) {
       mapStatusBadge(st.arrival_delay, st.departure_delay),
     ];
   });
-  return ui.card('Stations', ui.table(['#', 'Station', 'Code', 'Arr', 'Dep', 'Day', 'Dist', 'Exp. Arr', 'Exp. Dep', 'Delay', 'Status'], rows));
+  return ui.card('Stations', ui.collapsibleTable(['#', 'Station', 'Code', 'Arr', 'Dep', 'Day', 'Dist', 'Exp. Arr', 'Exp. Dep', 'Delay', 'Status'], rows));
 }
 
 function mapDelayCell(arr, dep) {
@@ -815,7 +745,7 @@ function renderLanding(container, ctx, prefillPnr) {
     renderRecent(recentWrap, ctx);
     const statusWrap = ui.el('div');
     renderStatus(statusWrap, ctx);
-    ui.render(landing, trainCard, pnrCard, recentWrap, statusWrap);
+    ui.render(landing, ui.el('div', { class: 'grid grid-2' }, trainCard, pnrCard, recentWrap, statusWrap));
     container.append(landing);
     const trainInput = landing.querySelector('.autocomplete .input');
     if (trainInput) trainInput.focus();
@@ -847,7 +777,6 @@ function buildTrainSearchCard(ui, navigate) {
 
   card.append(
     ui.el('div', { class: 'row', style: 'gap:6px;' }, wrap, btn),
-    ui.el('p', { class: 'text-sm muted mt-8', text: 'Enter a train number or name — or press ⌘K to search anything.' }),
   );
   return card;
 }
@@ -921,23 +850,8 @@ async function fetchPNR(pnr, captcha, attemptsLeft, ctx, setLoading) {
 
 function renderPNRResult(data, ctx) {
   const ui = ctx.ui;
-  const train = ui.card('Train',
-    ui.el('div', { class: 'row mt-8' },
-      ui.el('span', { class: 'bold', text: data.train_name || 'Unknown train' }),
-      data.train_number != null ? ui.entityLink('train', String(data.train_number), String(data.train_number), ctx.navigate) : null,
-    ),
-    data.journey_date
-      ? ui.el('div', { class: 'text-sm muted mt-8', text: 'Journey: ' + ui.friendlyDate(data.journey_date) })
-      : null,
-    ui.el('div', { class: 'row mt-8' },
-      stationCell(data.from, ui, ctx),
-      ui.el('span', { class: 'muted', text: '\u2192' }),
-      stationCell(data.to, ui, ctx),
-    ),
-  );
-
   const passengers = (Array.isArray(data.passengers) && data.passengers.length)
-    ? ui.card('Passengers', ui.table(
+    ? ui.table(
         ['Booking Status', 'Current Status', 'Coach', 'Berth'],
         data.passengers.map((p) => [
           ui.esc(p && p.booking_status),
@@ -945,16 +859,25 @@ function renderPNRResult(data, ctx) {
           ui.esc(p && p.coach),
           ui.esc(p && p.berth),
         ]),
-      ))
-    : ui.card('Passengers', ui.notice('No passenger data returned.'));
+      )
+    : ui.notice('No passenger data returned.');
 
-  const meta = ui.card('Details',
-    ui.el('div', { class: 'row mt-8' },
-      data.data_source ? ui.badge(String(data.data_source), 'green') : null,
-      data.freshness ? ui.el('span', { class: 'text-sm muted', text: data.freshness }) : null,
-      data.last_updated ? ui.el('span', { class: 'text-sm muted', text: 'Updated ' + ui.friendlyTime(data.last_updated) }) : null,
-    ),
-    data.notice ? ui.el('p', { class: 'text-sm muted mt-8', text: data.notice }) : null,
+  const card = ui.card('PNR Status',
+    ...[
+      ui.el('div', { class: 'row' },
+        ui.el('span', { class: 'bold', text: data.train_name || 'Unknown train' }),
+        data.train_number != null ? ui.entityLink('train', String(data.train_number), String(data.train_number), ctx.navigate) : null,
+      ),
+      data.journey_date
+        ? ui.el('div', { class: 'text-sm muted mt-8', text: 'Journey: ' + ui.friendlyDate(data.journey_date) })
+        : null,
+      ui.el('div', { class: 'row mt-8' },
+        stationCell(data.from, ui, ctx),
+        ui.el('span', { class: 'muted', text: '\u2192' }),
+        stationCell(data.to, ui, ctx),
+      ),
+      ui.el('div', { class: 'mt-8' }, passengers),
+    ].filter(Boolean),
   );
 
   const actions = ui.contextualActions(
@@ -962,7 +885,7 @@ function renderPNRResult(data, ctx) {
     ctx.navigate,
   );
 
-  return [train, passengers, meta, actions];
+  return [card, actions];
 }
 
 function stationCell(s, ui, ctx) {

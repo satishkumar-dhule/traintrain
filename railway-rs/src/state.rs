@@ -8,6 +8,7 @@ use crate::core::irctc::IrctcClient;
 use crate::core::metrics::{Metrics, SharedMetrics};
 use crate::core::ntes::{NtesClient, NtesWebClient};
 use crate::core::obs::Telemetry;
+use crate::core::paytm::PaytmClient;
 use crate::data::Datasets;
 
 /// Shared application state handed to every handler via `State<AppState>`.
@@ -21,6 +22,7 @@ pub struct AppState {
     pub ntes: NtesClient,
     pub ntes_web: NtesWebClient,
     pub irctc: IrctcClient,
+    pub paytm: PaytmClient,
     pub datasets: Arc<Datasets>,
     pub started_at: Instant,
 }
@@ -33,6 +35,7 @@ impl AppState {
         let ntes = NtesClient::new(&http, &config.ntes_base);
         let ntes_web = NtesWebClient::new(&http, &config.ntes_base);
         let irctc = IrctcClient::new(&http, &config.irctc_base);
+        let paytm = PaytmClient::new(&http, &config.paytm_base);
         let datasets = Arc::new(Datasets::load(&config.data_dir)?);
         let metrics = Arc::new(Metrics::new());
         Ok(Self {
@@ -44,6 +47,7 @@ impl AppState {
             ntes,
             ntes_web,
             irctc,
+            paytm,
             datasets,
             started_at: Instant::now(),
         })

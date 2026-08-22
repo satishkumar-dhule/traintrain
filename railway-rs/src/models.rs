@@ -444,6 +444,31 @@ pub struct AvailabilityTrain {
     pub train_type: String,
     /// 7 booleans: [Mon, Tue, Wed, Thu, Fri, Sat, Sun]
     pub runs_on: Vec<bool>,
+    /// Per-class booking status (Paytm source only; empty for IRCTC).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub availability: Vec<AvailabilityClass>,
+}
+
+/// Class-wise availability for one train on the journey date
+/// (`GNWL82/WL59`, `AVAILABLE 0022`, ... plus fare and Paytm's PNR
+/// prediction percentage when the source provides them).
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AvailabilityClass {
+    /// Class code, e.g. `SL`, `3A`.
+    pub class: String,
+    #[serde(default)]
+    pub class_name: String,
+    /// Live booking status as reported by the source.
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub available: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fare: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quota: Option<String>,
+    /// Paytm PNR-prediction confirmation chance (0-100), when present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prediction: Option<i64>,
 }
 
 /// `GET /rail-api/irctc/chart`

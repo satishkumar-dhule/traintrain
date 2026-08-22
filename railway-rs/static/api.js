@@ -95,8 +95,8 @@ window.Api = (() => {
     journeyStations: (train) => get(`/rail-api/ntes/journey-stations?train=${encodeURIComponent(train)}`),
     journeyBasis: (train, station) => get(`/rail-api/ntes/journey-basis?train=${encodeURIComponent(train)}&station=${encodeURIComponent(station)}`),
     trainOnMap: (train, station) => get(`/rail-api/ntes/train-on-map?train=${encodeURIComponent(train)}` + (station ? `&station=${encodeURIComponent(station)}` : '')),
-    availability: (src, dst, date) =>
-      get(`/rail-api/irctc/availability?src=${encodeURIComponent(src)}&dst=${encodeURIComponent(dst)}` + (date ? `&date=${encodeURIComponent(date)}` : '')),
+    availability: (src, dst, date, source) =>
+      get(`/rail-api/availability?src=${encodeURIComponent(src)}&dst=${encodeURIComponent(dst)}` + (date ? `&date=${encodeURIComponent(date)}` : '') + (source && source !== 'auto' ? `&source=${encodeURIComponent(source)}` : '')),
     chart: (train, date, station) =>
       get(`/rail-api/irctc/chart?train=${encodeURIComponent(train)}` + (date ? `&date=${encodeURIComponent(date)}` : '') + (station ? `&station=${encodeURIComponent(station)}` : '')),
     exceptional: (train, type) =>

@@ -72,6 +72,7 @@ or produce a Docker image following your existing image build process.
 | `RAILWAY_SOURCE_RAILYATRI_BASE`   | `https://www.railyatri.in`                        | Base URL of the RailYatri upstream source            |
 | `RAILWAY_SOURCE_ETRAIN_BASE`      | `https://etrain.info`                             | Base URL of the etrain.info upstream source          |
 | `RAILWAY_SOURCE_NTES_BASE`        | `https://enquiry.indianrail.gov.in`               | Base URL of the NTES (Indian Railways enquiry) source |
+| `RAILWAY_SOURCE_PAYTM_BASE`       | `https://travel.paytm.com`                        | Base URL of the Paytm Travel upstream source         |
 
 All variables are optional. `RAILWAY_HTTP_TIMEOUT` and `RAILWAY_CACHE_TTL` are
 parsed as seconds. The app needs no API keys: it reads only public, free

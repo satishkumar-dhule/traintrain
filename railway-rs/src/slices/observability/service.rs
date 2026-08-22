@@ -69,6 +69,16 @@ impl Service {
                     .unwrap_or(0),
                 status: "live".into(),
             },
+            OriginStatus {
+                name: "Paytm".into(),
+                latency: metrics
+                    .source_latency
+                    .iter()
+                    .find(|s| s.source == "paytm")
+                    .map(|s| s.avg_latency_ms as u64)
+                    .unwrap_or(0),
+                status: "live".into(),
+            },
         ];
 
         let top_paths = metrics

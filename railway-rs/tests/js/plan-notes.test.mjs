@@ -56,6 +56,16 @@ class FakeElement {
     }
   }
   appendChild(n) { this.append(n); return n; }
+  insertBefore(node, ref) {
+    if (ref && this.children.includes(ref)) {
+      if (node._parent) node.remove();
+      node._parent = this;
+      this.children.splice(this.children.indexOf(ref), 0, node);
+    } else {
+      this.append(node);
+    }
+    return node;
+  }
   prepend(...nodes) { this.children = [...(nodes.flat().map((n) => typeof n === 'string' ? document.createTextNode(n) : n)), ...this.children]; }
   replaceChildren(...nodes) { this.children = []; this.append(...nodes); }
   get textContent() {
@@ -252,7 +262,7 @@ const PLAN_STUB = {
 test('boot renders Home into tab-root', async () => {
   document.dispatch('DOMContentLoaded', {});
   await tick();
-  assert.ok(root.textContent.includes('RailCompanion'), `home text was: ${root.textContent.slice(0, 120)}`);
+  assert.ok(root.textContent.includes('Every train, live'), `home text was: ${root.textContent.slice(0, 120)}`);
 });
 
 test('weekdayName maps runs_on indexes 0..6 to Monday..Sunday', () => {
@@ -263,7 +273,7 @@ test('weekdayName maps runs_on indexes 0..6 to Monday..Sunday', () => {
   }
 });
 
-test('trains note names the weekday instead of "Today" when flex is off', async () => {
+test('day filter shows a compact "N of M · <weekday>" counter badge, no notice paragraphs', async () => {
   calls.length = 0;
   okResponses['/rail-api/ntes/trains-between?src=NDLS&dst=BSB'] = PLAN_STUB;
   location.hash = `#/plan/NDLS/BSB/${FIXED_DATE}`;
@@ -273,15 +283,22 @@ test('trains note names the weekday instead of "Today" when flex is off', async 
   assert.ok(calls.some((p) => p.includes('/rail-api/ntes/trains-between') && p.includes('NDLS')),
     `trains-between should be fetched: ${calls.join(' | ')}`);
 
-  const notes = root.querySelectorAll('.notice')
-    .map((n) => n.textContent)
-    .filter((t) => t.includes('trains run on'));
-  assert.ok(notes.length === 1, `exactly one note expected, got: ${JSON.stringify(notes)}`);
+  // The old explanatory notice paragraph is gone — density rule: no
+  // non-required text in results.
+  const notes = root.querySelectorAll('.notice').map((n) => n.textContent);
+  assert.ok(notes.length === 0, `no .notice expected, got: ${JSON.stringify(notes)}`);
 
-  const note = notes[0];
-  assert.ok(note.includes(`run on ${FIXED_WEEKDAY}`), `note should name ${FIXED_WEEKDAY}: ${note}`);
-  assert.ok(!note.includes('Today'), `note must not say "Today": ${note}`);
-  assert.ok(note.includes('Tick "Flexible with date" to show all.'), `note tail missing: ${note}`);
+  // Functional feedback survives as one compact slate badge:
+  // "1 of 2 · Thursday" (12302 runs on no days).
+  const badges = root.querySelectorAll('.badge')
+    .map((b) => b.textContent)
+    .filter((t) => t.includes(' of '));
+  assert.ok(badges.length === 1, `exactly one counter badge expected, got: ${JSON.stringify(badges)}`);
+
+  const badge = badges[0];
+  assert.ok(badge.startsWith('1 of 2'), `counter should read "1 of 2": ${badge}`);
+  assert.ok(badge.includes(` · ${FIXED_WEEKDAY}`), `badge should name ${FIXED_WEEKDAY}: ${badge}`);
+  assert.ok(!badge.includes('Today'), `badge must not say "Today": ${badge}`);
 });
 
 test('amber "Not on <weekday>" badge uses the shared weekday name when flex is on', async () => {

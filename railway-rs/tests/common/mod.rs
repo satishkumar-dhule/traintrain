@@ -288,7 +288,7 @@ impl TestApp {
     /// Spawn with a caller-provided config (e.g. custom data dir).
     pub async fn spawn_with_config(mut config: Config) -> Self {
         let mut mocks = HashMap::new();
-        for name in ["railyatri", "etrain", "ntes", "ir", "irctc"] {
+        for name in ["railyatri", "etrain", "ntes", "ir", "irctc", "paytm"] {
             let m = MockServer::new();
             m.spawn().await;
             mocks.insert(name.to_string(), m);
@@ -299,6 +299,7 @@ impl TestApp {
         config.ntes_base = mocks["ntes"].base_url();
         config.ir_base = mocks["ir"].base_url();
         config.irctc_base = mocks["irctc"].base_url();
+        config.paytm_base = mocks["paytm"].base_url();
 
         let state = AppState::from_config(config).expect("state builds");
         let app = web::router(state.clone(), state.config.static_dir.clone());

@@ -50,15 +50,10 @@ function buildHero(ctx) {
   const ui = ctx.ui;
   const hero = ui.el('div', { class: 'home-hero' });
   hero.append(
-    ui.el('div', { class: 'home-hero-eyebrow' },
-      ui.icon('pulse'),
-      ui.el('span', { text: 'RailCompanion · live Indian Railways' }),
-    ),
     ui.el('h1', { class: 'home-hero-title' },
       'Every train, ',
       ui.el('em', { text: 'live' }),
       '. Every station, now.'),
-    ui.el('p', { class: 'home-hero-sub', text: 'Spot trains in real time, check PNR status, plan journeys, and read coach charts — straight from the rails.' }),
     ui.el('div', { class: 'home-hero-console' }, buildConsole(ctx)),
   );
   return hero;
@@ -90,7 +85,6 @@ function renderQuickJumps(wrap, ctx) {
     },
       ui.icon(j.icon),
       ui.el('span', { class: 'chip-code', text: j.label }),
-      ui.el('span', { text: j.sub }),
     ));
   });
   ui.render(wrap, row);
@@ -171,8 +165,7 @@ function buildPnrTab(ctx) {
     ui.el('div', { class: 'row', style: 'gap:6px;align-items:flex-end;' },
       ui.el('div', { class: 'grow' }, input.wrap),
       btn),
-    err,
-    ui.el('p', { class: 'console-note', text: 'Checks live PNR status for an IRCTC e-ticket.' }));
+    err);
 }
 
 function buildChartTab(ctx) {
@@ -196,8 +189,7 @@ function buildChartTab(ctx) {
   return ui.el('div', {},
     ui.el('div', { class: 'console-form chart-form' }, train.wrap, date.wrap, btn),
     err,
-    results,
-    ui.el('p', { class: 'console-note', text: 'Live coach position & berth chart for a journey date.' }));
+    results);
 }
 
 /* ---------- Favorites / Recent / Status (bento tiles) ---------- */
@@ -230,7 +222,7 @@ function renderRecent(wrap, ctx) {
   const card = ui.card('Recent');
   const list = ctx.recent.list();
   if (!list.length) {
-    card.append(ui.notice('No recent lookups yet.'));
+    card.append(ui.el('p', { class: 'text-sm muted', text: 'No recent lookups yet.' }));
   } else {
     const rows = ui.el('div', { class: 'col', style: 'gap:3px;' });
     list.forEach((r) => {
@@ -247,10 +239,7 @@ function renderRecent(wrap, ctx) {
         ui.el('span', { class: 'recent-label' },
           icons[entityType] ? ui.icon(icons[entityType]) : null,
           ' ' + r.label),
-        ui.el('span', { class: 'col', style: 'gap:0;' },
-          ui.el('span', { class: 'text-xs muted', text: ts }),
-          ui.el('span', { class: 'text-xs mono muted', text: r.hash }),
-        ),
+        ui.el('span', { class: 'text-xs muted', text: ts }),
       ));
     });
     card.append(rows);

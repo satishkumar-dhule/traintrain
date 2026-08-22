@@ -15,6 +15,7 @@ use std::time::Duration;
 /// - `RAILWAY_SOURCE_NTES_BASE`      (default `https://enquiry.indianrail.gov.in`)
 /// - `RAILWAY_SOURCE_IR_BASE`        (default `https://www.indianrail.gov.in`)
 /// - `RAILWAY_SOURCE_IRCTC_BASE`     (default `https://www.irctc.co.in`)
+/// - `RAILWAY_SOURCE_PAYTM_BASE`     (default `https://travel.paytm.com`)
 ///
 /// Every source URL is prefixed by these base URLs so tests can point them at
 /// a local mock upstream. Real deployments keep the defaults.
@@ -31,6 +32,7 @@ pub struct Config {
     pub ntes_base: String,
     pub ir_base: String,
     pub irctc_base: String,
+    pub paytm_base: String,
 }
 
 impl Default for Config {
@@ -47,6 +49,7 @@ impl Default for Config {
             ntes_base: "https://enquiry.indianrail.gov.in".to_string(),
             ir_base: "https://www.indianrail.gov.in".to_string(),
             irctc_base: "https://www.irctc.co.in".to_string(),
+            paytm_base: "https://travel.paytm.com".to_string(),
         }
     }
 }
@@ -74,6 +77,7 @@ impl Config {
             ntes_base: std::env::var("RAILWAY_SOURCE_NTES_BASE").unwrap_or(d.ntes_base),
             ir_base: std::env::var("RAILWAY_SOURCE_IR_BASE").unwrap_or(d.ir_base),
             irctc_base: std::env::var("RAILWAY_SOURCE_IRCTC_BASE").unwrap_or(d.irctc_base),
+            paytm_base: std::env::var("RAILWAY_SOURCE_PAYTM_BASE").unwrap_or(d.paytm_base),
         }
     }
 

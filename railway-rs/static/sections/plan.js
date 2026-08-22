@@ -65,8 +65,7 @@ function planHash(src, dst, extras) {
   return Routes.href({ section: 'plan', params });
 }
 
-function renderHero(wrap, ui, ctx, pair, res, extras) {
-  const badges = [ui.badge('Data source: ' + (res && res.data_source ? res.data_source : 'unknown'), 'slate')];
+function renderHero(wrap, ui, ctx, pair, extras) {
   const hash = planHash(pair.src, pair.dst, extras);
   const actions = [
     ui.el('button', { class: 'btn', onclick: () => ctx.copyLink(hash) }, ui.icon('copy', 'btn-ic'), 'Copy link'),
@@ -75,8 +74,6 @@ function renderHero(wrap, ui, ctx, pair, res, extras) {
   ui.render(wrap, ui.entityHero({
     icon: 'plan',
     title: `${pair.src} → ${pair.dst}`,
-    subtitle: res && res.route_description ? res.route_description : '',
-    badges,
     actions,
   }));
 }
@@ -140,7 +137,7 @@ function viewTrains(container, ctx, params) {
   const fetchTrains = (pair, dateVal, flexOn, clsVal, berthOn) => {
     ui.fetchFlow(results, () => ctx.api.trainsBetween(pair.src, pair.dst), { button: form.btn, failText: 'Failed to load trains between stations' })
       .then((res) => {
-        renderHero(heroWrap, ui, ctx, pair, res, { date: dateVal, class: clsVal, flex: flexOn, berth: berthOn });
+        renderHero(heroWrap, ui, ctx, pair, { date: dateVal, class: clsVal, flex: flexOn, berth: berthOn });
         if (res) ui.render(results, ...renderTrains(res, ui, ctx, pair.src, pair.dst, dateVal, flexOn, clsVal, berthOn));
       });
   };
@@ -178,7 +175,7 @@ function viewTrains(container, ctx, params) {
   ui.render(container, heroWrap, form.form, results);
 
   if (p.src && p.dst) {
-    renderHero(heroWrap, ui, ctx, { src: p.src, dst: p.dst }, null, p);
+    renderHero(heroWrap, ui, ctx, { src: p.src, dst: p.dst }, p);
     submit();
   }
 }
@@ -192,22 +189,17 @@ function renderTrains(res, ui, ctx, src, dst, dateIso, flex, clsVal, berthOn) {
   const idx = dateIso ? weekdayIndex(dateIso) : -1;
   const runsOnDay = (t) => idx >= 0 && Array.isArray(t.runs_on) && t.runs_on[idx] === true;
   const running = flex ? trains : trains.filter(runsOnDay);
-  if (idx >= 0 && !flex && running.length !== trains.length) {
-    parts.push(ui.notice(
-      `${running.length} of ${trains.length} trains run on ${weekdayName(idx)}. Tick "Flexible with date" to show all.`));
-  }
-  if (clsVal && clsVal !== 'ALL') {
-    parts.push(ui.notice(`Class ${clsVal} selected — class-wise seats are listed in the Availability tab.`));
-  }
-  if (berthOn) {
-    parts.push(ui.notice('Berth availability is not part of this search — check the Availability tab for berth status.'));
-  }
   if (!running.length) {
     parts.push(ui.emptyState('train', 'No trains on this day',
       `None of the ${trains.length} direct trains between ${src} and ${dst} run on ${ui.friendlyDate(dateIso)}. Tick "Flexible with date" to show all.`));
     return parts;
   }
-  parts.push(ui.card('Direct trains',
+  const dayFiltered = idx >= 0 && !flex && running.length !== trains.length;
+  parts.push(ui.el('div', { class: 'card-sm' },
+    ui.el('div', { class: 'row align-center' },
+      ui.el('h2', { class: 'card-title', text: 'Direct trains' }),
+      dayFiltered ? ui.badge(`${running.length} of ${trains.length} · ${weekdayName(idx)}`, 'slate') : null,
+    ),
     ui.el('div', { class: 'col' },
       ...running.map((t) => trainCard(t, ui, ctx, src, dst, idx >= 0 && !runsOnDay(t) ? weekdayName(idx) : null)))));
   return parts;
@@ -243,6 +235,12 @@ function trainCard(t, ui, ctx, src, dst, notRunningDay) {
 
 /* ---------- availability ---------- */
 
+const AVL_SOURCES = [
+  ['auto', 'Source: Auto (Paytm → IRCTC)'],
+  ['paytm', 'Source: Paytm'],
+  ['irctc', 'Source: IRCTC'],
+];
+
 function viewAvailability(container, ctx, params) {
   const ui = ctx.ui;
   const p = params || {};
@@ -250,8 +248,8 @@ function viewAvailability(container, ctx, params) {
   const results = ui.el('div', { class: 'mt-8' });
   const heroWrap = ui.el('div');
 
-  const fetchAvail = (pair, dateVal) => {
-    ui.fetchFlow(results, () => ctx.api.availability(pair.src, pair.dst, dateVal), { button: form.btn, failText: 'Failed to load availability' })
+  const fetchAvail = (pair, dateVal, srcVal) => {
+    ui.fetchFlow(results, () => ctx.api.availability(pair.src, pair.dst, dateVal, srcVal), { button: form.btn, failText: 'Failed to load availability' })
       .then((res) => {
         renderHero(heroWrap, ui, ctx, pair, res, { date: dateVal });
         if (res) ui.render(results, ...renderAvailability(res, ui, ctx));
@@ -262,11 +260,12 @@ function viewAvailability(container, ctx, params) {
     const pair = stationPairValid(ui, form.rb.from, form.rb.to, results);
     if (!pair) return;
     const dateVal = form.date.getDate();
+    const srcVal = sourceSel.get();
     const target = Routes.href({
       section: 'plan', view: 'availability',
-      params: { src: pair.src, dst: pair.dst, date: dateVal },
+      params: { src: pair.src, dst: pair.dst, date: dateVal, source: srcVal !== 'auto' ? srcVal : '' },
     });
-    if (location.hash === target) fetchAvail(pair, dateVal);
+    if (location.hash === target) fetchAvail(pair, dateVal, srcVal);
     else ctx.navigate(target);
   };
 
@@ -278,6 +277,11 @@ function viewAvailability(container, ctx, params) {
     withClass: false,
     withChecks: false,
   });
+  const sourceSel = ui.flSelect({
+    label: 'Source', icon: 'ticket', cls: 'console-class',
+    options: AVL_SOURCES, value: p.source || 'auto',
+  });
+  form.form.insertBefore(sourceSel.wrap, form.btn);
 
   ui.render(container, heroWrap, form.form, results);
 
@@ -288,19 +292,17 @@ function viewAvailability(container, ctx, params) {
 }
 
 function renderAvailability(res, ui, ctx) {
-  const route = ui.card('Route',
-    ui.el('div', { class: 'row align-center mt-8' },
+  const trains = res.trains || [];
+  return [ui.el('div', { class: 'card-sm' },
+    ui.el('div', { class: 'row align-center' },
+      ui.el('h2', { class: 'card-title', text: 'Trains' }),
       ui.badge(res.src || '', 'blue'),
       ui.el('span', { class: 'bold', text: '→' }),
       ui.badge(res.dst || '', 'blue'),
-      ui.badge((res.data_source || 'unknown') + ' · ' + (res.date || ''), 'slate'),
+      ui.badge(ctx.ui.friendlyDate(res.date), 'slate'),
     ),
-  );
-
-  const trains = res.trains || [];
-  const list = ui.card('Trains',
     Array.isArray(trains) && trains.length
-      ? ui.collapsibleTable(['No.', 'Train', 'Departure', 'Arrival', 'Duration', 'Classes'],
+      ? ui.collapsibleTable(['No.', 'Train', 'Departure', 'Arrival', 'Duration', 'Classes', 'Availability'],
           trains.map((t) => [
             ui.entityLink('train', t.number || '', t.number || '', ctx.navigate),
             t.name || '',
@@ -308,11 +310,28 @@ function renderAvailability(res, ui, ctx) {
             ui.fmtTime(t.arrival_time),
             t.duration || '',
             classChips(t.classes, ui),
+            avlChips(t, ui),
           ]))
       : ui.emptyState('ticket', 'No availability', 'No availability data returned for this route and date.'),
-  );
-  if (res.notice) list.append(ui.el('p', { class: 'notice' }, res.notice));
-  return [route, list];
+  )];
+}
+
+function avlChips(t, ui) {
+  const list = Array.isArray(t.availability) ? t.availability : [];
+  if (!list.length) return ui.el('span', { class: 'text-sm muted', text: '—' });
+  return ui.el('span', { class: 'col', style: 'gap:4px;' },
+    ...list.map((a) => {
+      const fare = a.fare != null ? ` ₹${a.fare}` : '';
+      return ui.badge(`${a.class} ${a.status || ''}${fare}`.trim(), avlKind(a));
+    }));
+}
+
+function avlKind(a) {
+  if (a.available === true) return 'green';
+  const s = String(a.status || '').toUpperCase();
+  if (s.indexOf('AVAILABLE') !== -1 && s.indexOf('NOTAVAILABLE') === -1) return 'green';
+  if (s.indexOf('RAC') !== -1 || s.indexOf('WL') !== -1) return 'amber';
+  return 'slate';
 }
 
 function classChips(classes, ui) {

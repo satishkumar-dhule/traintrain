@@ -54,6 +54,16 @@ class FakeElement {
     }
   }
   appendChild(n) { this.append(n); return n; }
+  insertBefore(node, ref) {
+    if (ref && this.children.includes(ref)) {
+      if (node._parent) node.remove();
+      node._parent = this;
+      this.children.splice(this.children.indexOf(ref), 0, node);
+    } else {
+      this.append(node);
+    }
+    return node;
+  }
   prepend(...nodes) { this.children = [...(nodes.flat().map((n) => typeof n === 'string' ? document.createTextNode(n) : n)), ...this.children]; }
   replaceChildren(...nodes) { this.children = []; this.append(...nodes); }
   get textContent() {
@@ -244,7 +254,7 @@ const tick = () => new Promise((r) => setTimeout(r, 15));
 test('boot renders Home into tab-root', async () => {
   document.dispatch('DOMContentLoaded', {});
   await tick();
-  assert.ok(root.textContent.includes('RailCompanion'), `home text was: ${root.textContent.slice(0, 120)}`);
+  assert.ok(root.textContent.includes('Every train, live'), `home text was: ${root.textContent.slice(0, 120)}`);
   assert.ok(root.textContent.includes('Favorites'), 'home should render the Favorites card');
 });
 
@@ -276,7 +286,7 @@ test('deep link #/plan/NDLS/BSB/availability auto-submits through availability',
   location.hash = '#/plan/NDLS/BSB/availability';
   await tick();
   assert.ok(root.textContent.includes('NDLS'), `title missing: ${root.textContent.slice(0, 120)}`);
-  assert.ok(calls.some((p) => p.includes('/rail-api/irctc/availability') && p.includes('src=NDLS')));
+  assert.ok(calls.some((p) => p.includes('/rail-api/availability') && p.includes('src=NDLS')));
 });
 
 test('legacy #/pnr/2498761234 auto-submits through pnr', async () => {
@@ -298,7 +308,6 @@ test('recent lookups are recorded on entity deep links', async () => {
   location.hash = '#/';
   await tick();
   assert.ok(root.textContent.includes('Train 12002'), 'recent list should show the deep-linked train');
-  assert.ok(root.textContent.includes('#/train/12002'));
 });
 
 test('favorites toggle persists and appears on Home', async () => {

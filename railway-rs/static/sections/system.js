@@ -41,6 +41,7 @@ let obsCharts = {};
 let obsGaugeMax = {};
 let obsLogFilter = 'all';
 let obsUiRef = null;
+let obsLastLogs = [];
 
 function obsStop() {
   if (obsTimer) { clearInterval(obsTimer); obsTimer = null; }
@@ -116,10 +117,6 @@ function obsFmtBytes(v) {
   if (n >= 1048576) return `${(n / 1048576).toFixed(1)} MB`;
   if (n >= 1024) return `${(n / 1024).toFixed(1)} KB`;
   return `${n} B`;
-}
-
-function obsTimeNow() {
-  return new Date().toTimeString().slice(0, 8);
 }
 
 function obsEsc(v) {
@@ -211,14 +208,12 @@ function obsBuildKpis(ui) {
   obsSpecs().forEach((spec) => {
     obsGaugeMax[spec.id] = spec.max;
     const canvas = ui.el('canvas', { class: 'obs-gauge-canvas', id: `obs-gauge-${spec.id}`, width: 180, height: 90 });
-    const card = ui.el('div', { class: 'obs-kpi-card' },
+    grid.append(ui.el('div', { class: 'obs-kpi-card' },
       ui.el('p', { class: 'obs-kpi-label', text: spec.label }),
       canvas,
-      ui.el('p', { class: 'obs-kpi-sub', id: `obs-kpi-sub-${spec.id}`, text: '—' }),
-    );
-    grid.append(card);
+    ));
   });
-  return ui.card('Live Gauges', grid);
+  return ui.card('Live metrics', grid, obsBuildStats(ui));
 }
 
 function obsInitCharts() {
@@ -285,15 +280,6 @@ function obsUpdateKpis(m) {
   };
   obsSpecs().forEach((spec) => {
     const raw = values[spec.id];
-    const sub = document.getElementById(`obs-kpi-sub-${spec.id}`);
-    if (sub) {
-      if (spec.id === 'rps') sub.textContent = `of ${obsFmtNum(obsGaugeMax.rps)} · lifetime avg`;
-      else if (spec.id === 'latency') sub.textContent = `${obsFmtNum(raw)}${spec.suffix || ''} EMA`;
-      else if (spec.id === 'cpu') sub.textContent = `${(raw * 100).toFixed(1)}% of one core`;
-      else if (spec.id === 'mem') sub.textContent = obsFmtBytes(Number(m.mem_usage) || 0) + ' RSS';
-      else if (spec.id === 'conn') sub.textContent = 'in flight';
-      else if (spec.id === 'cache') sub.textContent = `${obsFmtNum(m.cache && m.cache.hits || 0)} hits · ${obsFmtNum(m.cache && m.cache.misses || 0)} misses`;
-    }
     if (spec.id === 'rps' && raw > obsGaugeMax.rps) obsGaugeMax.rps = Math.ceil(raw * 1.5);
     if (spec.id === 'latency' && raw > obsGaugeMax.latency) obsGaugeMax.latency = Math.ceil(raw * 1.5);
     if (spec.id === 'mem' && raw > obsGaugeMax.mem) obsGaugeMax.mem = Math.ceil(raw * 1.5);
@@ -386,7 +372,7 @@ function obsUpdateCharts(series) {
 /* Stats build + update */
 
 function obsBuildStats(ui) {
-  const grid = ui.el('div', { class: 'obs-stats-grid' });
+  const grid = ui.el('div', { class: 'obs-stats-grid mt-8' });
   const items = [
     ['Uptime', 'obs-stat-uptime'],
     ['Total requests', 'obs-stat-reqs'],
@@ -399,7 +385,7 @@ function obsBuildStats(ui) {
       ui.el('p', { class: 'obs-stat-value', id, text: '—' }),
     ));
   });
-  return ui.card('Stats', grid);
+  return grid;
 }
 
 function obsUpdateStats(m) {
@@ -479,7 +465,7 @@ function obsUpdateTables(m) {
     return [obsEsc(path), obsFmtNum(count), share];
   });
   const pathsTbl = document.getElementById('obs-paths-table');
-  if (pathsTbl) pathsTbl.replaceChildren(ui.table(['Path', 'Requests', 'Share'], pathRows.length ? pathRows : [['—', '—', '—']]));
+  if (pathsTbl) pathsTbl.replaceChildren(ui.collapsibleTable(['Path', 'Requests', 'Share'], pathRows.length ? pathRows : [['—', '—', '—']], 10));
 
   const origins = obsArr(m.origins);
   const sourceRows = origins.map((o) => [
@@ -504,21 +490,19 @@ function obsUpdateTables(m) {
 /* Logs build + update */
 
 function obsBuildLogs(ui) {
-  const panel = ui.card('Logs',
-    ui.el('div', { class: 'row gap-8 obs-log-controls' },
-      ['all', 'warn', 'error'].map((lv) =>
-        ui.el('button', {
-          class: `btn secondary obs-log-filter${lv === 'all' ? ' active' : ''}`,
-          'data-level': lv,
-          onclick: (e) => {
-            obsLogFilter = lv;
-            panel.querySelectorAll('.obs-log-filter').forEach((b) => b.classList.remove('active'));
-            e.currentTarget.classList.add('active');
-          },
-          text: lv === 'all' ? 'All' : lv === 'warn' ? 'Warn+' : 'Errors',
-        })),
-    ),
-    ui.el('div', { class: 'obs-log-panel', id: 'obs-log-list' }),
+  const panel = ui.card('Logs');
+  const controls = ui.el('div', { class: 'row gap-8 obs-log-controls' });
+  const renderFilter = () => {
+    controls.replaceChildren(ui.seg(
+      [['all', 'All'], ['warn', 'Warn+'], ['error', 'Errors']],
+      obsLogFilter,
+      (v) => { obsLogFilter = v; renderFilter(); obsUpdateLogs(obsLastLogs); },
+    ));
+  };
+  renderFilter();
+  panel.append(
+    controls,
+    ui.el('div', { class: 'obs-log-panel', id: 'obs-log-list', style: 'max-height:260px;overflow:auto;' }),
   );
   return panel;
 }
@@ -534,10 +518,10 @@ function obsUpdateLogs(logs) {
   });
   list.replaceChildren();
   if (!rows.length) {
-    list.append(obsUiRef.el('p', { class: 'text-xs muted', text: obsLogFilter === 'all' ? 'No log records yet — traffic to the API will appear here.' : 'No matching log records.' }));
+    list.append(obsUiRef.el('p', { class: 'text-xs muted', text: obsLogFilter === 'all' ? 'No log records.' : 'No matching records.' }));
     return;
   }
-  rows.slice(0, 120).forEach((l) => {
+  rows.slice(0, 60).forEach((l) => {
     const level = String(l.level || '').toLowerCase();
     const kind = level === 'error' ? 'red' : level === 'warn' ? 'amber' : 'slate';
     const ts = new Date(Number(l.ts)).toTimeString().slice(0, 8);
@@ -562,61 +546,67 @@ function viewObservability(container, ctx) {
   const ui = ctx.ui;
   obsUiRef = ui;
 
-  const header = ui.card('Observability',
-    ui.el('div', { class: 'row justify-between items-center' },
-      ui.el('span', { class: 'text-xs muted', id: 'obs-refreshed' }),
-      ui.el('span', { class: 'badge badge-green', text: '● LIVE' }),
-    ),
-  );
-
-  ui.render(container, header);
+  const refresh = ui.refreshRow({
+    autoMs: OBS_REFRESH_MS,
+    onRefresh: () => load(),
+    onAuto: (on) => obsSetAuto(on),
+  });
+  const autoToggle = refresh.row.querySelector('.auto-toggle');
+  if (autoToggle) {
+    autoToggle.setAttribute('aria-pressed', 'true');
+    autoToggle.classList.add('on');
+  }
+  const topRow = ui.el('div', { class: 'row justify-between items-center' }, refresh.row, ui.liveDot());
+  ui.render(container, topRow);
 
   const body = ui.el('div', { class: 'obs-wrap' });
   container.append(body);
 
   body.append(obsBuildKpis(ui));
   body.append(obsBuildCharts(ui));
-  body.append(obsBuildStats(ui));
   body.append(obsBuildTables(ui));
   body.append(obsBuildLogs(ui));
 
   obsRegisterCenterText();
   obsEnsureChartLib().then((ok) => {
     if (!ok) {
-      const note = ui.el('p', { class: 'text-sm muted mt-8', text: 'Chart.js could not be loaded — tables and gauges below still reflect live data.' });
-      body.prepend(note);
+      body.prepend(ui.el('p', { class: 'text-xs muted mt-8', text: 'Charts unavailable — tables and gauges still show live values.' }));
       return;
     }
     obsInitCharts();
   });
 
-  function refresh() {
-    if (!container.contains(header)) { obsStop(); return; }
-    const refreshed = container.querySelector('#obs-refreshed');
-    if (refreshed) refreshed.textContent = `Last refreshed ${obsTimeNow()} · ${new Date().toLocaleDateString()}`;
+  function obsSetAuto(on) {
+    if (obsTimer) { clearInterval(obsTimer); obsTimer = null; }
+    if (on) obsTimer = setInterval(load, OBS_REFRESH_MS);
+  }
+
+  function load() {
     Promise.all([ctx.api.observability(), ctx.api.logs(OBS_LOG_LIMIT)])
       .then(([m, lr]) => {
-        if (!container.contains(header)) { obsStop(); return; }
+        if (!container.contains(topRow)) { obsStop(); return; }
         if (!m || m.ok === false) {
           obsRenderError(body, `Observability: ${(m && m.error) || 'request failed'}`);
           return;
         }
         const logs = (lr && lr.ok !== false && obsArr(lr.logs)) || obsArr(m.logs);
+        obsLastLogs = obsArr(logs);
         obsUpdateKpis(m);
         obsUpdateCharts(m.series || {});
         obsUpdateStats(m);
         obsUpdateTables(m);
-        obsUpdateLogs(logs);
+        obsUpdateLogs(obsLastLogs);
+        refresh.setUpdated(new Date().toISOString());
         body.classList.remove('obs-error');
       })
       .catch((err) => {
-        if (!container.contains(header)) { obsStop(); return; }
+        if (!container.contains(topRow)) { obsStop(); return; }
         obsRenderError(body, `Request failed: ${err && err.message ? err.message : String(err)}`);
       });
   }
 
-  refresh();
-  obsTimer = setInterval(refresh, OBS_REFRESH_MS);
+  load();
+  obsTimer = setInterval(load, OBS_REFRESH_MS);
 }
 
 /* ===================================================================
@@ -645,23 +635,17 @@ function viewSettings(container, ctx) {
 function renderSettings(s, ui) {
   const liveBadge = s.live_enabled ? ui.badge('Enabled', 'green') : ui.badge('Disabled', 'red');
 
-  const dataMode = ui.card('Data Mode',
-    settingsInfoRow(ui, 'Mode', ui.badge(s.mode || 'live', 'blue')),
-    settingsInfoRow(ui, 'Live', liveBadge),
-    settingsInfoRow(ui, 'Cache', `${s.cache_ttl_seconds}s`),
-    settingsInfoRow(ui, 'Primary', s.primary_source),
-  );
-
-  const liveSources = ui.card('Sources',
-    ui.table(['Source', 'Status'], (s.sources || []).map((src) => [
-      src.name,
-      `<span class="badge badge-${src.reachable ? 'green' : 'red'}">${src.reachable ? 'Up' : 'Down'}</span>`,
-    ])),
-  );
-
-  const notice = s.notice ? ui.card('Notice', ui.notice(s.notice)) : null;
-
-  return [dataMode, liveSources, notice].filter(Boolean);
+  return [
+    ui.card('System',
+      settingsInfoRow(ui, 'Mode', ui.badge(s.mode || 'live', 'blue')),
+      settingsInfoRow(ui, 'Live', liveBadge),
+      settingsInfoRow(ui, 'Cache', `${s.cache_ttl_seconds}s`),
+      ui.el('div', { class: 'mt-8' }, ui.table(['Source', 'Status'], (s.sources || []).map((src) => [
+        src.name,
+        `<span class="badge badge-${src.reachable ? 'green' : 'red'}">${src.reachable ? 'Up' : 'Down'}</span>`,
+      ]))),
+    ),
+  ];
 }
 
 function settingsInfoRow(ui, label, value) {
@@ -726,9 +710,8 @@ function debugBuildSummary(ui, root) {
     ui.el('textarea', {
       id: 'debug-text', class: 'input mono debug-text', readonly: true,
       spellcheck: 'false',
-      style: 'width:100%;min-height:200px;height:40vh;resize:vertical;font-size:11px;white-space:pre;overflow:auto;',
+      style: 'width:100%;min-height:160px;height:30vh;resize:vertical;font-size:11px;white-space:pre;overflow:auto;',
     }),
-    ui.el('div', { id: 'debug-actions', class: 'text-xs muted mt-8' }),
   );
   root.append(panel);
   debugUpdate(ui);
@@ -757,21 +740,18 @@ function debugRaw() {
   return (window.RailLog && RailLog.raw()) || '(no log entries yet)';
 }
 
-function debugFlash(msg) {
-  const el = document.getElementById('debug-actions');
-  if (!el) return;
-  el.textContent = `${new Date().toISOString()} ${msg}`;
+function debugToast(msg, kind) {
+  if (window.UI && window.UI.toast) window.UI.toast(msg, kind || 'info');
 }
 
 function debugRefresh() {
   debugUpdate(window.UI);
-  debugFlash('refreshed');
 }
 
 function debugCopyLog() {
   const text = debugRaw();
-  const done = () => debugFlash('copied to clipboard');
-  const fail = () => debugFlash('clipboard blocked — use Download instead');
+  const done = () => debugToast('Log copied', 'success');
+  const fail = () => debugToast('Clipboard blocked — use Download instead', 'error');
   if (navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard.writeText(text).then(done, fail);
     return;
@@ -794,23 +774,30 @@ function debugDownloadLog() {
   document.body.appendChild(a);
   a.click();
   setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 200);
-  debugFlash('download started');
+  debugToast('Download started', 'success');
 }
 
 function debugClearLog(ui) {
-  if (!window.confirm('Clear the collected debug log for this browser?')) return;
-  RailLog.clear();
-  debugUpdate(ui);
-  debugFlash('log cleared');
+  ui.dialog({
+    title: 'Clear debug log?',
+    actions: [
+      { label: 'Cancel', value: false, primary: false },
+      { label: 'Clear', value: true },
+    ],
+  }).then((ok) => {
+    if (!ok) return;
+    RailLog.clear();
+    debugUpdate(ui);
+    debugToast('Log cleared', 'success');
+  });
 }
 
 async function debugSendLog(ui) {
   const text = debugRaw();
   if (!text || text === '(no log entries yet)') {
-    debugFlash('nothing to send');
+    debugToast('Nothing to send', 'info');
     return;
   }
-  debugFlash('sending…');
   try {
     const res = await window.Api.request('/rail-api/debug', {
       method: 'POST',
@@ -818,14 +805,14 @@ async function debugSendLog(ui) {
       body: JSON.stringify({ report: text }),
     });
     if (res && res.ok !== false) {
-      debugFlash(`sent to server log (${res.lines || 0} lines) — tell the developer to check /tmp/railway-rs.log`);
+      debugToast(`Sent (${res.lines || 0} lines)`, 'success');
       RailLog.lifecycle('debug report sent to server', { lines: res.lines || 0 });
     } else {
-      debugFlash(`send failed: ${res && res.error ? res.error : 'unknown error'}`);
+      debugToast(`Send failed: ${res && res.error ? res.error : 'unknown error'}`, 'error');
     }
   } catch (err) {
     const m = err && err.message ? err.message : String(err);
-    debugFlash(`send failed: ${m}`);
+    debugToast(`Send failed: ${m}`, 'error');
   }
 }
 

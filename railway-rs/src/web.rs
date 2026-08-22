@@ -14,7 +14,7 @@ use axum::routing::get;
 use axum::{Json, Router};
 use serde_json::json;
 use tower_http::catch_panic::CatchPanicLayer;
-use tower_http::services::{ServeDir, ServeFile};
+use tower_http::services::ServeDir;
 use tower_http::timeout::TimeoutLayer;
 use tower_http::trace::TraceLayer;
 
@@ -55,12 +55,29 @@ pub fn router(state: AppState, static_dir: PathBuf) -> Router {
         .layer(TimeoutLayer::new(Duration::from_secs(30)))
         .layer(middleware::from_fn(security_headers_mw))
         .layer(middleware::from_fn(request_log_mw))
-        .fallback_service(
+        .fallback_service({
+            let spa_index_path = index.clone();
             tower::ServiceBuilder::new()
                 .layer(middleware::from_fn(security_headers_mw))
                 .layer(middleware::from_fn(static_log_mw))
-                .service(ServeDir::new(static_dir).not_found_service(ServeFile::new(index))),
-        )
+                .service(
+                    ServeDir::new(static_dir).not_found_service(get(move || {
+                        let spa_index_path = spa_index_path.clone();
+                        async move {
+                            match tokio::fs::read(spa_index_path).await {
+                                Ok(bytes) => (
+                                    [(axum::http::header::CONTENT_TYPE, "text/html")],
+                                    bytes,
+                                ),
+                                Err(_) => (
+                                    [(axum::http::header::CONTENT_TYPE, "text/html")],
+                                    b"<!doctype html><title>RailCompanion</title><p>UI bundle missing".to_vec(),
+                                ),
+                            }
+                        }
+                    })),
+                )
+        })
         .with_state(state)
 }
 

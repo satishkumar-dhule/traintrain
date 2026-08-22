@@ -1,22 +1,28 @@
-//! Train-availability slice (no-login IRCTC).
+//! Train-availability slice.
 //!
-//! Endpoint: `GET /rail-api/irctc/availability?src=<CODE>&dst=<CODE>&date=<DATE>`
+//! Endpoints (aliases):
+//! - `GET /rail-api/availability?src=<CODE>&dst=<CODE>&date=<DATE>&source=<SRC>`
+//! - `GET /rail-api/irctc/availability?...` (legacy path, same handler)
 //!
-//! Live source: IRCTC's no-login mobile API `altAvlEnq/TC`
-//! (`POST /eticketing/protected/mapps1/altAvlEnq/TC`, see
-//! `crate::core::irctc::IrctcClient::availability`). It lists direct trains
-//! between the two stations on the journey date, with class availability,
-//! running days and times. `date` is optional and defaults to today (IST);
-//! accepted formats are `YYYY-MM-DD`, `DD-MM-YYYY`, `DD/MM/YYYY` and
-//! `YYYYMMDD`.
+//! Sources:
+//! - **Paytm** (`travel.paytm.com/api/trains/v5/search`, see
+//!   `crate::core::paytm::PaytmClient::search`) lists direct trains between
+//!   the two stations on the journey date with per-class booking status,
+//!   fares and PNR prediction. No login, no IP geofencing.
+//! - **IRCTC** (no-login mobile API `altAvlEnq/TC`, see
+//!   `crate::core::irctc::IrctcClient::availability`) lists the same trains
+//!   with class availability and running days, but is Akamai-protected and
+//!   IP-geofenced to India.
+//!
+//! `source` accepts `auto` (default: Paytm first, IRCTC fallback), `paytm`
+//! or `irctc`. `date` is optional and defaults to today (IST); accepted
+//! formats are `YYYY-MM-DD`, `DD-MM-YYYY`, `DD/MM/YYYY` and `YYYYMMDD`.
+//! The response's `data_source` always names the source that actually
+//! answered.
 //!
 //! Validation mirrors the trains-between slice: `src`/`dst` are required
 //! 4-char station codes known to the local dataset (or embedded as a token in
 //! an official train name), and `src == dst` is rejected.
-//!
-//! Note: IRCTC is Akamai-protected and IP-geofenced to India; from a
-//! datacenter IP the upstream answers HTTP 403 and the slice reports an
-//! honest `AppError::SourceUnavailable`.
 
 use axum::extract::{Query, State};
 use axum::routing::get;
@@ -35,10 +41,22 @@ struct AvlQuery {
     src: Option<String>,
     dst: Option<String>,
     date: Option<String>,
+    source: Option<String>,
+}
+
+/// Source preference parsed from the `source` query parameter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SourcePref {
+    /// Paytm first, IRCTC fallback.
+    Auto,
+    PaytmOnly,
+    IrctcOnly,
 }
 
 pub fn router() -> Router<AppState> {
-    Router::new().route("/rail-api/irctc/availability", get(availability_handler))
+    Router::new()
+        .route("/rail-api/availability", get(availability_handler))
+        .route("/rail-api/irctc/availability", get(availability_handler))
 }
 
 async fn availability_handler(
@@ -65,8 +83,22 @@ async fn availability_handler(
         _ => today_ist(),
     };
 
+    let source = match q.source.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        None => SourcePref::Auto,
+        Some(raw) => match raw.to_ascii_lowercase().as_str() {
+            "auto" => SourcePref::Auto,
+            "paytm" => SourcePref::PaytmOnly,
+            "irctc" => SourcePref::IrctcOnly,
+            other => {
+                return Err(AppError::bad_request(format!(
+                    "Invalid source: {other}. Use auto, paytm or irctc."
+                )))
+            }
+        },
+    };
+
     Ok(Json(
-        service::Service::get_availability(&state, &src, &dst, &date).await?,
+        service::Service::get_availability(&state, &src, &dst, &date, source).await?,
     ))
 }
 
