@@ -72,7 +72,7 @@ pub struct PnrPassenger {
 }
 
 /// `GET /rail-api/schedule`
-#[derive(Debug, Serialize, Default)]
+#[derive(Debug, Serialize, Deserialize, Default)]
 pub struct ScheduleResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub train_number: Option<String>,
@@ -94,7 +94,7 @@ pub struct ScheduleResponse {
     pub data_source: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ScheduleStop {
     pub code: String,
     pub name: String,
@@ -109,7 +109,7 @@ pub struct ScheduleStop {
 }
 
 /// `GET /rail-api/live-status`
-#[derive(Debug, Serialize, Default)]
+#[derive(Debug, Serialize, Deserialize, Default)]
 pub struct LiveStatusResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub train_number: Option<String>,
@@ -170,6 +170,10 @@ pub struct LiveStop {
 pub struct LiveStationResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub station: Option<String>,
+    /// Optional "Going to station" filter echoed back when the request carried
+    /// one (absent from the JSON otherwise).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub destination: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hours: Option<u8>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -343,7 +347,7 @@ pub struct JourneyStationInfo {
 ///
 /// The same shape as `LiveStatusResponse` (reused verbatim via
 /// `#[serde(flatten)]`) plus the `journey_station` the run was queried from.
-#[derive(Debug, Serialize, Default)]
+#[derive(Debug, Serialize, Deserialize, Default)]
 pub struct JourneyBasisResponse {
     #[serde(flatten)]
     pub status: LiveStatusResponse,

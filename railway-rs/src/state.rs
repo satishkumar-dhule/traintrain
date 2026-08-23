@@ -1,8 +1,8 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use crate::config::Config;
-use crate::core::ai::AiClient;
+use crate::config::{AiBackendPolicy, Config};
+use crate::core::ai::{AiBackend, AiClient};
 use crate::core::cache::Cache;
 use crate::core::corover::CoroverClient;
 use crate::core::http::HttpClient;
@@ -26,7 +26,12 @@ pub struct AppState {
     pub ntes_web: NtesWebClient,
     pub irctc: IrctcClient,
     pub paytm: PaytmClient,
-    pub ai: AiClient,
+    /// Primary AI backend (resolved per `RAILWAY_AI_BACKEND`: zen gateway or
+    /// in-process GGUF engine).
+    pub ai: Arc<dyn AiBackend>,
+    /// Once-per-request fallback used by the `local-first` policy (`None`
+    /// for `zen` and `local-only`).
+    pub ai_fallback: Option<Arc<dyn AiBackend>>,
     pub datasets: Arc<Datasets>,
     /// BM25 retrieval index over stations + trains (AI RAG layer).
     pub retrieval: Arc<RetrievalIndex>,
@@ -46,12 +51,41 @@ impl AppState {
         let ntes_web = NtesWebClient::new(&http, &config.ntes_base);
         let irctc = IrctcClient::new(&http, &config.irctc_base);
         let paytm = PaytmClient::new(&http, &config.paytm_base);
-        let ai = AiClient::new(
+        let zen = Arc::new(AiClient::new(
             &config.ai_base,
             &config.ai_model,
             config.ai_api_key.clone(),
             config.ai_timeout,
-        )?;
+        )?);
+        // Backend selection per RAILWAY_AI_BACKEND. The local engine is
+        // wired once its GGUF model is present; until then every policy
+        // degrades honestly to Zen.
+        let (ai, ai_fallback): (Arc<dyn AiBackend>, Option<Arc<dyn AiBackend>>) =
+            match config.ai_backend {
+                AiBackendPolicy::Zen => (zen.clone(), None),
+                AiBackendPolicy::LocalOnly | AiBackendPolicy::LocalFirst => {
+                    match crate::core::ai::local::LocalBackend::from_config(&config) {
+                        Ok(local) => {
+                            let local = Arc::new(local);
+                            if config.ai_backend == AiBackendPolicy::LocalFirst {
+                                (local, Some(zen.clone()))
+                            } else {
+                                (local, None)
+                            }
+                        }
+                        Err(e) => {
+                            if config.ai_backend == AiBackendPolicy::LocalOnly {
+                                return Err(e);
+                            }
+                            tracing::warn!(
+                                error = %e.message(),
+                                "local ai backend unavailable; falling back to zen gateway"
+                            );
+                            (zen.clone(), None)
+                        }
+                    }
+                }
+            };
         let datasets = Arc::new(Datasets::load(&config.data_dir)?);
         let retrieval = Arc::new(RetrievalIndex::build(datasets.retrieval_entries()));
         let metrics = Arc::new(Metrics::new());
@@ -73,6 +107,7 @@ impl AppState {
             irctc,
             paytm,
             ai,
+            ai_fallback,
             datasets,
             retrieval,
             askdisha,
@@ -91,5 +126,30 @@ impl AppState {
 
     pub fn uptime_secs(&self) -> u64 {
         self.started_at.elapsed().as_secs()
+    }
+
+    /// Single-shot completion with the once-per-request fallback policy:
+    /// primary backend first; on failure, `ai_fallback` (local-first setups)
+    /// gets one attempt. Returns `(text, prompt_tokens, completion_tokens,
+    /// effective_backend_tag)`.
+    pub async fn ai_chat_complete(
+        &self,
+        messages: &[crate::core::ai::ChatMessage],
+    ) -> Result<(String, u64, u64, &'static str), crate::core::error::AppError> {
+        match self.ai.chat_complete(messages).await {
+            Ok((text, pt, ct)) => Ok((text, pt, ct, self.ai.tag())),
+            Err(e) => match &self.ai_fallback {
+                Some(fb) => {
+                    tracing::warn!(
+                        error = %e.message(),
+                        fallback = %fb.tag(),
+                        "primary ai backend failed; failing over"
+                    );
+                    let (text, pt, ct) = fb.chat_complete(messages).await?;
+                    Ok((text, pt, ct, fb.tag()))
+                }
+                None => Err(e),
+            },
+        }
     }
 }

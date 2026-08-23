@@ -270,6 +270,36 @@ impl AiClient {
     }
 }
 
+/// The Zen gateway as an [`AiBackend`]: the original HTTP implementation,
+/// exposed behind the backend-neutral trait so slices can swap in the local
+/// engine without knowing the wire format.
+#[async_trait::async_trait]
+impl super::backend::AiBackend for AiClient {
+    fn tag(&self) -> &'static str {
+        "zen"
+    }
+
+    fn model(&self) -> &str {
+        &self.model
+    }
+
+    async fn chat_stream_with_tools(
+        &self,
+        messages: &[ChatMessage],
+        tools: &[serde_json::Value],
+    ) -> Result<super::backend::AiEventStream, AppError> {
+        let stream = AiClient::chat_stream_with_tools(self, messages, tools).await?;
+        Ok(Box::pin(stream))
+    }
+
+    async fn chat_complete(
+        &self,
+        messages: &[ChatMessage],
+    ) -> Result<(String, u64, u64), AppError> {
+        AiClient::chat_complete(self, messages).await
+    }
+}
+
 /// Map a non-2xx response body to a human-readable reason, understanding both
 /// observed Zen error shapes.
 pub(crate) fn decode_error_body(text: &str) -> Option<String> {

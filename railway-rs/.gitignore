@@ -5,3 +5,7 @@
 *.swp
 *.swo
 *~
+
+# local ai model weights (downloaded, not committed)
+models/*.gguf
+models/tokenizer.json

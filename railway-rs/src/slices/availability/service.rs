@@ -51,6 +51,12 @@ impl Service {
         };
 
         if let Some(fallback) = fallback {
+            // A definitive "no direct trains" answer settles the question —
+            // the fallback would only repeat it. Return the clean message
+            // instead of merging outage details from both sources.
+            if matches!(primary_err, AppError::NotFound(_)) {
+                return Err(primary_err);
+            }
             tracing::warn!(
                 %src,
                 %dst,

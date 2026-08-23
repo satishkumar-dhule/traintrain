@@ -1,26 +1,32 @@
 //! Search slice.
 //!
-//! Endpoints (all offline, backed by the pre-warmed local datasets):
+//! Endpoints:
 //! - `GET /rail-api/search/trains?q=<query>`   -> JSON array of `TrainLite`
 //! - `GET /rail-api/search/stations?q=<query>` -> JSON array of `StationRow`
 //! - `GET /rail-api/search/suggest?q=<query>`  -> JSON array of `SuggestHit`
 //!   (combined stations + trains for one-round-trip IntelliSense autocomplete)
 //!
+//! Station search is a live chain: **CoRover first** (Ask DISHA
+//! `bot/searchStation` via `state.askdisha`, gated by `ASKDISHA_ENABLED`),
+//! then the pre-warmed local dataset when the module is disabled, upstream
+//! fails or answers empty. The winning rows are cached under one key
+//! (`search:stations:{q}`, 30 min) regardless of source. Trains and suggest
+//! stay offline-only: CoRover has no train-search endpoint and the combined
+//! ranking authority must not split-brain.
+//!
 //! Both station response types carry the hydrated AskDISHA optionals
-//! (`name_hi`/`name_gu`/`district`/... , F2 passthrough from the hydrated
-//! `StationRecord`); keys are omitted whenever the dataset has no value, so
-//! unhydrated rows keep the exact old shape on the wire.
+//! (`name_hi`/`name_gu`/`district`/... , F2 passthrough); keys are omitted
+//! whenever a source has no value, so unhydrated rows keep the exact old
+//! shape on the wire.
 //!
 //! Trains: real local `data/trains.json` (`state.datasets.trains`) via
-//! `Datasets::search_trains`; stations: real `data/stations.json` via
-//! `Datasets::search_stations` — the single unified tiered ranking authority
-//! (exact code > exact name > code prefix > name prefix) also used by
-//! `/rail-api/stations` and by the station half of `suggest`, so every query
-//! path agrees. Both lists are pre-warmed into lowercase indexes at startup
-//! (`Datasets::rank_stations` matches against them, so no station is
-//! re-lowercased per request). Multi-word queries like `q=MUMBAI RAJDHANI`
-//! match whole names and rank all-token hits first. Empty query or no matches
-//! -> empty array.
+//! `Datasets::search_trains`; the offline station fallback uses real
+//! `data/stations.json` via `Datasets::search_stations` — the single unified
+//! tiered ranking authority (exact code > exact name > code prefix > name
+//! prefix) also used by `/rail-api/stations` and by the station half of
+//! `suggest`, so every query path agrees on ordering. Multi-word queries like
+//! `q=MUMBAI RAJDHANI` match whole names and rank all-token hits first.
+//! Empty query or no matches anywhere -> empty array.
 //!
 //! Note: `GET /rail-api/trains?q=` is NOT part of this slice; train search
 //! lives here only.
@@ -37,7 +43,8 @@ pub mod service;
 
 /// `GET /rail-api/search/stations` row: the ranked station identity plus the
 /// hydrated AskDISHA optionals (F2). Absent values are omitted on the wire.
-#[derive(Debug, Serialize)]
+/// Also `Deserialize`: winning rows go through the cache as JSON.
+#[derive(Debug, Serialize, Deserialize)]
 pub struct StationRow {
     pub code: String,
     pub name: String,
@@ -69,6 +76,26 @@ impl From<crate::data::StationRecord> for StationRow {
             train_count: s.train_count,
             lat: s.lat,
             lng: s.lng,
+        }
+    }
+}
+
+/// CoRover `searchStation` rows land on the same wire shape as dataset rows;
+/// upstream `latitude`/`longitude` map onto the short `lat`/`lng` keys and
+/// the `utterances`/`state` fields (not part of this wire contract) are
+/// dropped.
+impl From<crate::core::corover::StationRow> for StationRow {
+    fn from(s: crate::core::corover::StationRow) -> Self {
+        Self {
+            code: s.code,
+            name: s.name,
+            name_hi: s.name_hi,
+            name_gu: s.name_gu,
+            district: s.district,
+            address: s.address,
+            train_count: s.train_count,
+            lat: s.latitude,
+            lng: s.longitude,
         }
     }
 }
@@ -124,21 +151,15 @@ async fn search_trains(
     ))
 }
 
-/// Real station search over the pre-warmed station dataset, capped at 10 hits.
-/// Ranking comes from the single unified authority `Datasets::search_stations`
-/// (exact code > exact name > code prefix, shortest first > name prefix,
-/// shortest name first, then code); other stations are excluded. Rows carry
-/// the hydrated AskDISHA optionals (F2).
+/// Station search over the live chain (CoRover first, pre-warmed dataset
+/// fallback), capped at 10 hits. Rows carry the hydrated AskDISHA optionals
+/// (F2) whichever source won.
 async fn search_stations(
     State(state): State<AppState>,
     Query(q): Query<SearchQuery>,
 ) -> Json<Vec<StationRow>> {
     let query = clamp_q(q.q.as_deref());
-    Json(service::Service::search_stations(
-        &state,
-        &query,
-        SEARCH_LIMIT,
-    ))
+    Json(service::Service::search_stations(&state, &query, SEARCH_LIMIT).await)
 }
 
 /// Combined station + train autocomplete, capped at 10 hits.
@@ -314,12 +335,19 @@ mod tests {
         assert!(state.datasets.suggest("   ", 10).is_empty());
     }
 
-    /// F2: `/rail-api/search/stations` rows carry the hydrated AskDISHA
-    /// optionals (fixture values for NDLS) and present keys are serialized.
+    /// F2: station rows carry the hydrated AskDISHA optionals (fixture values
+    /// for NDLS) and present keys are serialized. Exercised through the
+    /// dataset->wire mapping (the offline fallback leg); the CoRover leg maps
+    /// onto the identical shape via its own `From` impl below.
     #[test]
     fn station_rows_carry_hydration_fields() {
         let state = AppState::for_test(crate::config::Config::default());
-        let rows = service::Service::search_stations(&state, "NEW DELHI", 10);
+        let rows: Vec<StationRow> = state
+            .datasets
+            .search_stations("NEW DELHI", 10)
+            .into_iter()
+            .map(StationRow::from)
+            .collect();
         let ndls = rows
             .iter()
             .find(|s| s.code == "NDLS")
@@ -329,6 +357,51 @@ mod tests {
         assert_eq!(ndls.lat, Some(28.642314));
         let wire = serde_json::to_string(ndls).unwrap();
         assert!(wire.contains("\"name_hi\""), "present field serialized");
+    }
+
+    /// The CoRover `searchStation` row maps losslessly onto the same wire
+    /// shape: `latitude`/`longitude` become `lat`/`lng`, absent optionals are
+    /// omitted, and upstream-only fields (`utterances`, `state`) drop off.
+    #[test]
+    fn corover_station_rows_map_onto_the_wire_shape() {
+        let raw = r#"[
+            {
+                "name": "VASHI",
+                "code": "VSH",
+                "utterances": ["वाशी"],
+                "name_hi": "वाशी",
+                "district": "Thane",
+                "state": "Maharashtra",
+                "trainCount": "42",
+                "latitude": 19.077,
+                "longitude": 72.999,
+                "address": "Vashi, Navi Mumbai"
+            },
+            { "name": "SANPADA", "code": "SNPD", "latitude": "", "longitude": null }
+        ]"#;
+        let rows: Vec<StationRow> =
+            serde_json::from_str::<Vec<crate::core::corover::StationRow>>(raw)
+                .expect("corover fixture parses")
+                .into_iter()
+                .map(StationRow::from)
+                .collect();
+
+        let vsh = &rows[0];
+        assert_eq!(vsh.code, "VSH");
+        assert_eq!(vsh.lat, Some(19.077));
+        assert_eq!(vsh.lng, Some(72.999));
+        assert_eq!(vsh.train_count.as_deref(), Some("42"));
+        let wire = serde_json::to_string(vsh).unwrap();
+        assert!(wire.contains("\"name_hi\":\"वाशी\""));
+        assert!(!wire.contains("utterances"), "upstream-only field dropped");
+        assert!(!wire.contains("\"state\":"), "upstream-only field dropped");
+
+        // Sparse row keeps the exact old two-key wire shape (F2 parity with
+        // unhydrated dataset rows).
+        assert_eq!(
+            serde_json::to_string(&rows[1]).unwrap(),
+            r#"{"code":"SNPD","name":"SANPADA"}"#
+        );
     }
 
     /// F2 wire shape: a record without hydration serializes as exactly the

@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 description = "Train Bro - Indian Railways companion (Rust rewrite, live data only)"
 license = "MIT"
+default-run = "railway-rs"
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
@@ -35,6 +36,11 @@ async-trait = "0.1"
 http-body-util = "0.1"
 hyper = { version = "1", features = ["full"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
+# In-process micro-LLM engine (CPU, GGUF k-quants). Pure Rust: no C toolchain.
+# Pinned to 0.9: 0.11 pulls zip 8.6 which needs rustc 1.88 (project targets 1.86).
+candle-core = "0.9"
+candle-transformers = "0.9"
+tokenizers = "0.21"
 
 [dev-dependencies]
 http-body-util = "0.1"

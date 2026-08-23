@@ -10,10 +10,41 @@
   import SendHorizontalIcon from 'lucide-svelte/icons/send-horizontal'
   import { renderMarkdown } from '$lib/markdown.js'
   import ToolCard from '$lib/components/chat/ToolCards.svelte'
+  import { classify, executePlan, PROJECTORS, nextActionsFor } from '$lib/chat/gate.js'
+  import { createMemory, remember, compact } from '$lib/chat/memory.js'
 
   const HISTORY_KEY = 'rc-assistant-history'
   const TIMEOUT_MS = 12000
   const MAX_TURNS = 20
+
+  // Zero-network starter chips for greetings/help.
+  const DEFAULT_CHIPS = [
+    { label: '12951 today', prompt: 'live status of 12951' },
+    { label: 'SC→PUNE', prompt: 'trains from secunderabad to pune' }
+  ]
+
+  const sessionMemory = createMemory()
+
+  // Live answers go stale; only replay them briefly. Static kinds replay all session.
+  const REPLAY_TTL_MS = { live_status: 30_000, station_board: 30_000 }
+
+  // One-line lead-in above a locally-served card; details live in the card.
+  function templateFor(kind, d = {}) {
+    switch (kind) {
+      case 'live_status':
+        return `**${d.train_name || 'Train ' + (d.train_number ?? '')}** — here's where it is right now:`
+      case 'trains_between':
+        return `Found **${d.total_found ?? d.trains?.length ?? 0} trains** ${d.from ?? ''} → ${d.to ?? ''}:`
+      case 'average_delay':
+        return `Worst delays on **${d.train_no ?? ''} ${d.train_name ?? ''}**:`
+      case 'train_schedule':
+        return `Route of **${d.train_number ?? ''} ${d.train_name ?? ''}** (${d.total_stops ?? '?'} stops):`
+      case 'station_board':
+        return `Next arrivals at **${d.station_code ?? ''}** (next ${d.hours ?? 2}h):`
+      default:
+        return 'Here’s what I found:'
+    }
+  }
 
   let { seed = '' } = $props()
 
@@ -126,12 +157,78 @@
   async function sendText(text) {
     text = (text ?? '').trim()
     if (!text || streaming || phase !== 'ready') return
+
+    // Local-first gate: serve what we can without the LLM.
+    const verdict = classify(text, sessionMemory)
+    if (verdict.kind === 'trivial') {
+      pushLocal(text, verdict.reply, { actions: DEFAULT_CHIPS })
+      return
+    }
+    if (verdict.kind === 'replay') {
+      const a = verdict.entry.answer
+      pushLocal(text, `*(answered earlier)* ${a.content}`, {
+        cards: a.cards ?? [],
+        actions: a.actions ?? []
+      })
+      return
+    }
+    if (verdict.kind === 'tool') {
+      streamError = null
+      draft = ''
+      streaming = true
+      try {
+        const dto = await executePlan(verdict.plan, (u) => fetch(u))
+        const data = PROJECTORS[verdict.plan.cardKind](dto)
+        // Build the turn COMPLETELY before pushing: mutating a raw object
+        // after push() bypasses the $state proxy and the UI never sees it.
+        const turn = {
+          role: 'assistant',
+          content: templateFor(verdict.plan.cardKind, data),
+          reasoning: '',
+          tokens: null,
+          tools: [verdict.plan.cardKind],
+          cards: [{ kind: verdict.plan.cardKind, data }],
+          actions: nextActionsFor(verdict.plan.cardKind, data)
+        }
+        turns.push({ role: 'user', content: text })
+        turns.push(turn)
+        remember(sessionMemory, text, { content: turn.content, cards: turn.cards, actions: turn.actions }, {
+          ttlMs: REPLAY_TTL_MS[verdict.plan.cardKind] ?? Infinity
+        })
+        persist()
+        return
+      } catch (e) {
+        // Tool path failed (unresolved station, upstream 5xx) -> LLM fallback.
+      } finally {
+        // Success clears it before returning; on fallback streamLlm re-sets it.
+        streaming = false
+      }
+    }
+    await streamLlm(text)
+  }
+
+  function pushLocal(userText, assistantText, extras = {}) {
     streamError = null
     draft = ''
-    const history = [...turns, { role: 'user', content: text }].map((t) => ({
-      role: t.role,
-      content: t.content,
-    }))
+    turns.push({ role: 'user', content: userText })
+    turns.push({
+      role: 'assistant',
+      content: assistantText,
+      reasoning: '',
+      tokens: null,
+      tools: [],
+      cards: extras.cards ?? [],
+      actions: extras.actions ?? []
+    })
+    persist()
+  }
+
+  // The only path that talks to /ai/chat. History is auto-compacted so long
+  // sessions stay under the server's caps with tiny payloads.
+  async function streamLlm(text) {
+    streamError = null
+    draft = ''
+    const { messages } = compact([...turns, { role: 'user', content: text }])
     turns.push({ role: 'user', content: text })
     turns.push({ role: 'assistant', content: '', reasoning: '', tokens: null, tools: [], cards: [], actions: [] })
     streaming = true
@@ -139,7 +236,7 @@
       const res = await fetch('/rail-api/ai/chat', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ messages: history }),
+        body: JSON.stringify({ messages }),
       })
       if (!res.ok) {
         let msg = `HTTP ${res.status}`
@@ -259,7 +356,7 @@
                       {#each t.actions as a (a.label)}
                         <button
                           type="button"
-                          class="rounded-full border bg-muted/60 px-2.5 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                          class="rounded-full border bg-muted/60 px-2.5 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground max-lg:min-h-11 max-lg:items-center max-lg:px-4 max-lg:inline-flex"
                           onclick={() => sendText(a.prompt)}
                         >{a.label}</button>
                       {/each}
@@ -301,6 +398,7 @@
                 type="button"
                 variant="ghost"
                 size="xs"
+                class="max-lg:h-11 max-lg:px-3.5"
                 onclick={clearChat}
                 disabled={streaming || turns.length === 0}
               >

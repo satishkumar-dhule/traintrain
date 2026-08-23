@@ -67,9 +67,8 @@ impl Service {
         };
 
         let started = Instant::now();
-        let (summary, prompt_tokens, completion_tokens) = state
-            .ai
-            .chat_complete(&[
+        let (summary, prompt_tokens, completion_tokens, backend_tag) = state
+            .ai_chat_complete(&[
                 ChatMessage::system(SYSTEM_PROMPT),
                 ChatMessage::user(format!(
                     "Question: explain this {kind} result\nSubject: {subject}\nData:\n{data}"
@@ -77,13 +76,13 @@ impl Service {
             ])
             .await?;
         let elapsed = started.elapsed();
-        state.metrics.record_source_latency("zen", elapsed);
+        state.metrics.record_source_latency(backend_tag, elapsed);
 
         let resp = InsightResponse {
             kind: kind.to_string(),
             summary,
             model: state.ai.model().to_string(),
-            data_source: "zen+ntes".to_string(),
+            data_source: format!("{backend_tag}+ntes"),
             cached: false,
             prompt_tokens,
             completion_tokens,
@@ -95,7 +94,7 @@ impl Service {
                 kind = %kind,
                 %src,
                 %dst,
-                source = "zen",
+                source = backend_tag,
                 latency_ms = elapsed.as_millis(),
                 prompt_tokens,
                 completion_tokens,
@@ -105,7 +104,7 @@ impl Service {
             tracing::info!(
                 kind = %kind,
                 %train,
-                source = "zen",
+                source = backend_tag,
                 latency_ms = elapsed.as_millis(),
                 prompt_tokens,
                 completion_tokens,

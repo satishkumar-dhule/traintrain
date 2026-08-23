@@ -10,14 +10,21 @@ pub struct Service;
 
 impl Service {
     /// Trains expected at a station within `hours` (NTES supports 2, 4, or 8).
+    /// `destination` is the optional "Going to station" filter forwarded to
+    /// the NTES form (`jToStationInput`) so the source itself narrows the
+    /// board; `None` returns the unfiltered board.
     pub async fn get_live_station(
         state: &AppState,
         station: &str,
         hours: u32,
+        destination: Option<&str>,
     ) -> Result<LiveStationResponse, AppError> {
-        let key = format!("live_station:{station}:{hours}");
+        let key = match destination {
+            Some(dest) => format!("live_station:{station}:{hours}:to-{dest}"),
+            None => format!("live_station:{station}:{hours}"),
+        };
         if let Some(cached) = state.cache.get(&key) {
-            if let Some(resp) = build_response(station, hours, &cached) {
+            if let Some(resp) = build_response(station, destination, hours, &cached) {
                 return Ok(resp);
             }
         }
@@ -28,17 +35,31 @@ impl Service {
             .station_name(station)
             .unwrap_or(station)
             .to_string();
-        let data = state.ntes_web.live_station(station, &name, hours).await;
+        // The form wants the destination as its `CODE - NAME` pair; resolve
+        // the official name from the same dataset the browser list uses.
+        let dest_pair = match destination {
+            Some(dest) => Some((dest, state.datasets.station_name(dest).unwrap_or(dest))),
+            None => None,
+        };
+        let data = state
+            .ntes_web
+            .live_station(station, &name, hours, dest_pair)
+            .await;
         state.metrics.record_source_latency("ntes", start.elapsed());
         let data = data?;
 
         state.cache.set(&key, data.clone());
-        build_response(station, hours, &data)
+        build_response(station, destination, hours, &data)
             .ok_or_else(|| AppError::internal("NTES: unexpected TrainsAtStationJson shape"))
     }
 }
 
-fn build_response(station: &str, hours: u32, data: &Value) -> Option<LiveStationResponse> {
+fn build_response(
+    station: &str,
+    destination: Option<&str>,
+    hours: u32,
+    data: &Value,
+) -> Option<LiveStationResponse> {
     let list = ["trainList", "trainsList", "trainBtwStationList"]
         .iter()
         .find_map(|k| {
@@ -48,6 +69,7 @@ fn build_response(station: &str, hours: u32, data: &Value) -> Option<LiveStation
         })?;
     Some(LiveStationResponse {
         station: Some(station.to_string()),
+        destination: destination.map(str::to_string),
         hours: Some(hours as u8),
         trains: Some(list.iter().map(station_train).collect()),
         data_source: Some("NTES".to_string()),

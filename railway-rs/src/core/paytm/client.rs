@@ -58,9 +58,13 @@ impl PaytmClient {
                 .and_then(Value::as_str)
                 .or_else(|| data.get("error").and_then(Value::as_str))
                 .unwrap_or("upstream rejected the search");
-            return Err(AppError::source_unavailable(
-                SOURCE,
-                format!("GET {url} returned {status}: {reason}"),
+            return Err(no_trains_or_outage(
+                src,
+                dst,
+                date,
+                status.as_u16() == 451,
+                &format!("GET {url} returned {status}: {reason}"),
+                reason,
             ));
         }
         if data.pointer("/status/result").and_then(Value::as_str) == Some("failure") {
@@ -68,13 +72,39 @@ impl PaytmClient {
                 .pointer("/status/message/message")
                 .and_then(Value::as_str)
                 .unwrap_or("search failed");
-            return Err(AppError::source_unavailable(
-                SOURCE,
-                format!("GET {url}: {reason}"),
+            return Err(no_trains_or_outage(
+                src,
+                dst,
+                date,
+                false,
+                &format!("GET {url}: {reason}"),
+                reason,
             ));
         }
         Ok(data)
     }
+}
+
+/// Paytm answers "no direct trains between these stations" with HTTP 451 /
+/// a failure envelope carrying that message. That is a definitive empty
+/// result for the route + date — not a source outage — so it maps to
+/// `NotFound` with a clean, user-facing message instead of raw upstream
+/// URL noise.
+fn no_trains_or_outage(
+    src: &str,
+    dst: &str,
+    date: &str,
+    definitive_no_trains: bool,
+    detail: &str,
+    reason: &str,
+) -> AppError {
+    if definitive_no_trains || reason.to_lowercase().contains("no direct trains") {
+        return AppError::NotFound(format!(
+            "No direct trains run between {src} and {dst} on {date}. Try a nearby station pair or a different date."
+        ));
+    }
+    tracing::warn!(source = SOURCE, %detail, "paytm search rejected");
+    AppError::source_unavailable(SOURCE, detail)
 }
 
 /// Full search URL for one query. `source` is the origin station and
@@ -112,6 +142,51 @@ mod tests {
         assert_eq!(urlencode("MAO"), "MAO");
         assert_eq!(urlencode("ndls"), "ndls");
         assert_eq!(urlencode("4 XYZ"), "4%20XYZ");
+    }
+
+    #[test]
+    fn no_direct_trains_message_maps_to_clean_not_found() {
+        let e = no_trains_or_outage(
+            "HYB",
+            "AL",
+            "2026-08-29",
+            false,
+            "GET https://travel.paytm.com/api/trains/v5/search returned 451 Unavailable For Legal Reasons: There are no direct trains running between these two stations for your travel date.",
+            "There are no direct trains running between these two stations for your travel date. Please try an alternative route or a different date.",
+        );
+        assert!(matches!(e, AppError::NotFound(_)));
+        let msg = e.message();
+        assert!(msg.contains("No direct trains"), "{msg}");
+        assert!(
+            !msg.contains("http"),
+            "no upstream URL noise in user error: {msg}"
+        );
+    }
+
+    #[test]
+    fn http_451_alone_counts_as_definitive_no_trains() {
+        let e = no_trains_or_outage(
+            "HYB",
+            "AL",
+            "2026-08-29",
+            true,
+            "GET … returned 451",
+            "nope",
+        );
+        assert!(matches!(e, AppError::NotFound(_)));
+    }
+
+    #[test]
+    fn genuine_paytm_rejection_stays_source_unavailable() {
+        let e = no_trains_or_outage(
+            "MAO",
+            "NDLS",
+            "2026-10-20",
+            false,
+            "GET https://travel.paytm.com returned 500 Internal Server Error: boom",
+            "boom",
+        );
+        assert!(matches!(e, AppError::SourceUnavailable { .. }));
     }
 
     #[test]

@@ -1,6 +1,8 @@
 mod common;
 
+use axum::http::StatusCode;
 use common::TestApp;
+use serde_json::json;
 
 #[tokio::test]
 async fn train_search_by_number() {
@@ -28,6 +30,80 @@ async fn train_search_by_name_is_case_insensitive() {
 async fn station_search_by_code() {
     let app = TestApp::spawn().await;
     let (status, body) = app.get("/rail-api/search/stations?q=NDLS").await;
+    assert_eq!(status, 200);
+    let stations = body.as_array().unwrap();
+    assert!(stations.iter().any(|s| s["code"] == "NDLS"));
+}
+
+/// CoRover is the primary origin for station search: when Ask DISHA answers,
+/// its rows win verbatim (lat/lng mapping proves the corover provenance -
+/// the local NDLS dataset row would carry different coordinates).
+#[tokio::test]
+async fn corover_is_primary_for_station_search() {
+    let app = TestApp::spawn().await;
+    app.mocks["corover"].route_json(
+        "/dishaAPI/bot/searchStation/vashi",
+        json!([
+            {
+                "name": "VASHI",
+                "code": "VSH",
+                "name_hi": "वाशी",
+                "district": "Thane",
+                "state": "Maharashtra",
+                "trainCount": "42",
+                "latitude": 19.077,
+                "longitude": 72.999,
+                "address": "Vashi, Navi Mumbai"
+            },
+            { "name": "SANPADA", "code": "SNPD" }
+        ]),
+    );
+
+    let (status, body) = app.get("/rail-api/search/stations?q=vashi").await;
+    assert_eq!(status, 200);
+    let arr = body.as_array().unwrap();
+    assert_eq!(arr.len(), 2, "corover rows served as-is: {body}");
+    assert_eq!(arr[0]["code"], "VSH");
+    assert_eq!(arr[0]["name"], "VASHI");
+    assert_eq!(arr[0]["lat"], 19.077, "upstream latitude -> wire lat");
+    assert_eq!(arr[0]["lng"], 72.999);
+    assert_eq!(arr[0]["train_count"], "42");
+    assert_eq!(
+        arr[1],
+        json!({"code": "SNPD", "name": "SANPADA"}),
+        "absent optionals stay omitted on the wire"
+    );
+}
+
+/// A failing CoRover upstream silently degrades to the pre-warmed local
+/// dataset (same tiered ranking authority), still answering 200.
+#[tokio::test]
+async fn corover_failure_falls_back_to_local_dataset() {
+    let app = TestApp::spawn().await;
+    app.mocks["corover"].route_error(
+        "/dishaAPI/bot/searchStation/",
+        StatusCode::INTERNAL_SERVER_ERROR,
+    );
+
+    let (status, body) = app.get("/rail-api/search/stations?q=Varanasi").await;
+    assert_eq!(status, 200);
+    let codes: Vec<&str> = body
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["code"].as_str().unwrap())
+        .collect();
+    assert_eq!(codes, vec!["BSB", "BCY", "BSBY"], "local authority wins");
+}
+
+/// An empty CoRover answer also falls through to the local dataset instead
+/// of caching an empty result.
+#[tokio::test]
+async fn empty_corover_answer_falls_back_to_local_dataset() {
+    let app = TestApp::spawn().await;
+    app.mocks["corover"].route_json("/dishaAPI/bot/searchStation/new%20delhi", json!([]));
+
+    let (status, body) = app.get("/rail-api/search/stations?q=new%20delhi").await;
     assert_eq!(status, 200);
     let stations = body.as_array().unwrap();
     assert!(stations.iter().any(|s| s["code"] == "NDLS"));

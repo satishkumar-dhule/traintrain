@@ -128,7 +128,7 @@ import { loadRecent, rememberRecent, clearStored } from '$lib/recent.js'
 </script>
 
 {#snippet dateCell(e)}
-  <span class="font-mono text-xs">{fmtDate(e.date)}</span>
+  <span class="font-mono text-xs max-lg:text-sm">{fmtDate(e.date)}</span>
 {/snippet}
 
 {#snippet kindCell(e)}
@@ -138,7 +138,7 @@ import { loadRecent, rememberRecent, clearStored } from '$lib/recent.js'
 <section class="grid gap-6" class:idle-center={phase === 'idle'}>
   <div class="grid gap-1">
     <h1 class="text-2xl font-semibold tracking-tight">Exceptions</h1>
-    <p class="text-sm text-muted-foreground">Cancelled, rescheduled or diverted dates for a train.</p>
+    <p class="max-lg:hidden text-sm text-muted-foreground">Cancelled, rescheduled or diverted dates for a train.</p>
   </div>
 
   <Card.Root>
@@ -219,6 +219,7 @@ import { loadRecent, rememberRecent, clearStored } from '$lib/recent.js'
           <DataTable
             columns={cols}
             rows={entries}
+            primary="date"
             rowKey={(e, i) => `${e.date ?? ''}|${e.kind ?? ''}|${i}`}
             cells={{ date: dateCell, kind: kindCell }}
             empty="No exception records found."

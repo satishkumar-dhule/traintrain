@@ -91,11 +91,12 @@ pub fn registry() -> Vec<ToolDef> {
         },
         ToolDef {
             name: "station_board",
-            description: "Trains arriving at / departing from one station within the next few hours: scheduled vs expected time, platform and late flag. Use for 'what is running through SBC right now' style questions.",
+            description: "Trains arriving at / departing from one station within the next few hours: scheduled vs expected time, platform and late flag. Use for 'what is running through SBC right now' style questions. An optional destination narrows the board to trains going to that station.",
             parameters: json!({
                 "type": "object",
                 "properties": {
                     "station": {"type": "string"},
+                    "destination": {"type": "string", "description": "Optional 'going to' station code; filters the board to trains towards it"},
                     "hours": {"type": "integer", "minimum": 1, "maximum": 4, "description": "Lookahead window in hours; default 2"}
                 },
                 "required": ["station"]
@@ -278,13 +279,32 @@ async fn dispatch(state: &AppState, name: &str, args: &Value) -> Result<Value, A
         }
         "station_board" => {
             let station = require_station(state, args, "station").await?;
+            let destination = match args
+                .get("destination")
+                .and_then(Value::as_str)
+                .map(str::trim)
+            {
+                None | Some("") => None,
+                Some(_) => {
+                    let dest = require_station(state, args, "destination").await?;
+                    if dest.eq_ignore_ascii_case(&station) {
+                        return Err(AppError::bad_request(
+                            "destination is the same as the board station",
+                        ));
+                    }
+                    Some(dest)
+                }
+            };
             let hours = args
                 .get("hours")
                 .and_then(Value::as_u64)
                 .map(|h| h.clamp(1, BOARD_MAX_HOURS as u64) as u32)
                 .unwrap_or(BOARD_DEFAULT_HOURS);
             let dto = crate::slices::live_station::service::Service::get_live_station(
-                state, &station, hours,
+                state,
+                &station,
+                hours,
+                destination.as_deref(),
             )
             .await?;
             Ok(project_station_board(&dto))
@@ -724,6 +744,7 @@ fn project_station_board(dto: &crate::models::LiveStationResponse) -> Value {
         .collect();
     json!({
         "station_code": dto.station,
+        "destination": dto.destination,
         "hours": dto.hours,
         "data_source": dto.data_source,
         "trains": rows,

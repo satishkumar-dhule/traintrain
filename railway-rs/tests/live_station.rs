@@ -117,6 +117,133 @@ async fn no_mock_route_is_honest_source_unavailable() {
         .contains("Live source"));
 }
 
+/// Pull one `key=value` pair out of an urlencoded form body, percent-decoded.
+fn form_field(body: &str, key: &str) -> Option<String> {
+    body.split('&').find_map(|pair| {
+        pair.split_once('=')
+            .filter(|(k, _)| *k == key)
+            .map(|(_, v)| v.replace("%20", " ").replace('+', " "))
+    })
+}
+
+/// The optional `destination` must travel upstream as the NTES form's
+/// "Going to station" (`jToStationInput`, `CODE - NAME` pair) and be echoed
+/// back in the response.
+#[tokio::test]
+async fn destination_flows_to_upstream_form_and_response() {
+    let app = TestApp::spawn().await;
+    app.mocks["ntes"].ntes_web(LS_HTML);
+
+    let (status, body) = app
+        .get("/rail-api/ntes/live-station?station=NDLS&hours=4&destination=BCT")
+        .await;
+    assert_eq!(status, 200);
+    assert_eq!(body["station"], "NDLS");
+    assert_eq!(body["destination"], "BCT");
+    assert_eq!(body["data_source"], "NTES");
+    assert_eq!(body["trains"].as_array().unwrap().len(), 2);
+
+    let calls = app.mocks["ntes"].calls();
+    let q_post = calls
+        .iter()
+        .rev()
+        .find(|(p, _)| p == "/mntes/q")
+        .expect("a /mntes/q POST must happen");
+    assert_eq!(
+        form_field(&q_post.1, "jToStationInput").as_deref(),
+        Some("BCT - Mumbai Central"),
+        "destination goes upstream as the CODE - NAME pair: {}",
+        q_post.1
+    );
+    assert_eq!(
+        form_field(&q_post.1, "jFromStationInput").as_deref(),
+        Some("NDLS")
+    );
+}
+
+/// No destination keeps the upstream field empty (the unfiltered board) and
+/// omits `destination` from the response JSON.
+#[tokio::test]
+async fn absent_destination_keeps_upstream_field_empty() {
+    let app = TestApp::spawn().await;
+    app.mocks["ntes"].ntes_web(LS_HTML);
+
+    let (status, body) = app
+        .get("/rail-api/ntes/live-station?station=NDLS&hours=2")
+        .await;
+    assert_eq!(status, 200);
+    assert!(body.get("destination").is_none());
+
+    let calls = app.mocks["ntes"].calls();
+    let q_post = calls
+        .iter()
+        .rev()
+        .find(|(p, _)| p == "/mntes/q")
+        .expect("a /mntes/q POST must happen");
+    assert_eq!(
+        form_field(&q_post.1, "jToStationInput").as_deref(),
+        Some("")
+    );
+}
+
+#[tokio::test]
+async fn unknown_destination_is_400() {
+    let app = TestApp::spawn().await;
+    let (status, body) = app
+        .get("/rail-api/ntes/live-station?station=NDLS&destination=NDXX")
+        .await;
+    assert_eq!(status, 400);
+    assert_eq!(body["error"], "Station NDXX not found.");
+}
+
+#[tokio::test]
+async fn same_station_and_destination_is_400() {
+    let app = TestApp::spawn().await;
+    let (status, body) = app
+        .get("/rail-api/ntes/live-station?station=NDLS&destination=ndls")
+        .await;
+    assert_eq!(status, 400);
+    assert_eq!(
+        body["error"], "Destination must differ from the board station.",
+        "mirrors the NTES form's own From==To validation"
+    );
+}
+
+/// Distinct destinations are distinct cache entries (two upstream POSTs),
+/// while repeating one hits the cache (no second POST for it).
+#[tokio::test]
+async fn destination_partitions_the_cache() {
+    let app = TestApp::spawn().await;
+    app.mocks["ntes"].ntes_web(LS_HTML);
+
+    let (status, _) = app
+        .get("/rail-api/ntes/live-station?station=NDLS&hours=2&destination=BCT")
+        .await;
+    assert_eq!(status, 200);
+    // Same station+hours but no destination: a different board, not a cache hit.
+    let (status, body) = app
+        .get("/rail-api/ntes/live-station?station=NDLS&hours=2")
+        .await;
+    assert_eq!(status, 200);
+    assert!(body.get("destination").is_none());
+    // Repeating the filtered request now serves from cache.
+    let (status, _) = app
+        .get("/rail-api/ntes/live-station?station=NDLS&hours=2&destination=BCT")
+        .await;
+    assert_eq!(status, 200);
+
+    let q_posts = app.mocks["ntes"]
+        .calls()
+        .into_iter()
+        .filter(|(p, _)| p == "/mntes/q")
+        .collect::<Vec<_>>();
+    assert_eq!(
+        q_posts.len(),
+        2,
+        "exactly two upstream POSTs (filtered, unfiltered); the repeat is cached"
+    );
+}
+
 /// A rejected/stale CSRF token (empty 200 body) must be healed by re-fetching
 /// only the token - the session cookies stay, so no new `/mntes/` bootstrap.
 #[tokio::test]

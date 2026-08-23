@@ -78,6 +78,22 @@
   function stepDay(days) {
     pickDate(clampDate(isoShift(sel, days)))
   }
+
+  /* Auto-center the selected day in the strip (skip while user drags).
+     Respects prefers-reduced-motion. */
+  let stripEl = $state(null)
+  $effect(() => {
+    if (!stripEl) return
+    sel // dependency: re-center whenever the selection changes
+    const el = stripEl.querySelector('[data-active="true"]')
+    if (!el) return
+    const r = el.getBoundingClientRect()
+    const pr = stripEl.getBoundingClientRect()
+    const delta = r.left + r.width / 2 - (pr.left + pr.width / 2)
+    if (Math.abs(delta) < 4) return
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    stripEl.scrollBy({ left: delta, behavior: reduce ? 'auto' : 'smooth' })
+  })
 </script>
 
 <div
@@ -89,7 +105,7 @@
     type="button"
     variant="ghost"
     size="icon"
-    class="size-7 shrink-0"
+    class="size-8 shrink-0 hit-y max-lg:size-11"
     onclick={() => stepDay(-1)}
     aria-label="Previous day"
     title="Previous day"
@@ -98,7 +114,8 @@
   </Button>
   <div class="min-w-0 flex-1">
     <div
-      class="flex items-center gap-0.5 overflow-x-auto px-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      bind:this={stripEl}
+      class="flex items-center gap-1 overflow-x-auto px-1.5 snap-x snap-mandatory [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
     >
       {#each stripDates as iso (iso)}
         {@const active = iso === sel}
@@ -108,18 +125,18 @@
           aria-current={active ? 'date' : undefined}
           aria-label={`${label}: ${iso}`}
           onclick={() => pickDate(iso)}
-          class={`flex w-[3.6rem] shrink-0 cursor-pointer flex-col items-center rounded-md border px-1 py-1 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+          class={`flex min-h-11 w-16 max-sm:w-[4rem] shrink-0 cursor-pointer snap-center flex-col items-center justify-center rounded-md border px-1 py-1 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
             active
               ? 'border-transparent bg-primary text-primary-foreground shadow-sm'
               : 'border-transparent hover:bg-muted'
           }`}
         >
           <span
-            class={`text-[10px] font-medium uppercase tracking-wide ${active ? 'opacity-80' : 'text-muted-foreground'}`}
+            class={`text-xs leading-tight font-medium uppercase tracking-wide ${active ? 'opacity-80' : 'text-muted-foreground'}`}
           >
             {iso === TODAY ? 'Today' : weekdayShort(iso)}
           </span>
-          <span class="font-mono text-[11px] font-semibold tabular-nums">
+          <span class="font-mono text-xs leading-tight font-semibold tabular-nums">
             {iso.slice(8)}&thinsp;{monthShort(iso)}
           </span>
         </button>
@@ -130,7 +147,7 @@
     type="button"
     variant="ghost"
     size="icon"
-    class="size-7 shrink-0"
+    class="size-8 shrink-0 hit-y max-lg:size-11"
     onclick={() => stepDay(1)}
     aria-label="Next day"
     title="Next day"
@@ -148,6 +165,6 @@
     }}
     aria-label={`${label} (calendar)`}
     title="Calendar"
-    class="h-8 w-32 shrink-0 sm:w-36"
+    class="h-10 w-36 shrink-0"
   />
 </div>

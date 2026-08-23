@@ -333,3 +333,45 @@ async fn no_mock_route_is_source_unavailable() {
         .unwrap_or_default()
         .contains("unavailable"));
 }
+
+/// Mirrors the live HYB→AL incident: Paytm answers HTTP 451 "There are no
+/// direct trains running between these two stations…". The API must return
+/// a clean 404 with a user-facing message — no upstream URLs, no merged
+/// IRCTC outage blob — and must not bother the fallback source.
+#[tokio::test]
+async fn paytm_no_direct_trains_is_clean_404_without_fallback() {
+    let app = TestApp::spawn().await;
+    app.mocks["paytm"].route_raw_seq(
+        PAYTM_SEARCH_PATH,
+        vec![(
+            axum::http::StatusCode::UNAVAILABLE_FOR_LEGAL_REASONS,
+            "application/json",
+            json!({
+                "status": {
+                    "result": "failure",
+                    "message": {"message": "There are no direct trains running between these two stations for your travel date. Please try an alternative route or a different date."}
+                }
+            })
+            .to_string(),
+        )],
+    );
+
+    let (status, body) = app
+        .get("/rail-api/availability?src=HYB&dst=AL&date=2026-08-29")
+        .await;
+    assert_eq!(status, 404);
+    let msg = body["error"].as_str().unwrap_or_default();
+    assert!(
+        msg.contains("No direct trains"),
+        "clean message, got: {msg}"
+    );
+    assert!(!msg.contains("http"), "no URL noise, got: {msg}");
+    assert!(
+        !msg.contains("IRCTC"),
+        "fallback outage details must not leak into the answer: {msg}"
+    );
+    assert!(
+        app.mock("irctc").calls().is_empty(),
+        "definitive no-trains must not trigger the IRCTC fallback"
+    );
+}

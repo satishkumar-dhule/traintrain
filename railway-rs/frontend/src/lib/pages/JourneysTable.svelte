@@ -14,7 +14,10 @@ import DataTable from '$lib/components/DataTable.svelte'
 import EmptyState from '$lib/components/EmptyState.svelte'
 import RecentSearches from '$lib/components/RecentSearches.svelte'
 import { loadRecent, rememberRecent, clearStored } from '$lib/recent.js'
-import { TrainNumberBadge, RunsOnBadges } from '$lib/components/badges/index.js'
+import { TrainNumberBadge, RunsOnBadges, TrainDelayBadge } from '$lib/components/badges/index.js'
+import { availabilityHref, trainHref } from '$lib/utils.js'
+import CalendarDaysIcon from 'lucide-svelte/icons/calendar-days'
+import CalendarClockIcon from 'lucide-svelte/icons/calendar-clock'
 
   let { src = '', dst = '' } = $props()
 
@@ -52,8 +55,8 @@ import { TrainNumberBadge, RunsOnBadges } from '$lib/components/badges/index.js'
 
   const cols = [
     { key: 'train', label: 'Train', value: (t) => `${t.number ?? ''} ${t.name ?? ''}` },
-    { key: 'dep', label: 'Departs', cellClass: 'font-mono text-xs', value: (t) => t.departure_time },
-    { key: 'arr', label: 'Arrives', cellClass: 'font-mono text-xs', value: (t) => t.arrival_time },
+    { key: 'dep', label: 'Departs', cellClass: 'font-mono text-xs max-lg:text-sm', value: (t) => t.departure_time },
+    { key: 'arr', label: 'Arrives', cellClass: 'font-mono text-xs max-lg:text-sm', value: (t) => t.arrival_time },
     {
       key: 'runs',
       label: 'Runs on',
@@ -134,11 +137,35 @@ import { TrainNumberBadge, RunsOnBadges } from '$lib/components/badges/index.js'
   <span class="flex items-center gap-2">
     <TrainNumberBadge number={t.number} name={t.name} />
     <span>{t.name}</span>
+    <TrainDelayBadge number={t.number} name={t.name} compact />
   </span>
 {/snippet}
 
 {#snippet runsCell(t)}
   <RunsOnBadges days={t.runs_on ?? []} />
+{/snippet}
+
+{#snippet rowActions(t)}
+  <Button
+    type="button"
+    variant="outline"
+    size="xs"
+    onclick={() => navigate(availabilityHref(src, dst))}
+    title={`Seat availability for ${norm(src)} → ${norm(dst)} (today)`}
+  >
+    <CalendarDaysIcon class="size-3" />
+    Availability
+  </Button>
+  <Button
+    type="button"
+    variant="ghost"
+    size="xs"
+    onclick={() => navigate(trainHref(t.number, 'schedule'))}
+    title={`Timetable & stops of ${t.number}`}
+  >
+    <CalendarClockIcon class="size-3" />
+    Schedule
+  </Button>
 {/snippet}
 
 <div class="flex flex-col gap-4">
@@ -211,7 +238,9 @@ import { TrainNumberBadge, RunsOnBadges } from '$lib/components/badges/index.js'
             columns={cols}
             rows={trains}
             rowKey={trainKey}
+            primary="train"
             cells={{ train: trainCell, runs: runsCell }}
+            actions={rowActions}
             empty={`No trains found between ${norm(src)} and ${norm(dst)}.`}
           />
         {/if}

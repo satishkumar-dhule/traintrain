@@ -16,18 +16,20 @@ import {
   TrainNumberBadge,
   StationCodeBadge,
   DelayBadge,
+  TrainDelayBadge,
   RunsOnBadges,
   HaltStatusBadge,
   StatusBadge,
   parseDelayMinutes
 } from '$lib/components/badges/index.js'
+import { primeTrainDelay } from '$lib/trainDelay.svelte.js'
 import RouteMap from '$lib/components/RouteMap.svelte'
 import ActivityIcon from 'lucide-svelte/icons/activity'
   import LightbulbIcon from 'lucide-svelte/icons/lightbulb'
   import CalendarClockIcon from 'lucide-svelte/icons/calendar-clock'
+  import CalendarX2Icon from 'lucide-svelte/icons/calendar-x-2'
   import ChartColumnIcon from 'lucide-svelte/icons/chart-no-axes-column'
   import MapIcon from 'lucide-svelte/icons/map'
-  import { Input } from '$lib/components/ui/input/index.js'
 
   let { number = '', view = '' } = $props()
 
@@ -131,6 +133,7 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
     if (res.ok) {
       avgData = res.data
       avgPhase = 'ok'
+      primeTrainDelay(res.data)
     } else {
       avgErr = res.error || `HTTP ${res.status}`
       avgPhase = 'error'
@@ -307,8 +310,8 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
   const statusCols = $derived.by(() => {
     const cols = [
       { key: 'station', label: 'Station', value: (s) => `${s.name ?? ''} ${s.code ?? ''}` },
-      { key: 'sched', label: 'Sched', cellClass: 'font-mono text-xs', value: (s) => fmtTime(s.scheduled_arrival) },
-      { key: 'actual', label: 'Actual', cellClass: 'font-mono text-xs', value: (s) => fmtTime(s.actual_arrival) },
+      { key: 'sched', label: 'Sched', cellClass: 'font-mono text-xs max-lg:text-sm', value: (s) => fmtTime(s.scheduled_arrival) },
+      { key: 'actual', label: 'Actual', cellClass: 'font-mono text-xs max-lg:text-sm', value: (s) => fmtTime(s.actual_arrival) },
       {
         key: 'delay',
         label: 'Delay',
@@ -324,21 +327,21 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
       },
     ]
     if (statusRows.some((s) => s?.platform)) {
-      cols.splice(1, 0, { key: 'pf', label: 'PF', cellClass: 'font-mono text-xs', value: (s) => String(s.platform ?? '') })
+      cols.splice(1, 0, { key: 'pf', label: 'PF', cellClass: 'font-mono text-xs max-lg:text-sm', value: (s) => String(s.platform ?? '') })
     }
     return cols
   })
 
   const schedCols = [
-    { key: 'code', label: 'Code', cellClass: 'font-mono text-xs', value: (s) => s.code },
+    { key: 'code', label: 'Code', cellClass: 'font-mono text-xs max-lg:text-sm', value: (s) => s.code },
     { key: 'station', label: 'Station', cellClass: 'font-medium', value: (s) => s.name },
-    { key: 'arrival', label: 'Arr', cellClass: 'font-mono text-xs', value: (s) => fmtTime(s.arrival) },
-    { key: 'departure', label: 'Dep', cellClass: 'font-mono text-xs', value: (s) => fmtTime(s.departure) },
+    { key: 'arrival', label: 'Arr', cellClass: 'font-mono text-xs max-lg:text-sm', value: (s) => fmtTime(s.arrival) },
+    { key: 'departure', label: 'Dep', cellClass: 'font-mono text-xs max-lg:text-sm', value: (s) => fmtTime(s.departure) },
     {
       key: 'distance',
       label: 'Dist',
       class: 'w-20',
-      cellClass: 'font-mono text-xs',
+      cellClass: 'font-mono text-xs max-lg:text-sm',
       value: (s) => (s.distance_km == null ? '' : `${s.distance_km}`),
       sortValue: (s) => numOrNull(s.distance_km),
     },
@@ -346,7 +349,7 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
       key: 'day',
       label: 'Day',
       class: 'w-16',
-      cellClass: 'font-mono text-xs',
+      cellClass: 'font-mono text-xs max-lg:text-sm',
       value: (s) => (s.day == null ? '' : String(s.day)),
       sortValue: (s) => numOrNull(s.day),
     },
@@ -369,15 +372,15 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
   ]
 
   const mapCols = [
-    { key: 'code', label: 'Code', cellClass: 'font-mono text-xs', value: (s) => s.code },
+    { key: 'code', label: 'Code', cellClass: 'font-mono text-xs max-lg:text-sm', value: (s) => s.code },
     { key: 'station', label: 'Station', cellClass: 'font-medium', value: (s) => s.name },
-    { key: 'arrival', label: 'Arr', cellClass: 'font-mono text-xs', value: (s) => fmtTime(s.arrival) },
-    { key: 'departure', label: 'Dep', cellClass: 'font-mono text-xs', value: (s) => fmtTime(s.departure) },
+    { key: 'arrival', label: 'Arr', cellClass: 'font-mono text-xs max-lg:text-sm', value: (s) => fmtTime(s.arrival) },
+    { key: 'departure', label: 'Dep', cellClass: 'font-mono text-xs max-lg:text-sm', value: (s) => fmtTime(s.departure) },
     {
       key: 'day',
       label: 'Day',
       class: 'w-16',
-      cellClass: 'font-mono text-xs',
+      cellClass: 'font-mono text-xs max-lg:text-sm',
       value: (s) => String(s.day ?? ''),
       sortValue: (s) => numOrNull(s.day),
     },
@@ -385,12 +388,12 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
       key: 'distance',
       label: 'Dist (km)',
       class: 'w-24',
-      cellClass: 'font-mono text-xs',
+      cellClass: 'font-mono text-xs max-lg:text-sm',
       value: (s) => String(s.distance ?? ''),
       sortValue: (s) => numOrNull(s.distance),
     },
-    { key: 'exp_arrival', label: 'Exp. arr', cellClass: 'font-mono text-xs', value: (s) => fmtTime(s.expected_arrival) },
-    { key: 'exp_departure', label: 'Exp. dep', cellClass: 'font-mono text-xs', value: (s) => fmtTime(s.expected_departure) },
+    { key: 'exp_arrival', label: 'Exp. arr', cellClass: 'font-mono text-xs max-lg:text-sm', value: (s) => fmtTime(s.expected_arrival) },
+    { key: 'exp_departure', label: 'Exp. dep', cellClass: 'font-mono text-xs max-lg:text-sm', value: (s) => fmtTime(s.expected_departure) },
     {
       key: 'delay',
       label: 'Spot delay',
@@ -519,7 +522,7 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
 <section class="grid gap-6" class:idle-center={!committed}>
   <div class="grid gap-1">
     <h1 class="text-2xl font-semibold tracking-tight">Live train status</h1>
-    <p class="text-sm text-muted-foreground">Spot any train by number or name. Data refreshes honestly from the live API.</p>
+    <p class="max-lg:hidden text-sm text-muted-foreground">Spot any train by number or name. Data refreshes honestly from the live API.</p>
   </div>
 
   <Card.Root>
@@ -545,8 +548,8 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
       <Button type="button" onclick={() => track()} disabled={phase === 'loading' || phase === 'refreshing'}>
         {phase === 'refreshing' ? 'Refreshing…' : 'Track'}
       </Button>
-      <label class="mb-0.5 flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
-        <input type="checkbox" bind:checked={auto} class="size-4 accent-[var(--primary)]" />
+      <label class="mb-0.5 flex min-h-11 cursor-pointer items-center gap-2 py-2 text-sm text-muted-foreground">
+        <input type="checkbox" bind:checked={auto} class="size-5 accent-[var(--primary)]" />
         Auto 30s
       </label>
     </Card.Content>
@@ -593,6 +596,7 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
               <Card.Title class="flex flex-wrap items-center gap-2">
                 <TrainNumberBadge number={data.train_number} name={data.train_name} />
                 <span>{data.train_name ?? ''}</span>
+                <TrainDelayBadge number={data.train_number} name={data.train_name} />
               </Card.Title>
               <Card.Description>
                 {#if runPosition}{runPosition}{:else}{statusRows.length} stations on this run{/if}
@@ -606,6 +610,15 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
                 onclick={() => navigate(`/insights/live_status/${encodeURIComponent(committed || data.train_number)}`)}
               >
                 <LightbulbIcon class="mr-2 size-4" />Explain
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                title="Cancelled / rescheduled / diverted dates for this train"
+                onclick={() => navigate(`/exceptions/${encodeURIComponent(committed || data.train_number)}/cancelled`)}
+              >
+                <CalendarX2Icon class="mr-2 size-4" />Exceptions
               </Button>
               <StatusBadge tone={auto ? 'info' : 'outline'} dot={auto}>{auto ? 'auto 30s' : 'manual'}</StatusBadge>
             </div>
@@ -629,6 +642,7 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
             <DataTable
               columns={statusCols}
               rows={statusRows}
+              primary="station"
               rowKey={(s, i) => `${i}-${s?.code ?? ''}-${s?.name ?? ''}`}
               cells={{
                 station: statusStationCell,
@@ -672,6 +686,7 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
             <Card.Title class="flex flex-wrap items-center gap-2">
               <TrainNumberBadge number={schData.train_number} name={schData.train_name} />
               <span>{schData.train_name ?? ''}</span>
+              <TrainDelayBadge number={schData.train_number} name={schData.train_name} />
             </Card.Title>
             <Card.Description>{schData.stops?.length ?? 0} scheduled stops</Card.Description>
           </Card.Header>
@@ -683,6 +698,8 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
             <DataTable
               columns={schedCols}
               rows={schData.stops ?? []}
+              primary="station"
+              titleText={(s) => s?.name ?? s?.code ?? ''}
               rowKey={(s, i) => `${i}-${s?.code ?? ''}-${s?.name ?? ''}`}
               cells={{ code: schedCodeCell }}
               empty="No stops returned."
@@ -723,6 +740,12 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
             <Card.Title class="flex flex-wrap items-center gap-2">
               <TrainNumberBadge number={avgData.train_no} name={avgData.train_name} />
               <span>{avgData.train_name ?? ''}</span>
+              <TrainDelayBadge
+                number={avgData.train_no}
+                name={avgData.train_name}
+                type={avgData.train_type ?? ''}
+                data={avgData}
+              />
             </Card.Title>
             <Card.Description>
               Average arrival / departure delays{avgData.days_of_run ? ` · runs: ${avgData.days_of_run}` : ''}
@@ -732,6 +755,7 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
             <DataTable
               columns={avgCols}
               rows={avgData.stations ?? []}
+              primary="station"
               rowKey={(s, i) => `${i}-${s?.sr ?? ''}-${s?.code ?? ''}`}
               cells={{
                 station: avgStationCell,
@@ -767,7 +791,12 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
               }}
             >
               <Label for="map-station">Your boarding stop (optional)</Label>
-              <Input id="map-station" bind:value={mapStation} placeholder="Station code, e.g. NDLS" autocomplete="off" />
+              <AutoCompleteInput
+                id="map-station"
+                kind="station"
+                bind:value={mapStation}
+                placeholder="Station code, e.g. NDLS"
+              />
             </div>
             <Button type="button" variant="outline" onclick={applyMapStation} disabled={mapPhase === 'loading'}>
               Show live spot
@@ -808,6 +837,7 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
                     <StatusBadge tone="info" dot>Current: {mapData.current_station.code}</StatusBadge>
                     {#if mapData.train_name}
                       <span class="text-sm text-muted-foreground">{mapData.train_no ?? ''} {mapData.train_name}</span>
+                      <TrainDelayBadge number={mapData.train_no} name={mapData.train_name} />
                     {/if}
                   </div>
                 {/if}
@@ -841,6 +871,8 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
               <DataTable
                 columns={mapCols}
                 rows={mapData.route ?? []}
+                primary="station"
+                titleText={(s) => s?.name ?? s?.code ?? ''}
                 rowKey={(s, i) => `${i}-${s?.code ?? ''}`}
                 cells={{
                   code: mapCodeCell,

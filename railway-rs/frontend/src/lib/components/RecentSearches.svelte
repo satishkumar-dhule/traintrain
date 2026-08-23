@@ -13,7 +13,7 @@
   {#each items as item (item.id)}
     <button
       type="button"
-      class="inline-flex h-6 max-w-full items-center gap-1.5 rounded-full border px-2.5 text-xs transition-colors hover:bg-muted hover:text-foreground"
+      class="inline-flex h-6 max-w-full items-center gap-1.5 rounded-full border px-2.5 text-xs transition-colors hover:bg-muted hover:text-foreground max-lg:h-11 max-lg:px-4"
       onclick={() => onpick?.(item)}
     >
       <span class="font-mono">{item.label}</span>
@@ -23,7 +23,7 @@
   <Button
     variant="ghost"
     size="xs"
-    class="h-6 text-xs text-muted-foreground"
+    class="h-6 text-xs text-muted-foreground max-lg:h-11 max-lg:px-4"
     onclick={() => onclear?.()}
   >
     Clear all

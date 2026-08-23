@@ -17,8 +17,13 @@ import {
   StationCodeBadge,
   PnrStatusBadge,
   DataSourceBadge,
-  StatusBadge
+  StatusBadge,
+  TrainDelayBadge
 } from '$lib/components/badges/index.js'
+import { stationHref, trainHref, availabilityHref, todayISO, DATE_RE } from '$lib/utils.js'
+import TrainFrontIcon from 'lucide-svelte/icons/train-front'
+import CalendarDaysIcon from 'lucide-svelte/icons/calendar-days'
+import Building2Icon from 'lucide-svelte/icons/building-2'
 
   const RECENT_KEY = 'rc-pnr-recent'
 
@@ -32,6 +37,7 @@ import {
   let captcha = $state(null)
   let captchaPnr = null
   let captchaText = $state('')
+  let auto = $state(false)
 
   function loadRecent() {
     try {
@@ -116,11 +122,44 @@ import {
     }
   })
 
+  $effect(() => {
+    if (!auto || phase === 'captcha') return
+    const t = committed
+    const timer = setInterval(() => {
+      if (t) lookup(t)
+    }, 30000)
+    return () => clearInterval(timer)
+  })
+
   function fmt(v) {
     return v && v !== '-' && v !== '--' ? v : '—'
   }
 
+  function fmtUpdated(v) {
+    const d = new Date(v)
+    if (Number.isNaN(d.getTime())) return v
+    const when = d.toLocaleString('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      day: '2-digit',
+      month: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    })
+    return `${when} IST`
+  }
+
   const passengers = $derived(Array.isArray(data?.passengers) ? data.passengers : [])
+  const notice = $derived(asText(data?.notice))
+  const lastUpdated = $derived(asText(data?.last_updated))
+
+  /* Context for the jump actions: boarding/destination codes and the
+     journey date (ISO from the backend; fall back to today). */
+  const pnrFrom = $derived(asText(data?.from?.code).toUpperCase())
+  const pnrTo = $derived(asText(data?.to?.code).toUpperCase())
+  const pnrDate = $derived(
+    DATE_RE.test(asText(data?.journey_date)) ? asText(data.journey_date) : todayISO()
+  )
 
   const cols = [
     {
@@ -148,7 +187,7 @@ import {
 <section class="grid gap-6" class:idle-center={phase === 'idle'}>
   <div class="grid gap-1">
     <h1 class="text-2xl font-semibold tracking-tight">PNR status</h1>
-    <p class="text-sm text-muted-foreground">10-digit passenger name record. Upstream may require a captcha.</p>
+    <p class="max-lg:hidden text-sm text-muted-foreground">10-digit passenger name record. Upstream may require a captcha.</p>
   </div>
 
   <Card.Root>
@@ -170,6 +209,10 @@ import {
       <Button type="button" onclick={() => lookup()} disabled={!valid || busy}>
         {phase === 'refreshing' ? 'Refreshing…' : 'Check status'}
       </Button>
+      <label class="mb-0.5 flex min-h-11 cursor-pointer items-center gap-2 py-2 text-sm text-muted-foreground">
+        <input type="checkbox" bind:checked={auto} class="size-5 accent-[var(--primary)]" />
+        Auto 30s
+      </label>
     </Card.Content>
   </Card.Root>
 
@@ -235,6 +278,7 @@ import {
           <Card.Title class="flex flex-wrap items-center gap-2">
             <TrainNumberBadge number={data.train_number} name={data.train_name} />
             <span>{data.train_name ?? ''}</span>
+            <TrainDelayBadge number={data.train_number} name={data.train_name} />
           </Card.Title>
           <DataSourceBadge source={data.data_source} freshness={data.freshness} />
         </div>
@@ -261,12 +305,62 @@ import {
         <DataTable
           columns={cols}
           rows={passengers}
+          primary="booking_status"
+          titleText={(p) => `Passenger ${p.n ?? ''}`.trim()}
           rowKey={(p, i) => i}
           cells={{ n: numCell, booking_status: bookingCell }}
           empty="No passengers returned."
         />
+        {#if data.train_number || (pnrFrom && pnrTo)}
+          <div class="mt-3 flex flex-wrap items-center gap-2 border-t pt-3">
+            <span class="text-xs text-muted-foreground">Jump to</span>
+            {#if data.train_number}
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                onclick={() => navigate(trainHref(data.train_number, 'status'))}
+              >
+                <TrainFrontIcon class="size-3" />
+                Track live
+              </Button>
+            {/if}
+            {#if pnrFrom && pnrTo}
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                onclick={() => navigate(availabilityHref(pnrFrom, pnrTo, pnrDate))}
+              >
+                <CalendarDaysIcon class="size-3" />
+                Availability · {pnrFrom}→{pnrTo}
+              </Button>
+            {/if}
+            {#if pnrFrom}
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                onclick={() => navigate(stationHref(pnrFrom))}
+              >
+                <Building2Icon class="size-3" />
+                {pnrFrom} board
+              </Button>
+            {/if}
+          </div>
+        {/if}
       </Card.Content>
     </Card.Root>
+    {#if notice || lastUpdated}
+      <div class="flex flex-wrap items-center gap-x-3 gap-y-1 px-1 text-xs text-muted-foreground">
+        {#if notice}
+          <span class="max-w-full truncate" title={notice}>{notice}</span>
+        {/if}
+        {#if lastUpdated}
+          <span>updated {fmtUpdated(lastUpdated)}</span>
+        {/if}
+      </div>
+    {/if}
   {:else}
     <EmptyState
       icon={Ticket}

@@ -1,6 +1,9 @@
 <script>
   import { api } from '$lib/api.js'
   import { TrainNumberBadge, StationCodeBadge } from '$lib/components/badges/index.js'
+  import { pickNearbyStation } from '$lib/nearby.svelte.js'
+  import LocateFixedIcon from 'lucide-svelte/icons/locate-fixed'
+  import LoaderCircleIcon from 'lucide-svelte/icons/loader-circle'
 
   let {
     id = null,
@@ -10,13 +13,23 @@
     onpick = () => {},
     inputClass = '',
     class: className = '',
+    // External handlers are composed with (not clobbered by) the internal
+    // combobox behaviour; see handleInput/handleKeydown below.
+    oninput: extInput,
+    onkeydown: extKeydown,
+    // Station inputs get a "use my location" affordance that opens the
+    // blocking nearby-stations dialog; pass nearby={false} to opt out.
+    nearby,
     ...rest
   } = $props()
+
+  const showNearby = $derived(nearby ?? kind === 'station')
 
   let items = $state([])
   let open = $state(false)
   let active = $state(-1)
   let pos = $state(null)
+  let locating = $state(false)
   let controller = null
   let timer = null
   let rootEl = $state(null)
@@ -101,6 +114,33 @@
     }
   }
 
+  // Compose external handlers with the internal combobox ones: internal runs
+  // first so a suggestion pick (Enter) can preventDefault and stop callers
+  // from double-submitting, while plain typing still reaches them.
+  function handleInput(e) {
+    extInput?.(e)
+    onInput()
+  }
+
+  function handleKeydown(e) {
+    onKeydown(e)
+    if (!e.defaultPrevented) extKeydown?.(e)
+  }
+
+  // Geolocate -> blocking "stations near you" dialog -> commit the pick.
+  async function detectNearby() {
+    if (locating) return
+    locating = true
+    const picked = await pickNearbyStation()
+    locating = false
+    if (!picked || !picked.code) return
+    open = false
+    abort()
+    clearTimeout(timer)
+    value = picked.code
+    onpick({ type: 'station', code: picked.code, name: picked.name ?? '' })
+  }
+
   function place() {
     if (!rootEl || !open) return
     const r = rootEl.getBoundingClientRect()
@@ -167,18 +207,34 @@
   <input
     {id}
     bind:value
-    oninput={onInput}
+    oninput={handleInput}
     onfocus={onInput}
-    onkeydown={onKeydown}
+    onkeydown={handleKeydown}
     {placeholder}
     autocomplete="off"
     {...rest}
-    class={`flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-xs transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 ${inputClass}`}
+    class={`flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-base shadow-xs transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 md:text-sm max-lg:h-11 ${showNearby ? 'pr-11' : ''} ${inputClass}`}
     aria-autocomplete="list"
     aria-expanded={open}
     aria-controls={open && filtered.length > 0 ? `${uid}-list` : undefined}
     role="combobox"
   />
+  {#if showNearby}
+    <button
+      type="button"
+      onclick={detectNearby}
+      disabled={locating}
+      title="Use my location — pick a station near me"
+      aria-label="Find stations near my current location"
+      class="absolute top-1/2 right-1 inline-flex size-9 max-lg:size-11 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+    >
+      {#if locating}
+        <LoaderCircleIcon class="size-4 animate-spin" />
+      {:else}
+        <LocateFixedIcon class="size-5" />
+      {/if}
+    </button>
+  {/if}
 </div>
 
 {#if open && filtered.length > 0 && pos}
@@ -197,10 +253,12 @@
         type="button"
         role="option"
         aria-selected={i === active}
-        class={`flex w-full items-center justify-between gap-2 rounded-sm px-2 py-1.5 text-left text-sm ${
+        class={`flex min-h-11 w-full items-center justify-between gap-2 rounded-sm px-2 py-1.5 text-left text-sm ${
           i === active ? 'bg-accent text-accent-foreground' : ''
         }`}
-        onmousedown={(e) => {
+        onpointerdown={(e) => {
+          /* pointerdown (not click/mousedown): fires before the input blur,
+             works for mouse + touch, and preventDefault keeps keyboard focus. */
           e.preventDefault()
           pick(r)
         }}

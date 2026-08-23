@@ -30,7 +30,11 @@
     ...rest
   } = $props();
 
-  const sizeClass = $derived(size === 'xs' ? 'px-1.5 text-[10px]' : '');
+  const sizeClass = $derived(
+    size === 'xs'
+      ? 'px-1.5 text-[10px] max-lg:min-w-10 max-lg:px-2 max-lg:text-xs'
+      : 'max-lg:min-w-10'
+  );
 
   function onclick(e) {
     if (!href) return;
@@ -56,9 +60,10 @@
   {href}
   {...title ? { title } : {}}
   class={cn(
+    'inline-flex items-center justify-center',
     tone === 'outline' ? '' : STATUS_TONES[tone] ?? STATUS_TONES.neutral,
     sizeClass,
-    href && 'cursor-pointer',
+    href && 'hit-y cursor-pointer',
     className
   )}
   variant="outline"

@@ -350,12 +350,88 @@
   * {
     @apply border-border outline-ring/50;
   }
+  /* Phone type scale: lift the root em to ~17px (iOS body size). Every rem
+     unit — text, icons, spacing, tap targets — scales up together (~6%), so
+     no component overrides needed and layouts stay fluid. */
+  @media (max-width: 639.98px) and (pointer: coarse) {
+    html {
+      font-size: 106.25%;
+    }
+  }
   body {
     @apply bg-background text-foreground;
   }
   html,
   body {
     overflow-x: clip;
+  }
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+}
+
+/* ---------- Touch ergonomics (coarse pointers) ----------
+   Kill the double-tap-zoom delay and the grey tap flash; give pressed
+   feedback via the existing active: transforms. Visual density is kept —
+   hit areas are grown per-component, not globally. */
+@media (pointer: coarse) {
+  button,
+  a,
+  input,
+  select,
+  textarea,
+  summary,
+  [role='button'],
+  [role='tab'],
+  label {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+/* Hit-area expansion: keep compact visuals but guarantee a ~40px+ target by
+   extending the clickable box with an absolutely-positioned pseudo element.
+   Touch-only: precise pointers keep the dense targets. Apply only where
+   vertical neighbours are non-interactive (no overlap). */
+.hit-y {
+  position: relative;
+}
+.hit-y::after {
+  content: '';
+  position: absolute;
+  inset: -9px 0;
+}
+@media (pointer: fine) {
+  .hit-y::after {
+    content: none;
+  }
+}
+
+/* Mobile drawer motion (respects reduced-motion). */
+@keyframes drawer-in {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: none;
+  }
+}
+@keyframes scrim-in {
+  from {
+    opacity: 0;
+  }
+}
+.drawer-enter {
+  animation: drawer-in 0.22s cubic-bezier(0.32, 0.72, 0, 1);
+}
+.scrim-enter {
+  animation: scrim-in 0.18s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .drawer-enter,
+  .scrim-enter {
+    animation: none;
   }
 }
 
@@ -373,14 +449,14 @@
 }
 @media (max-width: 1023.98px) {
   .idle-center {
-    /* mobile header h-14 + main py-6 */
-    min-height: calc(100svh - 6.5rem);
+    /* mobile header h-14 + main pt-6 + bottom tab bar ~3.25rem clearance */
+    min-height: calc(100svh - 8.75rem);
   }
 }
 @media (min-width: 768px) and (max-width: 1023.98px) {
   .idle-center {
-    /* mobile header h-14 + main md:py-10 */
-    min-height: calc(100svh - 8.5rem);
+    /* mobile header h-14 + main md:pt-10 + bottom tab bar */
+    min-height: calc(100svh - 10rem);
   }
 }
 
@@ -440,3 +516,28 @@
 
 /* Inline links inside AI answers only (safe renderer gates the href). */
 .md a { text-decoration: underline; text-underline-offset: 2px; }
+
+/* Leaflet map controls: enlarge to touch-friendly sizes on coarse pointers. */
+.leaflet-touch .leaflet-control-zoom a,
+.leaflet-control-zoom a {
+  width: 40px;
+  height: 40px;
+  line-height: 40px;
+  font-size: 20px;
+}
+@media (pointer: fine) {
+  .leaflet-control-zoom a {
+    width: 30px;
+    height: 30px;
+    line-height: 30px;
+    font-size: 19px;
+  }
+}
+.leaflet-control-attribution {
+  font-size: 12px;
+}
+.leaflet-control-attribution a {
+  display: inline-block;
+  padding: 4px 0;
+  line-height: 16px;
+}

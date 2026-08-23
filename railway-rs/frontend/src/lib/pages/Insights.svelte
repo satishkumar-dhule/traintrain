@@ -1,9 +1,10 @@
 <script>
   import * as Card from '$lib/components/ui/card/index.js'
   import { Button } from '$lib/components/ui/button/index.js'
-  import { Input } from '$lib/components/ui/input/index.js'
-  import { Label } from '$lib/components/ui/label/index.js'
   import { Badge } from '$lib/components/ui/badge/index.js'
+  import { Input } from '$lib/components/ui/input/index.js'
+  import AutoCompleteInput from '$lib/components/AutoCompleteInput.svelte'
+  import { Label } from '$lib/components/ui/label/index.js'
   import { Skeleton } from '$lib/components/ui/skeleton/index.js'
   import * as Alert from '$lib/components/ui/alert/index.js'
   import * as Tabs from '$lib/components/ui/tabs/index.js'
@@ -114,7 +115,7 @@
 <section class="grid gap-6">
   <div class="grid gap-1">
     <h1 class="text-2xl font-semibold tracking-tight">Insights</h1>
-    <p class="text-sm text-muted-foreground">
+    <p class="max-lg:hidden text-sm text-muted-foreground">
       Plain-language explanations grounded in live rail data
     </p>
   </div>
@@ -135,21 +136,32 @@
         <div class="flex flex-wrap items-end gap-3">
           <div class="grid min-w-32 flex-1 gap-2 sm:max-w-44">
             <Label for="ins-src">From station</Label>
-            <Input
+            <AutoCompleteInput
               id="ins-src"
+              kind="station"
               bind:value={srcInput}
               placeholder="e.g. NDLS"
               oninput={resetResult}
+              onpick={(item) => {
+                if (asText(item?.code)) srcInput = asText(item.code).toUpperCase()
+                resetResult()
+              }}
               onkeydown={(e) => e.key === 'Enter' && !e.defaultPrevented && explain()}
             />
           </div>
           <div class="grid min-w-32 flex-1 gap-2 sm:max-w-44">
             <Label for="ins-dst">To station</Label>
-            <Input
+            <AutoCompleteInput
               id="ins-dst"
+              kind="station"
               bind:value={dstInput}
               placeholder="e.g. MMCT"
               oninput={resetResult}
+              onpick={(item) => {
+                if (asText(item?.code)) dstInput = asText(item.code).toUpperCase()
+                resetResult()
+                if (pairValid) explain()
+              }}
               onkeydown={(e) => e.key === 'Enter' && !e.defaultPrevented && explain()}
             />
           </div>

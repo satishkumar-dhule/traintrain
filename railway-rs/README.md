@@ -99,7 +99,7 @@ Unmatched `/rail-api/*` paths return JSON 404; everything else falls through to 
 | GET    | `/rail-api/logs`         | `limit` (1-500), `level` (`debug`\|`info`\|`warn`\|`error`) | Tail the structured-log ring (newest-first JSON records) |
 | GET    | `/rail-api/stations`     | `q` (substring, optional)                | Station search over the local dataset, up to 20 hits  |
 | GET    | `/rail-api/search/trains`| `q` (query, optional)                    | Train search by number or name over the local dataset, up to 10 hits |
-| GET    | `/rail-api/search/stations` | `q` (query, optional)                 | Lite station search, up to 10 hits                    |
+| GET    | `/rail-api/search/stations` | `q` (query, optional)                 | Station search, up to 10 hits — CoRover (Ask DISHA) first, local dataset fallback |
 | GET    | `/rail-api/search/suggest` | `q` (query, optional)                  | Combined station + train IntelliSense autocomplete, up to 10 hits (one round trip) |
 | GET    | `/rail-api/pnr`          | `pnr` (10 digits), `captcha_session`, `captcha_text`, `captcha_source` | PNR status (Railyatri). Captcha params echo a prior 428 challenge |
 | GET    | `/rail-api/schedule`     | `train` (1-8 digit number)               | Full timetable: stops, run days, route description    |
@@ -126,6 +126,7 @@ Search is IntelliSense-style: train queries match **numbers and names**, station
 
 - `cargo test` - hermetic integration tests in `tests/` plus unit tests in `src/`.
 - `make check-js` (or `node --test tests/js/`) - frontend gates: every served `static/*.js` parses (`node --check`), and the pure route-table unit tests (`tests/js/routes.test.mjs`) plus a DOM-smoke suite (`tests/js/dom-smoke.test.mjs`, a fake-DOM boot + hash-navigation harness that loads all real scripts with the network stubbed) pass. Requires Node >= 18. The JS test files live in `tests/js/` so they are never publicly served.
+- `make check-ui` (or `npm run test:ui`) - real-browser UI suite (`tests/ui/`): drives the actual SPA on :3000 through headless Chromium, pinning per-route rendering, single-`<h1>` outline, zero horizontal overflow at desktop + phone widths, working vertical scroll, accessible control/button names, honest live-status flow resolution (data or explicit error, never blank), theme persistence, and no uncaught JS exceptions. Reuses a running server or starts one from `target/`; bootstraps its private browser runtime on first use; see `tests/ui/README.md`.
 - Integration tests use `tests/common` (`MockServer` + `TestApp`): the real app is spawned bound to a random port, with mock upstreams (railyatri / etrain / ntes / ir / irctc) wired in via the `*_BASE` config, and driven over real HTTP.
 - Set `RAILWAY_LIVE_TESTS=1` to run the live-data test suite, which hits the real upstreams and is therefore not hermetic and not run in CI.
 

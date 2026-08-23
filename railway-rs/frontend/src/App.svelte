@@ -12,6 +12,7 @@
   import Assistant from '$lib/pages/Assistant.svelte'
   import Insights from '$lib/pages/Insights.svelte'
   import System from '$lib/pages/System.svelte'
+  import About from '$lib/pages/About.svelte'
 
   const segs = $derived(route.path.split('/').filter(Boolean))
 </script>
@@ -44,6 +45,8 @@
     />
   {:else if segs[0] === 'system'}
     <System />
+  {:else if segs[0] === 'about'}
+    <About />
   {:else}
     <section class="grid gap-2">
       <h1 class="text-3xl font-semibold tracking-tight">Page not found</h1>

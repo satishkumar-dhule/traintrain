@@ -28,7 +28,7 @@
   }
 
   function seg(active) {
-    return `rounded-[calc(var(--radius)-4px)] px-2 py-1 text-xs transition-colors ${
+    return `min-h-9 max-lg:min-h-11 rounded-[calc(var(--radius)-4px)] px-2 text-xs max-lg:text-sm transition-colors ${
       active ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
     }`
   }
@@ -59,15 +59,15 @@
     bind:this={trigger}
     class={
       compact
-        ? 'rounded-md p-2 text-muted-foreground hover:bg-accent'
-        : 'flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground'
+        ? 'flex size-11 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground'
+        : 'flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-[0.95rem] text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground'
     }
     onclick={toggle}
     aria-haspopup="dialog"
     aria-expanded={open}
     aria-label="Display settings"
   >
-    <TriggerIcon class="size-4" />
+    <TriggerIcon class={compact ? 'size-5' : 'size-5 shrink-0'} />
     {#if !compact}
       <span>Display</span>
       <span class="ml-auto text-xs capitalize">{theme.mode}</span>

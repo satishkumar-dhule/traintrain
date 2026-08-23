@@ -387,7 +387,7 @@
   ]
 
   const logCols = [
-    { key: 'time', label: 'Time', class: 'w-28', cellClass: 'font-mono text-xs', value: (l) => tsTime(l?.ts), sortValue: (l) => num(l?.ts) },
+    { key: 'time', label: 'Time', class: 'w-28', cellClass: 'font-mono text-xs max-lg:text-sm', value: (l) => tsTime(l?.ts), sortValue: (l) => num(l?.ts) },
     { key: 'level', label: 'Level', class: 'w-24', value: (l) => String(l?.level ?? '').toLowerCase() },
     { key: 'event', label: 'Event', cellClass: 'max-w-md truncate font-mono text-xs', value: (l) => logLine(l) }
   ]
@@ -450,15 +450,15 @@
           <RefreshCw class={`mr-2 size-4${busy ? ' animate-spin' : ''}`} />
           {busy ? 'Refreshing…' : 'Refresh'}
         </Button>
-        <label class="mb-0.5 flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
-          <input type="checkbox" bind:checked={auto} class="size-4 accent-[var(--primary)]" />
+        <label class="mb-0.5 flex min-h-11 cursor-pointer items-center gap-2 py-2 text-sm text-muted-foreground">
+          <input type="checkbox" bind:checked={auto} class="size-5 accent-[var(--primary)]" />
           Auto 10s
         </label>
       </div>
     </div>
-    <p class="text-sm text-muted-foreground">Runtime metrics and recent request logs — real numbers only.</p>
+    <p class="max-lg:hidden text-sm text-muted-foreground">Runtime metrics and recent request logs — real numbers only.</p>
     {#if note}
-      <p class="text-xs text-destructive">{note}</p>
+      <p class="text-xs text-destructive max-lg:text-sm">{note}</p>
     {/if}
   </div>
 
@@ -503,7 +503,7 @@
           {#each runtimeStats as [label, value] (label)}
             <div class="grid gap-0.5 bg-card px-3 py-2.5">
               <span class="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{label}</span>
-              <span class="truncate font-mono text-sm font-semibold tabular-nums" title={value}>{value}</span>
+              <span class="truncate font-mono text-sm font-semibold tabular-nums max-lg:whitespace-normal max-lg:break-words" title={value}>{value}</span>
             </div>
           {/each}
         </div>
@@ -568,6 +568,7 @@
           <DataTable
             columns={originCols}
             rows={origins}
+            primary="name"
             rowKey={(o) => o.name}
             cells={{ status: originStatusCell, latency: latencyCell }}
             empty="No upstream origins reported."
@@ -647,7 +648,7 @@
               {#each cacheEntries as e (e.key)}
                 <div class="flex items-baseline justify-between gap-3 border-b pb-1">
                   <dt class="text-xs uppercase tracking-wide text-muted-foreground">{e.label}</dt>
-                  <dd class="truncate font-mono text-sm font-medium" title={e.value}>{e.value}</dd>
+                  <dd class="truncate font-mono text-sm font-medium max-lg:whitespace-normal max-lg:break-words" title={e.value}>{e.value}</dd>
                 </div>
               {/each}
             </dl>
@@ -667,6 +668,7 @@
           <Button
             type="button"
             size="xs"
+            class="max-lg:h-11 max-lg:px-3.5"
             variant={logFilter === value ? 'default' : 'ghost'}
             onclick={() => (logFilter = value)}
             aria-pressed={logFilter === value}
@@ -697,6 +699,8 @@
           <DataTable
             columns={logCols}
             rows={logsFiltered}
+            primary="event"
+            titleText={(l) => logLine(l)}
             rowKey={(l, i) => `${tsTime(l?.ts)}-${i}`}
             cells={{ level: logLevelCell }}
             empty={logFilter === 'all' ? 'No log entries.' : `No ${logFilter === 'errors' ? 'error' : 'warning'} entries.`}

@@ -109,15 +109,19 @@ fn class_availability(t: &Value) -> Vec<Value> {
 }
 
 /// `runs_on` (7 booleans, Monday-first) parsed from the human text
-/// (`"Runs on Tue, Wed"`); defaults to all-false when absent/unparseable.
+/// (`"Runs on Tue, Wed"`); `"Runs on All Days"`/daily variants mark all seven
+/// days; defaults to all-false when absent/unparseable.
 fn day_bools(t: &Value) -> Vec<bool> {
     const DAYS: [&str; 7] = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"];
-    let mut out = vec![false; 7];
     let text = t
         .pointer("/runs_on/text")
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_uppercase();
+    if text.contains("ALL DAYS") || text.contains("DAILY") {
+        return vec![true; 7];
+    }
+    let mut out = vec![false; 7];
     for (i, day) in DAYS.iter().enumerate() {
         out[i] = text.contains(day);
     }
@@ -306,6 +310,18 @@ mod tests {
                 "expected SourceUnavailable, got {err:?}"
             );
         }
+    }
+
+    #[test]
+    fn day_bools_handles_all_days_and_daily() {
+        let all = day_bools(&json!({"runs_on": {"text": "Runs on All Days"}}));
+        assert_eq!(all, vec![true; 7]);
+        let daily = day_bools(&json!({"runs_on": {"text": "Runs Daily"}}));
+        assert_eq!(daily, vec![true; 7]);
+        let some = day_bools(&json!({"runs_on": {"text": "Runs on Tue, Wed"}}));
+        assert_eq!(some, vec![false, true, true, false, false, false, false]);
+        let none = day_bools(&json!({}));
+        assert_eq!(none, vec![false; 7]);
     }
 
     #[test]

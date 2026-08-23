@@ -1,6 +1,7 @@
 <script>
   import { api } from '$lib/api.js'
   import { navigate, route } from '$lib/router.svelte.js'
+  import { viewport } from '$lib/media.svelte.js'
   import * as Card from '$lib/components/ui/card/index.js'
   import { Button } from '$lib/components/ui/button/index.js'
   import { Skeleton } from '$lib/components/ui/skeleton/index.js'
@@ -17,11 +18,15 @@
     RunsOnBadges,
     AvailabilityStatusBadge,
     DataSourceBadge,
+    TrainDelayBadge,
     availabilityStatusKind,
     dayFlags
   } from '$lib/components/badges/index.js'
 import ArrowDownUpIcon from 'lucide-svelte/icons/arrow-down-up'
 import CalendarDaysIcon from 'lucide-svelte/icons/calendar-days'
+import CalendarClockIcon from 'lucide-svelte/icons/calendar-clock'
+import RouteIcon from 'lucide-svelte/icons/route'
+import { journeysHref, trainHref } from '$lib/utils.js'
 
   let { src = '', dst = '', date = '' } = $props()
 
@@ -48,6 +53,11 @@ import CalendarDaysIcon from 'lucide-svelte/icons/calendar-days'
     ['chance', 'Confirm chance']
   ]
   const CLASS_ORDER = ['1A', 'EA', 'EC', '2A', '3A', '3E', 'FC', 'CC', 'SL', '2S', 'UR']
+  const SOURCES = [
+    ['auto', 'Auto'],
+    ['paytm', 'Paytm'],
+    ['irctc', 'IRCTC']
+  ]
 
   function loadPrefs() {
     try {
@@ -237,6 +247,9 @@ import CalendarDaysIcon from 'lucide-svelte/icons/calendar-days'
       data = res.data
       phase = 'ok'
       rememberRoute(s, d, dt)
+    } else if (res.status === 404) {
+      phase = 'none'
+      errorMsg = res.error || 'No direct trains found for this route and date.'
     } else {
       phase = 'error'
       errorMsg = res.error || `HTTP ${res.status}`
@@ -290,7 +303,7 @@ import CalendarDaysIcon from 'lucide-svelte/icons/calendar-days'
         style={`width:${w}%`}
       ></div>
     </div>
-    <div class="mt-0.5 text-right text-[9px] leading-none tabular-nums text-muted-foreground">
+    <div class="mt-0.5 text-right text-[9px] leading-none tabular-nums text-muted-foreground max-lg:text-[11px]">
       {Math.round(pct)}% confirm
     </div>
   {/if}
@@ -309,10 +322,10 @@ import CalendarDaysIcon from 'lucide-svelte/icons/calendar-days'
   {@const fare = numOrNull(row?.fare)}
   <div class={`overflow-hidden rounded-md border px-2 py-1 ${tone}`}>
     <div class="flex items-baseline justify-between gap-2">
-      <span class="font-mono text-[11px] font-semibold">{fmt(classCode(row))}</span>
-      <span class="font-mono text-[11px] tabular-nums">{fare != null ? `₹${fare.toLocaleString('en-IN')}` : ''}</span>
+      <span class="font-mono text-[11px] max-lg:text-xs font-semibold">{fmt(classCode(row))}</span>
+      <span class="font-mono text-[11px] max-lg:text-xs tabular-nums">{fare != null ? `₹${fare.toLocaleString('en-IN')}` : ''}</span>
     </div>
-    <div class="flex min-w-0 items-center gap-1 text-[10px]">
+    <div class="flex min-w-0 items-center gap-1 text-[10px] max-lg:text-sm max-lg:font-medium">
       <span class="size-1.5 shrink-0 rounded-full bg-current opacity-80"></span>
       <span class="min-w-0 truncate font-medium" title={asText(row?.status)}>{asText(row?.status) || '—'}</span>
     </div>
@@ -323,7 +336,7 @@ import CalendarDaysIcon from 'lucide-svelte/icons/calendar-days'
 <section class="grid grid-cols-[minmax(0,1fr)] gap-3">
   <div class="flex flex-wrap items-baseline gap-x-3 gap-y-0">
     <h1 class="text-xl font-semibold tracking-tight">Availability</h1>
-    <p class="text-xs text-muted-foreground">
+    <p class="text-xs max-lg:hidden text-muted-foreground">
       Class-wise availability, fares and confirm chances across every train.
     </p>
   </div>
@@ -339,6 +352,7 @@ import CalendarDaysIcon from 'lucide-svelte/icons/calendar-days'
       bind:value={from}
       kind="station"
       placeholder="From station…"
+      aria-label="From station"
       class="min-w-44 flex-1"
       inputClass="h-8"
       onpick={(item) => {
@@ -361,6 +375,7 @@ import CalendarDaysIcon from 'lucide-svelte/icons/calendar-days'
       bind:value={to}
       kind="station"
       placeholder="To station…"
+      aria-label="To station"
       class="min-w-44 flex-1"
       inputClass="h-8"
       onpick={(item) => {
@@ -409,10 +424,15 @@ import CalendarDaysIcon from 'lucide-svelte/icons/calendar-days'
         </Card.Root>
       {/each}
     </div>
+  {:else if phase === 'none'}
+    <Alert.Root>
+      <Alert.Title>No direct trains found</Alert.Title>
+      <Alert.Description class="[overflow-wrap:anywhere]">{errorMsg}</Alert.Description>
+    </Alert.Root>
   {:else if phase === 'error'}
     <Alert.Root variant="destructive" role="alert">
       <Alert.Title>Could not load availability</Alert.Title>
-      <Alert.Description>{errorMsg}</Alert.Description>
+      <Alert.Description class="[overflow-wrap:anywhere]">{errorMsg}</Alert.Description>
     </Alert.Root>
   {:else if phase === 'ok'}
     {#if trains.length === 0}
@@ -448,8 +468,21 @@ import CalendarDaysIcon from 'lucide-svelte/icons/calendar-days'
             </span>
           {/if}
           <DataSourceBadge source={data?.data_source} class="ml-auto" />
+          {#if src && dst}
+            <Button
+              type="button"
+              variant="outline"
+              size="xs"
+              class="h-6 text-xs"
+              onclick={() => navigate(journeysHref(src, dst))}
+              title={`All trains running ${String(src).toUpperCase()} → ${String(dst).toUpperCase()}`}
+            >
+              <RouteIcon class="size-3" />
+              All trains on route
+            </Button>
+          {/if}
           {#if notice}
-            <p class="w-full truncate text-[11px] text-muted-foreground" title={notice}>{notice}</p>
+            <p class="w-full truncate text-[11px] text-muted-foreground max-lg:whitespace-normal max-lg:line-clamp-2 max-lg:break-words" title={notice}>{notice}</p>
           {/if}
         </div>
 
@@ -472,7 +505,7 @@ import CalendarDaysIcon from 'lucide-svelte/icons/calendar-days'
                   aria-pressed={!hiddenClasses.includes(c)}
                   title={hiddenClasses.includes(c) ? `Show ${c}` : `Hide ${c}`}
                   onclick={() => toggleClass(c)}
-                  class={`inline-flex h-6 cursor-pointer items-center rounded-md border px-2 font-mono text-[11px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                  class={`inline-flex h-6 max-lg:h-11 cursor-pointer items-center rounded-md border px-2 max-lg:px-3.5 font-mono text-[11px] max-lg:text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
                     hiddenClasses.includes(c)
                       ? 'border-border text-muted-foreground opacity-50 hover:opacity-100'
                       : 'border-transparent bg-secondary text-secondary-foreground hover:bg-secondary/80'
@@ -486,7 +519,7 @@ import CalendarDaysIcon from 'lucide-svelte/icons/calendar-days'
           {#if filtersActive || sortKey !== 'departure'}
             <button
               type="button"
-              class="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+              class="inline-flex min-h-11 items-center px-2 -mx-2 text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
               onclick={resetFilters}
             >
               Reset ({filteredTrains.length}/{trains.length})
@@ -494,7 +527,7 @@ import CalendarDaysIcon from 'lucide-svelte/icons/calendar-days'
           {/if}
           <div class="ml-auto flex items-center gap-2">
             <Select.Root type="single" bind:value={sortKey}>
-              <Select.Trigger class="h-7 w-32 text-xs" aria-label="Sort trains by">
+              <Select.Trigger class="w-32 text-xs max-lg:text-sm" aria-label="Sort trains by">
                 {SORTS.find(([k]) => k === sortKey)?.[1] ?? 'Departure'}
               </Select.Trigger>
               <Select.Content>
@@ -513,7 +546,7 @@ import CalendarDaysIcon from 'lucide-svelte/icons/calendar-days'
                 aria-pressed={view === 'cards'}
                 title="Card view"
                 onclick={() => (view = 'cards')}
-                class={`cursor-pointer px-2.5 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${view === 'cards' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}
+                class={`cursor-pointer px-2.5 py-1 text-xs transition-colors max-lg:min-h-11 max-lg:px-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${view === 'cards' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}
               >
                 Cards
               </button>
@@ -522,7 +555,7 @@ import CalendarDaysIcon from 'lucide-svelte/icons/calendar-days'
                 aria-pressed={view === 'matrix'}
                 title="Matrix view"
                 onclick={() => (view = 'matrix')}
-                class={`cursor-pointer px-2.5 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${view === 'matrix' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}
+                class={`cursor-pointer px-2.5 py-1 text-xs transition-colors max-lg:min-h-11 max-lg:px-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${view === 'matrix' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}
               >
                 Matrix
               </button>
@@ -538,6 +571,45 @@ import CalendarDaysIcon from 'lucide-svelte/icons/calendar-days'
           </Card.Content>
         </Card.Root>
       {:else if view === 'matrix'}
+        {#if viewport.narrow}
+          <!-- Mobile matrix: one card per train, class chips instead of columns -->
+          <ul class="grid gap-2">
+            {#each filteredTrains as tr, i (asText(tr?.number) || `mm-${i}`)}
+              <li class="rounded-lg border bg-card">
+                <div class="border-b px-3 py-2">
+                  <div class="flex min-w-0 items-center gap-1.5">
+                    <TrainNumberBadge number={tr?.number} name={tr?.name} />
+                    <span class="truncate text-sm font-medium">{asText(tr?.name)}</span>
+                    <TrainDelayBadge number={tr?.number} name={tr?.name} compact />
+                  </div>
+                  <div class="mt-0.5 font-mono text-[11px] max-lg:text-xs tabular-nums text-muted-foreground">
+                    {fmt(tr?.departure_time)} → {fmt(tr?.arrival_time)} · {durationLabel(tr)}
+                  </div>
+                </div>
+                <div class="grid grid-cols-[repeat(auto-fill,minmax(6.5rem,1fr))] gap-x-3 gap-y-2 px-3 py-2">
+                  {#each matrixClasses as c (c)}
+                    {@const row = visibleRows(tr).find((r) => classCode(r) === c)}
+                    <div class="grid content-start gap-0.5">
+                      <span class="font-mono text-[10px] leading-tight font-medium tracking-wide uppercase text-muted-foreground">
+                        {c}
+                      </span>
+                      {#if row}
+                        <AvailabilityStatusBadge status={row?.status} size="xs" class="max-w-full" />
+                        {#if numOrNull(row?.fare) != null}
+                          <span class="font-mono text-[11px] max-lg:text-xs tabular-nums text-muted-foreground">
+                            ₹{numOrNull(row?.fare).toLocaleString('en-IN')}
+                          </span>
+                        {/if}
+                      {:else}
+                        <span class="text-sm text-muted-foreground">—</span>
+                      {/if}
+                    </div>
+                  {/each}
+                </div>
+              </li>
+            {/each}
+          </ul>
+        {:else}
         <div class="rounded-lg border">
           <Table.Root class="text-xs">
             <Table.Header>
@@ -560,6 +632,7 @@ import CalendarDaysIcon from 'lucide-svelte/icons/calendar-days'
                     <div class="flex items-center gap-1.5">
                       <TrainNumberBadge number={tr?.number} name={tr?.name} />
                       <span class="max-w-36 truncate font-medium">{asText(tr?.name)}</span>
+                      <TrainDelayBadge number={tr?.number} name={tr?.name} compact />
                     </div>
                     <div class="mt-0.5 font-mono text-[10px] tabular-nums text-muted-foreground">
                       {fmt(tr?.departure_time)} → {fmt(tr?.arrival_time)} · {durationLabel(tr)}
@@ -587,6 +660,7 @@ import CalendarDaysIcon from 'lucide-svelte/icons/calendar-days'
             </Table.Body>
           </Table.Root>
         </div>
+        {/if}
       {:else}
         <div class="grid gap-2.5">
           {#each filteredTrains as tr, i (asText(tr?.number) || `c-${i}`)}
@@ -596,6 +670,7 @@ import CalendarDaysIcon from 'lucide-svelte/icons/calendar-days'
                 <div class="flex min-w-0 items-center gap-2">
                   <TrainNumberBadge number={tr?.number} name={tr?.name} />
                   <span class="truncate text-sm font-medium">{asText(tr?.name) || 'Unknown train'}</span>
+                  <TrainDelayBadge number={tr?.number} name={tr?.name} compact />
                 </div>
                 <div class="ml-auto flex flex-wrap items-center gap-2">
                   {#if flags}
@@ -604,6 +679,18 @@ import CalendarDaysIcon from 'lucide-svelte/icons/calendar-days'
                   <span class="font-mono text-xs tabular-nums text-muted-foreground">
                     {fmt(tr?.departure_time)} → {fmt(tr?.arrival_time)} · {durationLabel(tr)}
                   </span>
+                  {#if asText(tr?.number)}
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="xs"
+                      onclick={() => navigate(trainHref(tr.number, 'schedule'))}
+                      title={`Timetable & stops of ${asText(tr?.number)}`}
+                    >
+                      <CalendarClockIcon class="size-3" />
+                      Schedule
+                    </Button>
+                  {/if}
                 </div>
               </div>
               <div class="grid grid-cols-[repeat(auto-fill,minmax(9.5rem,1fr))] gap-1.5 border-t px-3 py-2">

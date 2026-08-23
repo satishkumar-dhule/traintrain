@@ -15,10 +15,12 @@ import DataTable from '$lib/components/DataTable.svelte'
 import EmptyState from '$lib/components/EmptyState.svelte'
 import RecentSearches from '$lib/components/RecentSearches.svelte'
 import { loadRecent, rememberRecent, clearStored } from '$lib/recent.js'
+import { pickNearbyStation } from '$lib/nearby.svelte.js'
 import {
   TrainNumberBadge,
   StationCodeBadge,
   DelayBadge,
+  TrainDelayBadge,
   RunsOnBadges,
   StatusBadge,
   CountBadge
@@ -26,13 +28,13 @@ import {
   import ActivityIcon from 'lucide-svelte/icons/activity'
   import CalendarClockIcon from 'lucide-svelte/icons/calendar-clock'
   import MapPinIcon from 'lucide-svelte/icons/map-pin'
-  import XIcon from 'lucide-svelte/icons/x'
 
   let { code = '', view = '' } = $props()
 
   let query = $state('')
   let hours = $state('2')
   let dateInput = $state('')
+  let destInput = $state('')
   let tab = $state('live')
   let committedCode = $state('')
 
@@ -47,12 +49,13 @@ import {
   let stationInfo = $state(null)
   let infoFetched = ''
 
-  // Nearby: idle -> locating -> loading -> ok | message | gone.
-  // `gone` retires the control entirely when the endpoint answers non-OK
-  // (e.g. the askdisha module is disabled and the route falls through to 404).
-  let nearbyPhase = $state('idle')
-  let nearbyMsg = $state('')
-  let nearbyStations = $state([])
+  // Nearby uses the shared blocking dialog (`nearby.svelte.js`): locate ->
+  // list stations around the user -> jump straight to that board.
+  async function pickNearbyBoard() {
+    const picked = await pickNearbyStation()
+    if (!picked || !picked.code) return
+    onPickStation({ code: picked.code })
+  }
 
   let liveKey = ''
   let ttKey = ''
@@ -128,52 +131,10 @@ import {
     stationInfo = res.ok && res.data && typeof res.data === 'object' ? res.data : null
   }
 
-  function findNearby() {
-    if (!('geolocation' in navigator)) {
-      nearbyPhase = 'message'
-      nearbyMsg = 'Geolocation is not available in this browser.'
-      return
-    }
-    nearbyPhase = 'locating'
-    navigator.geolocation.getCurrentPosition(
-      async ({ coords }) => {
-        nearbyPhase = 'loading'
-        const res = await api(
-          `/rail-api/askdisha/nearby?lat=${encodeURIComponent(coords.latitude)}&lng=${encodeURIComponent(coords.longitude)}`
-        )
-        if (!res.ok || !Array.isArray(res.data?.stations)) {
-          nearbyPhase = 'gone'
-          return
-        }
-        nearbyStations = res.data.stations
-        nearbyPhase = 'ok'
-      },
-      (err) => {
-        nearbyPhase = 'message'
-        nearbyMsg =
-          err && err.code === 1
-            ? 'Location permission denied — allow location access to find nearby stations.'
-            : (err && err.message) || 'Could not determine your location.'
-      },
-      { timeout: 10000, maximumAge: 60000 },
-    )
-  }
-
-  function dismissNearby() {
-    nearbyPhase = 'idle'
-    nearbyMsg = ''
-    nearbyStations = []
-  }
-
-  function nearbyDistance(km) {
-    const n = Number(km)
-    return Number.isFinite(n) ? `${n.toFixed(1)} km` : null
-  }
-
   const liveCols = [
     { key: 'train', label: 'Train', value: (t) => `${t.number ?? ''} ${t.name ?? ''}` },
-    { key: 'sta', label: 'Sched', cellClass: 'font-mono text-xs', value: (t) => fmt(t.sta) },
-    { key: 'eta', label: 'Expected', cellClass: 'font-mono text-xs', value: (t) => fmt(t.eta) },
+    { key: 'sta', label: 'Sched', cellClass: 'font-mono text-xs max-lg:text-sm', value: (t) => fmt(t.sta) },
+    { key: 'eta', label: 'Expected', cellClass: 'font-mono text-xs max-lg:text-sm', value: (t) => fmt(t.eta) },
     {
       key: 'delay',
       label: 'Delay',
@@ -185,7 +146,7 @@ import {
       key: 'platform',
       label: 'Platform',
       class: 'w-24',
-      cellClass: 'font-mono text-xs',
+      cellClass: 'font-mono text-xs max-lg:text-sm',
       value: (t) => fmt(t.platform),
       sortValue: (t) => numOrNull(t.platform),
     },
@@ -195,8 +156,8 @@ import {
     { key: 'train', label: 'Train', value: (t) => `${t.number ?? ''} ${t.name ?? ''}` },
     { key: 'type', label: 'Type', class: 'w-28', value: (t) => t.train_type || '' },
     { key: 'classes', label: 'Classes', class: 'w-28', value: (t) => t.classes || '' },
-    { key: 'arrival', label: 'Arr', cellClass: 'font-mono text-xs', value: (t) => fmt(t.arrival) },
-    { key: 'departure', label: 'Dep', cellClass: 'font-mono text-xs', value: (t) => fmt(t.departure) },
+    { key: 'arrival', label: 'Arr', cellClass: 'font-mono text-xs max-lg:text-sm', value: (t) => fmt(t.arrival) },
+    { key: 'departure', label: 'Dep', cellClass: 'font-mono text-xs max-lg:text-sm', value: (t) => fmt(t.departure) },
     {
       key: 'days',
       label: 'Days',
@@ -209,11 +170,14 @@ import {
     const c = norm(target)
     if (!c) return
     const h = String(hours)
-    const k = `${c}|${h}`
+    const d = norm(destInput)
+    const k = `${c}|${h}|${d}`
     liveKey = k
     livePhase = live && `${live.station ?? ''}` === `${c}` ? 'refreshing' : 'loading'
     liveError = null
-    const res = await api(`/rail-api/ntes/live-station?station=${encodeURIComponent(c)}&hours=${encodeURIComponent(h)}`)
+    let qs = `station=${encodeURIComponent(c)}&hours=${encodeURIComponent(h)}`
+    if (d) qs += `&destination=${encodeURIComponent(d)}`
+    const res = await api(`/rail-api/ntes/live-station?${qs}`)
     if (liveKey !== k) return
     if (res.ok) {
       live = res.data
@@ -227,7 +191,8 @@ import {
 
   function ensureLive() {
     if (!committedCode) return
-    if (`${committedCode}|${hours}` === liveKey) return
+    const d = norm(destInput)
+    if (`${committedCode}|${hours}|${d}` === liveKey) return
     loadLive(committedCode)
   }
 
@@ -266,6 +231,13 @@ import {
     const want = `/station/${encodeURIComponent(c)}/${tab}`
     if (route.path !== want) navigate(want)
     if (tab === 'live') loadLive(c)
+  }
+
+  // Picking a destination re-queries the live board immediately (the NTES
+  // source filters it upstream); typing still waits for "Show board".
+  function onPickDest(item) {
+    if (tab !== 'live' || !committedCode || !norm(item && item.code)) return
+    loadLive(committedCode)
   }
 
   function showBoard() {
@@ -314,6 +286,7 @@ import {
   <span class="flex items-center gap-2">
     <TrainNumberBadge number={t.number} name={t.name} />
     <span class="font-medium">{t.name}</span>
+    <TrainDelayBadge number={t.number} name={t.name} type={t.train_type} compact />
   </span>
 {/snippet}
 
@@ -322,7 +295,7 @@ import {
 {/snippet}
 
 {#snippet ttClassesCell(t)}
-  <span class="text-xs text-muted-foreground">{t.classes || '—'}</span>
+  <span class="text-xs max-lg:text-sm text-muted-foreground">{t.classes || '—'}</span>
 {/snippet}
 
 {#snippet ttDaysCell(t)}
@@ -333,7 +306,7 @@ import {
 <section class="grid grid-cols-[minmax(0,1fr)] gap-6" class:idle-center={!committedCode}>
   <div class="grid gap-1">
     <h1 class="text-2xl font-semibold tracking-tight">Station board</h1>
-    <p class="text-sm text-muted-foreground">Live board and full-day timetable for any station.</p>
+    <p class="max-lg:hidden text-sm text-muted-foreground">Live board and full-day timetable for any station.</p>
     {#if infoNames.length}
       <p class="text-sm text-muted-foreground">{infoNames.join(' · ')}</p>
     {/if}
@@ -354,6 +327,19 @@ import {
           onpick={onPickStation}
         />
       </div>
+      {#if tab === 'live'}
+        <div class="grid min-w-44 flex-1 gap-2">
+          <Label for="stn-dest">Going to (optional)</Label>
+          <AutoCompleteInput
+            id="stn-dest"
+            kind="station"
+            nearby={false}
+            placeholder="Filter board, e.g. BCT"
+            bind:value={destInput}
+            onpick={onPickDest}
+          />
+        </div>
+      {/if}
       <div class="grid gap-2">
         <Label>Window</Label>
         <Select.Root type="single" bind:value={hours}>
@@ -376,23 +362,13 @@ import {
           ? 'Refreshing…'
           : 'Show board'}
       </Button>
-      {#if nearbyPhase !== 'gone'}
-        <div class="grid gap-2">
-          <Label>Nearby</Label>
-          <Button
-            variant="outline"
-            onclick={findNearby}
-            disabled={nearbyPhase === 'locating' || nearbyPhase === 'loading'}
-          >
-            <MapPinIcon />
-            {nearbyPhase === 'locating'
-              ? 'Locating…'
-              : nearbyPhase === 'loading'
-                ? 'Searching…'
-                : 'Nearby stations'}
-          </Button>
-        </div>
-      {/if}
+      <div class="grid gap-2">
+        <Label>Nearby</Label>
+        <Button variant="outline" onclick={pickNearbyBoard}>
+          <MapPinIcon />
+          Nearby stations
+        </Button>
+      </div>
     </Card.Content>
   </Card.Root>
 
@@ -405,64 +381,6 @@ import {
       if (tab === 'timetable') ensureTimetable()
     }}
   />
-
-  {#if nearbyPhase === 'message'}
-    <Alert.Root role="status">
-      <Alert.Title>Could not find nearby stations</Alert.Title>
-      <Alert.Description class="flex items-center justify-between gap-3">
-        {nearbyMsg}
-        <Button variant="ghost" size="icon-sm" aria-label="Dismiss" onclick={dismissNearby}>
-          <XIcon />
-        </Button>
-      </Alert.Description>
-    </Alert.Root>
-  {:else if nearbyPhase === 'loading'}
-    <Card.Root>
-      <Card.Content class="grid gap-2">
-        {#each [0, 1, 2] as i (i)}
-          <Skeleton class="h-9 w-full" />
-        {/each}
-      </Card.Content>
-    </Card.Root>
-  {:else if nearbyPhase === 'ok'}
-    <Card.Root>
-      <Card.Header class="flex-row items-center justify-between space-y-0">
-        <div class="grid gap-1">
-          <Card.Title>Nearby stations</Card.Title>
-          <Card.Description>
-            {nearbyStations.length
-              ? `${nearbyStations.length} stations sorted by distance`
-              : 'No stations found around your location.'}
-          </Card.Description>
-        </div>
-        <Button variant="ghost" size="icon-sm" aria-label="Dismiss nearby list" onclick={dismissNearby}>
-          <XIcon />
-        </Button>
-      </Card.Header>
-      {#if nearbyStations.length}
-        <Card.Content class="grid gap-1">
-          {#each nearbyStations as s (s.code)}
-            <button
-              type="button"
-              class="flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-sm hover:bg-muted"
-              onclick={() => onPickStation({ code: s.code })}
-            >
-              <span class="flex min-w-0 items-baseline">
-                <span class="font-mono text-xs font-medium">{s.code}</span>
-                <span class="mx-1.5 text-muted-foreground">·</span>
-                <span class="truncate font-medium">{s.name}</span>
-              </span>
-              {#if nearbyDistance(s.distance_km)}
-                <span class="shrink-0 font-mono text-xs text-muted-foreground">
-                  {nearbyDistance(s.distance_km)}
-                </span>
-              {/if}
-            </button>
-          {/each}
-        </Card.Content>
-      {/if}
-    </Card.Root>
-  {/if}
 
   {#if !committedCode && recent.length > 0}
     <RecentSearches
@@ -498,7 +416,11 @@ import {
           <Card.Header class="flex-row items-center justify-between space-y-0">
             <div class="grid gap-1">
               <Card.Title>{live.station ?? '—'} departures &amp; arrivals</Card.Title>
-              <Card.Description>{live.trains?.length ?? 0} trains within {live.hours}h</Card.Description>
+              <Card.Description>
+                {live.trains?.length ?? 0} trains within {live.hours}h{live.destination
+                  ? ` · towards ${live.destination}`
+                  : ''}
+              </Card.Description>
             </div>
             <span class="inline-flex items-center rounded-md bg-sky-500/10 px-2 py-0.5 text-xs font-medium text-sky-700 dark:text-sky-400">{live.hours}h window</span>
           </Card.Header>
@@ -506,9 +428,12 @@ import {
             <DataTable
               columns={liveCols}
               rows={live.trains ?? []}
+              primary="train"
               rowKey={(t, i) => `${i}-${t?.number ?? ''}-${t?.name ?? ''}`}
               cells={{ train: liveTrainCell, delay: liveDelayCell }}
-              empty="No trains in this window."
+              empty={live.destination
+                ? 'No trains towards this destination in this window.'
+                : 'No trains in this window.'}
             />
           </Card.Content>
         </Card.Root>
@@ -546,6 +471,7 @@ import {
             <DataTable
               columns={ttCols}
               rows={timetable.trains ?? []}
+              primary="train"
               rowKey={(t, i) => `${i}-${t?.number ?? ''}-${t?.name ?? ''}`}
               cells={{
                 train: ttTrainCell,

@@ -23,6 +23,18 @@ impl Service {
         station: Option<&str>,
         date: Option<&str>,
     ) -> Result<TrainOnMapResponse, AppError> {
+        // The spot view (`station` present) changes the response, so it gets
+        // its own cache key; the route-only map is keyed by train alone.
+        let cache_key = match station {
+            Some(code) => format!("train_on_map:{train}:{}", code.to_ascii_uppercase()),
+            None => format!("train_on_map:{train}"),
+        };
+        if let Some(cached) = state.cache.get(&cache_key) {
+            if let Ok(resp) = serde_json::from_value(cached) {
+                return Ok(resp);
+            }
+        }
+
         let date = date.map(str::to_string).unwrap_or_else(today_ist);
         let route_norm = state.ntes_web.train_route_map(train, &date).await?;
         let mut route: Vec<RouteStation> = route_entries(&route_norm, state);
@@ -102,6 +114,7 @@ impl Service {
                 }
             }
         }
+        state.cache.set(&cache_key, serde_json::to_value(&resp)?);
         Ok(resp)
     }
 }

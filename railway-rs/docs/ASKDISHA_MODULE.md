@@ -69,7 +69,8 @@ Disabled behavior for both: router not merged ⇒ 404 fall-through (unchanged v1
 |---|---|---|
 | F1 | offline | `src/bin/hydrate_stations.rs`: merge `testdata/askdisha/stationupdated_full.json` into `data/stations.json` by code. Adds optional `name_hi,name_gu,district,address,train_count,lat,lng`. **Local `state`/`zone` always win on conflict.** Prints unmatched-code report; idempotent. |
 | F2 | search + stations slices | Search response rows and `GET /stations/:code` gain the optional fields (passthrough from hydrated `StationRecord`). |
-| F4 | schedule slice | Chain **NTES → Railyatri → Corover**: same normalized `ScheduleResponse`; winning source honest in `data_source` ("CoRover"); `record_source_latency("corover-api")`; cache key `schedule:{train}` reused. Stops may now carry `distance_km:f64` + `day:u8` (absent when NTES/Railyatri win). |
+| F3 | search slice | `/rail-api/search/stations` chain **CoRover → local dataset** (`bot/searchStation` primary, tiered-dataset fallback on disabled/failed/empty; shared cache key `search:stations:{q}` / 30 min). Trains + suggest stay offline (no upstream train-search endpoint). |
+| F4 | schedule slice | Chain **CoRover → NTES → Railyatri**: same normalized `ScheduleResponse`; winning source honest in `data_source` ("CoRover"); `record_source_latency("corover-api")`; cache key `schedule:{train}` reused. Stops may now carry `distance_km:f64` + `day:u8` (absent when NTES/Railyatri win). |
 | — | observability | `record_source_latency` on success per house mechanism; failures = warn-log + honest error (no fabricated metrics). |
 
 ## 5. Rust types (exact names — fixtures/tests compile against these)

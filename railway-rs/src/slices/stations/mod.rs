@@ -5,8 +5,15 @@
 //!   `crate::models::Station`
 //! - `GET /rail-api/stations/:code`          -> single `crate::models::Station`
 //!   or 404 (`{"error":"Station <CODE> not found."}`)
+//! - `GET /rail-api/nearby/stations?lat=&lng=&limit=` -> distance-sorted
+//!   [`NearbyResponse`] computed locally with haversine over the hydrated
+//!   coordinates in `data/stations.json`
 //!
-//! Both carry the hydrated AskDISHA optionals (F2 passthrough from
+//! The nearby path deliberately lives outside `/stations/*`: axum 0.7
+//! (matchit 0.7) rejects static segments that collide with the `:code`
+//! parameter at router-build time.
+//!
+//! All carry the hydrated AskDISHA optionals (F2 passthrough from
 //! `StationRecord`); absent keys are omitted on the wire.
 //!
 //! Data: real local `data/stations.json` via `state.datasets.stations`
@@ -23,6 +30,8 @@ use crate::models::Station;
 use crate::state::AppState;
 
 pub mod service;
+
+pub use service::{NearbyResponse, NearbyStation};
 
 const MAX_Q_LEN: usize = 128;
 
@@ -60,8 +69,38 @@ async fn station_by_code_handler(
         })
 }
 
+#[derive(Deserialize, Default)]
+struct NearbyQuery {
+    lat: Option<f64>,
+    lng: Option<f64>,
+    limit: Option<usize>,
+}
+
+/// `GET /rail-api/nearby/stations` - nearest stations to a coordinate pair,
+/// straight from the local dataset (no upstream, no feature flag). Bad or
+/// missing coordinates are a 400 so clients see an honest failure.
+async fn nearby_stations_handler(
+    State(state): State<AppState>,
+    Query(params): Query<NearbyQuery>,
+) -> Result<Json<NearbyResponse>, AppError> {
+    let lat = params
+        .lat
+        .ok_or_else(|| AppError::bad_request("Missing lat."))?;
+    let lng = params
+        .lng
+        .ok_or_else(|| AppError::bad_request("Missing lng."))?;
+    service::validate_coords(lat, lng)?;
+    Ok(Json(service::Service::nearby(
+        &state,
+        lat,
+        lng,
+        params.limit.unwrap_or(service::DEFAULT_NEARBY_LIMIT),
+    )))
+}
+
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/rail-api/stations", get(stations_handler))
         .route("/rail-api/stations/:code", get(station_by_code_handler))
+        .route("/rail-api/nearby/stations", get(nearby_stations_handler))
 }

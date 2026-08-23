@@ -5,6 +5,7 @@
   import * as Card from '$lib/components/ui/card/index.js'
   import { Button } from '$lib/components/ui/button/index.js'
   import { Input } from '$lib/components/ui/input/index.js'
+  import { Label } from '$lib/components/ui/label/index.js'
   import { Badge } from '$lib/components/ui/badge/index.js'
   import * as Tabs from '$lib/components/ui/tabs/index.js'
   import { Skeleton } from '$lib/components/ui/skeleton/index.js'
@@ -251,7 +252,7 @@ import {
 <section class="grid gap-6">
   <div class="grid gap-1">
     <h1 class="text-2xl font-semibold tracking-tight">Extras</h1>
-    <p class="text-sm text-muted-foreground">Heritage trains and running parcel specials, live from NTES.</p>
+    <p class="max-lg:hidden text-sm text-muted-foreground">Heritage trains and running parcel specials, live from NTES.</p>
   </div>
 
   <Tabs.Root class="min-w-0" bind:value={tab} onValueChange={onTabChange}>
@@ -262,16 +263,18 @@ import {
 
     <Tabs.Content value="heritage" class="mt-4 grid gap-4">
       <Card.Root>
-        <Card.Content class="flex flex-wrap items-center gap-3">
-          <Input
-            bind:value={selInput}
-            placeholder="Selection keyword, blank = all"
-            class="min-w-56 flex-1"
-            aria-label="Heritage selection keyword"
-            onkeydown={(e) => {
-              if (e.key === 'Enter') applyFilter()
-            }}
-          />
+        <Card.Content class="flex flex-wrap items-end gap-3">
+          <div class="grid min-w-56 flex-1 gap-2">
+            <Label for="heritage-kw">Keyword</Label>
+            <Input
+              id="heritage-kw"
+              bind:value={selInput}
+              placeholder="Selection keyword, blank = all"
+              onkeydown={(e) => {
+                if (e.key === 'Enter') applyFilter()
+              }}
+            />
+          </div>
           <Button onclick={applyFilter}><FilterIcon class="mr-2 size-4" />Filter</Button>
         </Card.Content>
       </Card.Root>
@@ -306,6 +309,7 @@ import {
             <DataTable
               columns={heritageCols}
               rows={hTrains}
+              primary="name"
               rowKey={(t, i) => `${i}|${str(t.number)}|${str(t.name)}`}
               cells={{ number: hNumberCell, route: hRouteCell }}
               empty="No heritage trains match this selection."
@@ -346,6 +350,7 @@ import {
             <DataTable
               columns={parcelCols}
               rows={pTrains}
+              primary="name"
               rowKey={(t, i) => `${i}|${str(t.number)}|${str(t.name)}`}
               cells={{ days: pDaysCell }}
               empty="No parcel special trains are currently listed."

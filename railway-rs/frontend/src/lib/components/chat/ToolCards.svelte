@@ -11,13 +11,13 @@
   import RouteIcon from 'lucide-svelte/icons/route'
   import ClipboardCheck from 'lucide-svelte/icons/clipboard-check'
   import ArrowRight from 'lucide-svelte/icons/arrow-right'
+  import { availabilityHref, journeysHref, trainHref } from '$lib/utils.js'
 
   let { kind = '', data = {} } = $props()
 
   let d = $derived(data ?? {})
 
   const DASH = '—'
-  const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
   const txt = (v) => (v === undefined || v === null || v === '' ? DASH : String(v))
   const num = (v) => {
@@ -55,7 +55,7 @@
   }
 
   const LINK_BTN =
-    'inline-flex w-fit items-center gap-1 text-xs font-medium text-primary hover:underline'
+    'inline-flex w-fit items-center gap-1 text-xs font-medium text-primary hover:underline max-lg:min-h-11 max-lg:px-1 max-lg:-mx-1'
 </script>
 
 {#snippet header(Icon, title, source)}
@@ -79,7 +79,7 @@
 
 {#snippet ToneChip(c)}
   {@const tone = CHIP_TONES[c?.tone] ?? CHIP_TONES.warn}
-  <span class={`inline-flex items-baseline gap-1 rounded-lg border px-2 py-0.5 text-[11px] leading-tight ${tone}`}>
+  <span class={`inline-flex items-baseline gap-1 rounded-lg border px-2 py-0.5 text-[11px] leading-tight max-lg:text-xs ${tone}`}>
     <span class="font-semibold">{txt(c?.class)}</span>
     <span>{txt(c?.status)}</span>
     {#if c?.fare !== undefined && c?.fare !== null && c?.fare !== ''}
@@ -99,7 +99,7 @@
         <div class="flex items-center gap-2">
           <Badge variant="outline" class="shrink-0 font-mono">{txt(t?.number)}</Badge>
           <span class="min-w-0 flex-1 truncate">{txt(t?.name)}</span>
-          <span class="shrink-0 tabular-nums text-xs">{txt(t?.dep)} → {txt(t?.arr)}</span>
+          <span class="shrink-0 tabular-nums text-xs max-lg:text-sm">{txt(t?.dep)} → {txt(t?.arr)}</span>
           <span class="hidden w-24 shrink-0 truncate text-right text-[11px] text-muted-foreground sm:block">
             {t?.runs ?? ''}
           </span>
@@ -113,7 +113,7 @@
     </div>
     {#if d.src_code && d.dst_code}
       <div class="mt-2">
-        {@render footer('Open Journeys', `/plan/${d.src_code}/${d.dst_code}/trains`)}
+        {@render footer('Open Journeys', journeysHref(d.src_code, d.dst_code))}
       </div>
     {/if}
   </div>
@@ -123,11 +123,11 @@
     <p class="rounded-md bg-muted px-2 py-1 text-xs">{d.position || 'Position unavailable'}</p>
     <div class="mt-2 flex flex-wrap items-center gap-1.5">
       {#if num(d.last_seen_delay_minutes) > 0}
-        <span class="inline-flex items-center rounded-full border border-red-500/30 bg-red-500/10 px-2 py-0.5 text-[11px] font-medium text-red-600 dark:text-red-400">
+        <span class="inline-flex items-center rounded-full border border-red-500/30 bg-red-500/10 px-2 py-0.5 text-[11px] max-lg:text-xs font-medium text-red-600 dark:text-red-400">
           {num(d.last_seen_delay_minutes)}m late
         </span>
       {:else}
-        <span class="inline-flex items-center rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
+        <span class="inline-flex items-center rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[11px] max-lg:text-xs font-medium text-emerald-600 dark:text-emerald-400">
           on time
         </span>
       {/if}
@@ -137,10 +137,10 @@
     </div>
     <div class="mt-2 space-y-1">
       {#each list(d.next_stops) as s (s?.code + s?.sch)}
-        <div class="flex items-center justify-between gap-2 text-xs">
+        <div class="flex items-center justify-between gap-2 text-xs max-lg:text-sm">
           <span class="min-w-0 flex-1 truncate">
             {txt(s?.name)}
-            <span class="ml-1 font-mono text-[11px] text-muted-foreground">{s?.code ?? DASH}</span>
+            <span class="ml-1 font-mono text-[11px] max-lg:text-xs text-muted-foreground">{s?.code ?? DASH}</span>
           </span>
           <span class="shrink-0 tabular-nums text-muted-foreground">{txt(s?.sch)} → {txt(s?.act)}</span>
           <span
@@ -166,9 +166,9 @@
         {@const tone = delayTone(mins)}
         <div class="flex items-center gap-2">
           <span class={`size-1.5 shrink-0 rounded-full ${DOT_CLS[tone]}`}></span>
-          <span class="w-32 min-w-0 shrink-0 truncate text-xs">
+          <span class="w-32 min-w-0 shrink-0 truncate text-xs max-lg:text-sm">
             {txt(s?.name)}
-            <span class="ml-1 font-mono text-[11px] text-muted-foreground">{s?.code ?? DASH}</span>
+            <span class="ml-1 font-mono text-[11px] max-lg:text-xs text-muted-foreground">{s?.code ?? DASH}</span>
           </span>
           <span class="h-1.5 min-w-1 flex-1 overflow-hidden rounded-full bg-muted">
             <span
@@ -176,7 +176,7 @@
               style={`width:${Math.min(100, mins * 2)}%`}
             ></span>
           </span>
-          <span class="w-16 shrink-0 text-right tabular-nums text-xs">
+          <span class="w-16 shrink-0 text-right tabular-nums text-xs max-lg:text-sm">
             {mins}m
             {#if s?.dep_delay_min != null && s.dep_delay_min !== s.arr_delay_min}
               <span class="text-muted-foreground">/ {Math.max(0, num(s.dep_delay_min))}m</span>
@@ -187,6 +187,11 @@
         <p class="text-xs text-muted-foreground">No delay data</p>
       {/each}
     </div>
+    {#if d.train_no}
+      <div class="mt-2">
+        {@render footer('Open avg delay view', trainHref(d.train_no, 'delay'))}
+      </div>
+    {/if}
   </div>
 {:else if kind === 'seat_availability'}
   <div class="rounded-xl border bg-card p-3 text-sm">
@@ -203,10 +208,10 @@
         <div class="rounded-lg border p-2">
           <div class="flex items-baseline justify-between gap-2">
             <span class="min-w-0 truncate">
-              <span class="mr-1.5 inline-block rounded bg-muted px-1 font-mono text-xs">{txt(t?.number)}</span>
+              <span class="mr-1.5 inline-block rounded bg-muted px-1 font-mono text-xs max-lg:text-sm">{txt(t?.number)}</span>
               {txt(t?.name)}
             </span>
-            <span class="shrink-0 tabular-nums text-[11px] text-muted-foreground">
+            <span class="shrink-0 tabular-nums text-[11px] max-lg:text-xs text-muted-foreground">
               {txt(t?.dep)} → {txt(t?.arr)} · {t?.duration ?? DASH}
             </span>
           </div>
@@ -222,10 +227,7 @@
     </div>
     {#if d.src_code && d.dst_code}
       <div class="mt-2">
-        {@render footer(
-          'Open availability',
-          `/plan/${d.src_code}/${d.dst_code}/availability${DATE_RE.test(d.date ?? '') ? `/${d.date}` : ''}`
-        )}
+        {@render footer('Open availability', availabilityHref(d.src_code, d.dst_code, d.date))}
       </div>
     {/if}
   </div>
@@ -234,7 +236,7 @@
     {@render header(ListIcon, `Station board · ${txt(d.station_code)} (${num(d.hours)}h)`, d.data_source)}
     <div class="space-y-1">
       {#each list(d.trains) as r, i (r?.number + i)}
-        <div class="flex items-center gap-2 text-xs">
+        <div class="flex items-center gap-2 text-xs max-lg:text-sm">
           <span
             class={`size-1.5 shrink-0 rounded-full ${r?.late ? 'bg-red-500' : 'bg-transparent'}`}
             title={r?.late ? 'late' : undefined}
@@ -262,7 +264,7 @@
         {@const isStation = String(r?.type ?? '').toLowerCase().includes('station')}
         <button
           type="button"
-          class="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition-colors hover:bg-muted"
+          class="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition-colors hover:bg-muted max-lg:min-h-11 max-lg:px-3.5"
           onclick={() => navigate(isStation ? `/station/${r.code}` : `/train/${r.code}`)}
         >
           {#if isStation}
@@ -284,21 +286,21 @@
     {#if list(d.running_days).length}
       <div class="mb-2 flex flex-wrap gap-1">
         {#each d.running_days as day, i (day + i)}
-          <Badge variant="secondary" class="text-[10px]">{day}</Badge>
+          <Badge variant="secondary" class="text-[10px] max-lg:text-xs">{day}</Badge>
         {/each}
       </div>
     {/if}
     <div class="space-y-1">
       {#each list(d.stops) as s, i (s?.code + i)}
         {#if i < 12}
-          <div class="flex items-baseline justify-between gap-2 border-l border-border pl-3 text-xs">
+          <div class="flex items-baseline justify-between gap-2 border-l border-border pl-3 text-xs max-lg:text-sm">
             <span class="min-w-0 flex-1 truncate">
               {i + 1}.
               <span class="ml-0.5 font-mono">{txt(s?.code)}</span>
               <span class="ml-1.5">{txt(s?.name)}</span>
             </span>
             <span class="shrink-0 tabular-nums text-muted-foreground">{txt(s?.arr)} – {txt(s?.dep)}</span>
-            <span class="w-9 shrink-0 text-right text-[11px] text-muted-foreground">{s?.halt ?? ''}</span>
+            <span class="w-9 shrink-0 text-right text-[11px] max-lg:text-xs text-muted-foreground">{s?.halt ?? ''}</span>
           </div>
         {/if}
       {:else}
@@ -308,11 +310,16 @@
         <p class="pl-3 text-[11px] text-muted-foreground">+{list(d.stops).length - 12} more stops</p>
       {/if}
     </div>
+    {#if d.train_number}
+      <div class="mt-2">
+        {@render footer('Open full schedule', trainHref(d.train_number, 'schedule'))}
+      </div>
+    {/if}
   </div>
 {:else if kind === 'chart_status'}
   <div class="rounded-xl border bg-card p-3 text-sm">
     {@render header(ClipboardCheck, `Chart · ${txt(d.train_number)}`, d.data_source)}
-    <dl class="grid grid-cols-[auto_1fr] items-baseline gap-x-4 gap-y-1 text-xs">
+    <dl class="grid grid-cols-[auto_1fr] items-baseline gap-x-4 gap-y-1 text-xs max-lg:text-sm">
       <dt class="text-muted-foreground">Journey date</dt>
       <dd>{txt(d.journey_date)}</dd>
       <dt class="text-muted-foreground">Boarding at</dt>

@@ -330,6 +330,12 @@ impl NtesWebClient {
     /// is the official name from the local dataset (`NEW DELHI`); the form
     /// needs it verbatim as `jStnName`.
     ///
+    /// `destination` is the optional "Going to station" filter of the real
+    /// NTES LiveStation form (`frmSTN`): when set it must travel upstream as
+    /// the `CODE - NAME` pair in `jToStationInput`, exactly what
+    /// `getStnByCode` fills in for a browser submission. `None` keeps the
+    /// field empty (the unfiltered board).
+    ///
     /// Emits the mobile-shape JSON `{"trainList":[{"trainNo","trainName",
     /// "scheduledTime","expectedTime","delayArr","platformNo"}]}`.
     pub async fn live_station(
@@ -337,7 +343,12 @@ impl NtesWebClient {
         station_code: &str,
         station_name: &str,
         hours: u32,
+        destination: Option<(&str, &str)>,
     ) -> Result<Value, AppError> {
+        let to_input = match destination {
+            Some((code, name)) => format!("{code} - {name}"),
+            None => String::new(),
+        };
         let html = self
             .post_form(
                 "q",
@@ -349,7 +360,7 @@ impl NtesWebClient {
                     ("jStation", station_code.to_string()),
                     ("jStnName", station_name.to_string()),
                     ("jFromStationInput", station_code.to_string()),
-                    ("jToStationInput", String::new()),
+                    ("jToStationInput", to_input),
                     ("nHr", hours.to_string()),
                 ],
             )
@@ -3305,7 +3316,7 @@ var runInfo = ["Source|#17-Aug-2026 15:20|On Time","17-Aug-2026 15:53|On Time#17
             Err(AppError::SourceUnavailable { source, .. }) if source == "ntes"
         ));
         assert!(matches!(
-            c.live_station("NDLS", "NEW DELHI", 2).await,
+            c.live_station("NDLS", "NEW DELHI", 2, None).await,
             Err(AppError::SourceUnavailable { source, .. }) if source == "ntes"
         ));
         assert!(matches!(

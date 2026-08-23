@@ -3,7 +3,9 @@
   import { initTheme } from '$lib/theme.svelte.js'
   import { palette, togglePalette } from '$lib/palette.svelte.js'
   import PowerSearch from '$lib/components/PowerSearch.svelte'
+  import NearbyStationDialog from '$lib/components/NearbyStationDialog.svelte'
   import DisplaySettings from '$lib/components/DisplaySettings.svelte'
+  import VisitTrail from '$lib/components/VisitTrail.svelte'
   import House from 'lucide-svelte/icons/house'
   import TrainFront from 'lucide-svelte/icons/train-front'
   import Building2 from 'lucide-svelte/icons/building-2'
@@ -15,24 +17,34 @@
   import Package from 'lucide-svelte/icons/package'
   import Sparkles from 'lucide-svelte/icons/sparkles'
   import Lightbulb from 'lucide-svelte/icons/lightbulb'
+  import Info from 'lucide-svelte/icons/info'
   import Search from 'lucide-svelte/icons/search'
+  import XIcon from 'lucide-svelte/icons/x'
+  import EllipsisIcon from 'lucide-svelte/icons/ellipsis'
 
   let { children } = $props()
 
   let mobileOpen = $state(false)
 
-  const items = [
+  /* Primary destinations get thumb-reachable slots; everything else lives in
+     the "More" sheet. Bottom-nav pattern: ≤5 visible items. */
+  const primaryItems = [
     { href: '/', label: 'Home', icon: House, exact: true },
-    { href: '/train', label: 'Live Status', icon: TrainFront },
-    { href: '/station', label: 'Station Board', icon: Building2 },
-    { href: '/journeys', label: 'Journeys', icon: RouteIcon },
+    { href: '/train', label: 'Live', icon: TrainFront },
+    { href: '/station', label: 'Board', icon: Building2 },
+    { href: '/journeys', label: 'Journeys', icon: RouteIcon }
+  ]
+
+  const items = [
+    ...primaryItems,
     { href: '/availability', label: 'Availability', icon: CalendarDays },
     { href: '/pnr', label: 'PNR Status', icon: Ticket },
     { href: '/exceptions', label: 'Exceptions', icon: TriangleAlert },
     { href: '/extras', label: 'Heritage & Parcel', icon: Package },
     { href: '/assistant', label: 'Ask Train Bro', icon: Sparkles },
     { href: '/insights', label: 'Insights', icon: Lightbulb },
-    { href: '/system', label: 'System', icon: Activity }
+    { href: '/system', label: 'System', icon: Activity },
+    { href: '/about', label: 'About', icon: Info }
   ]
 
   function isActive(item) {
@@ -50,6 +62,8 @@
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
       e.preventDefault()
       togglePalette()
+    } else if (e.key === 'Escape') {
+      mobileOpen = false
     }
   }
 
@@ -57,6 +71,16 @@
     initTheme()
     window.addEventListener('keydown', onKeydown)
     return () => window.removeEventListener('keydown', onKeydown)
+  })
+
+  /* Lock body scroll while the mobile drawer is open. */
+  $effect(() => {
+    if (!mobileOpen) return
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.body.style.overflow = prev
+    }
   })
 </script>
 
@@ -101,58 +125,120 @@
   </aside>
 
   <header
-    class="sticky top-0 z-30 flex h-14 items-center gap-1 overflow-x-auto border-b bg-background/95 px-4 backdrop-blur lg:hidden"
+    class="sticky top-0 z-30 flex h-[calc(3.5rem+env(safe-area-inset-top))] items-center gap-0.5 border-b bg-background/95 px-2 pt-[env(safe-area-inset-top)] backdrop-blur supports-[backdrop-filter]:bg-background/80 lg:hidden"
   >
-    <a class="mr-2 flex items-center gap-2" href="/" onclick={(e) => go(e, '/')}>
+    <a
+      class="mr-1 flex min-h-11 min-w-11 items-center gap-2 rounded-lg px-2 transition-colors hover:bg-accent"
+      href="/"
+      onclick={(e) => go(e, '/')}
+    >
       <span class="flex size-7 items-center justify-center rounded-md bg-primary text-primary-foreground">
         <TrainFront class="size-4" />
       </span>
       <span class="whitespace-nowrap font-semibold tracking-tight">Train Bro</span>
     </a>
-    <button
-      type="button"
-      class="ml-auto flex items-center gap-1 rounded-md p-2 text-muted-foreground hover:bg-accent"
-      onclick={() => togglePalette()}
-      aria-label="Open search"
-    >
-      <Search class="size-4" />
-    </button>
-    <DisplaySettings placement="down" compact />
-    <button
-      type="button"
-      class="rounded-md px-2 py-1 text-sm text-muted-foreground hover:bg-accent"
-      onclick={() => (mobileOpen = !mobileOpen)}
-      aria-expanded={mobileOpen}
-    >
-      Menu
-    </button>
+    <div class="ml-auto flex items-center">
+      <button
+        type="button"
+        class="flex size-11 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+        onclick={() => togglePalette()}
+        aria-label="Open search"
+      >
+        <Search class="size-5" />
+      </button>
+      <DisplaySettings placement="down" compact />
+    </div>
   </header>
 
   {#if mobileOpen}
-    <div class="fixed inset-0 z-50 lg:hidden" role="dialog" aria-modal="true">
-      <div class="absolute inset-0 bg-black/50" onclick={() => (mobileOpen = false)}></div>
-      <nav class="absolute inset-y-0 left-0 w-64 overflow-y-auto border-r bg-card p-3">
+    <div class="fixed inset-0 z-50 lg:hidden" role="dialog" aria-modal="true" aria-label="Menu">
+      <div class="scrim-enter absolute inset-0 bg-black/50" onclick={() => (mobileOpen = false)}></div>
+      <nav
+        class="drawer-enter absolute inset-y-0 left-0 w-[min(19rem,85vw)] overflow-y-auto border-r bg-card pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-[max(0.75rem,env(safe-area-inset-top))] shadow-xl"
+      >
+        <div class="flex items-center justify-between px-3 pb-1">
+          <span class="text-sm font-semibold tracking-tight">Menu</span>
+          <button
+            type="button"
+            class="flex size-11 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+            onclick={() => (mobileOpen = false)}
+            aria-label="Close menu"
+          >
+            <XIcon class="size-5" />
+          </button>
+        </div>
         {#each items as item (item.href)}
           <a
             href={item.href}
             onclick={(e) => go(e, item.href)}
-            class={`mt-1 flex items-center gap-3 rounded-md px-3 py-2 text-sm ${
-              isActive(item) ? 'bg-primary text-primary-foreground' : 'hover:bg-accent'
+            aria-current={isActive(item) ? 'page' : undefined}
+            class={`mt-1 flex min-h-12 items-center gap-3.5 rounded-lg px-3.5 text-base transition-colors ${
+              isActive(item)
+                ? 'bg-primary text-primary-foreground'
+                : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
             }`}
           >
-            <item.icon class="size-4" />
+            <item.icon class="size-[22px] shrink-0" />
             {item.label}
           </a>
         {/each}
+        <div class="mt-3 space-y-1 border-t pt-3">
+          <button
+            type="button"
+            class="flex min-h-12 w-full items-center gap-3.5 rounded-lg px-3.5 text-base text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+            onclick={() => togglePalette()}
+          >
+            <Search class="size-5 shrink-0" />
+            <span>Search everything</span>
+          </button>
+          <DisplaySettings placement="down" />
+        </div>
       </nav>
     </div>
   {/if}
 
   <div class="lg:pl-60">
-    <main class="mx-auto w-full max-w-5xl px-4 py-6 md:px-8 md:py-10">
+    <VisitTrail />
+    <main
+      class="mx-auto w-full max-w-5xl px-4 pt-6 md:px-8 md:pt-10 max-lg:pb-[calc(5.5rem+env(safe-area-inset-bottom))] lg:pb-[calc(2.5rem+env(safe-area-inset-bottom))]"
+    >
       {@render children()}
     </main>
   </div>
+
+  <!-- Bottom tab bar: primary destinations thumb-reachable; the rest in "More". -->
+  <nav
+    class="fixed inset-x-0 bottom-0 z-40 border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/85 lg:hidden"
+    aria-label="Primary"
+  >
+    <div class="mx-auto grid max-w-xl grid-cols-5">
+      {#each primaryItems as item (item.href)}
+        <a
+          href={item.href}
+          onclick={(e) => go(e, item.href)}
+          aria-current={isActive(item) ? 'page' : undefined}
+          class={`flex min-h-14 flex-col items-center justify-center gap-1 px-1 pt-0.5 text-xs font-medium transition-colors ${
+            isActive(item) ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          <item.icon class="size-6" />
+          {item.label}
+        </a>
+      {/each}
+      <button
+        type="button"
+        onclick={() => (mobileOpen = true)}
+        aria-expanded={mobileOpen}
+        aria-haspopup="dialog"
+        class="flex min-h-14 flex-col items-center justify-center gap-1 px-1 pt-0.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+      >
+        <EllipsisIcon class="size-6" />
+        More
+      </button>
+    </div>
+    <div class="h-[env(safe-area-inset-bottom)]"></div>
+  </nav>
 </div>
 
 <PowerSearch />
+<NearbyStationDialog />

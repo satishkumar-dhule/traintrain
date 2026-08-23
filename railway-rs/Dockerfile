@@ -18,6 +18,9 @@ WORKDIR /app
 COPY --from=builder /app/target/release/railway-rs /app/railway-rs
 COPY static/ /app/static/
 COPY data/ /app/data/
+# Optional local AI model (GGUF + tokenizer.json). Absent = local backend
+# reports unavailable and deployments stay on the Zen gateway.
+COPY models/ /app/models/
 
 USER railway
 EXPOSE 3000

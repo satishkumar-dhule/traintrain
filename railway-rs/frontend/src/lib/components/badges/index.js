@@ -6,6 +6,7 @@ export {
   parseDelayMinutes,
   delayKind
 } from './delay-badge.svelte';
+export { default as TrainDelayBadge } from './train-delay-badge.svelte';
 export {
   default as RunsOnBadges,
   dayFlags,

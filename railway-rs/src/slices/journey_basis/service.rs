@@ -46,6 +46,14 @@ impl Service {
         date: Option<&str>,
     ) -> Result<JourneyBasisResponse, AppError> {
         let _ = date; // NTES auto-selects the run nearest today via the minimal ShowRunCStn body.
+
+        let cache_key = format!("journey_basis:{train}:{station}");
+        if let Some(cached) = state.cache.get(&cache_key) {
+            if let Ok(resp) = serde_json::from_value(cached) {
+                return Ok(resp);
+            }
+        }
+
         let list = state.ntes_web.journey_stations(train).await?;
         let info = journey_station_matching(&list, station).ok_or_else(|| {
             AppError::bad_request(format!(
@@ -58,10 +66,12 @@ impl Service {
             .journey_station_basis(train, &j_station_value)
             .await?;
         let status = map_response(&norm)?;
-        Ok(JourneyBasisResponse {
+        let resp = JourneyBasisResponse {
             status,
             journey_station: Some(info),
-        })
+        };
+        state.cache.set(&cache_key, serde_json::to_value(&resp)?);
+        Ok(resp)
     }
 }
 

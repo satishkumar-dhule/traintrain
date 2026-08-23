@@ -1,14 +1,18 @@
-//! AI inference over an OpenAI-compatible gateway (OpenCode Zen by default).
+//! AI inference backends behind one trait.
 //!
-//! The only outbound surface is HTTPS: `POST {base}/chat/completions` with
-//! `stream:true` and — when configured — an `Authorization: Bearer` key. The
-//! keyless free tier needs no credentials, so the app ships with AI enabled
-//! out of the box. This module is the single place that knows the wire format;
-//! slices consume typed [`AiEvent`] streams (deep-module contract).
+//! Two implementations ship: [`client::AiClient`] streams from an
+//! OpenAI-compatible gateway (OpenCode Zen by default; keyless free tier),
+//! and [`local::LocalBackend`] runs a quantized GGUF micro model in-process
+//! on CPU via candle. Slices consume typed [`AiEvent`] streams and never
+//! know which one answered (deep-module contract).
 
+pub mod backend;
 pub mod client;
+pub mod local;
 
+pub use backend::{AiBackend, AiEventStream};
 pub use client::{AiClient, AiEvent, AssembledToolCall, ChatMessage};
+pub use local::LocalBackend;
 
 #[cfg(test)]
 mod tests;

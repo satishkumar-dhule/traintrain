@@ -21,6 +21,15 @@ impl Service {
     pub async fn get_schedule(state: &AppState, train: &str) -> Result<ScheduleResponse, AppError> {
         let key = format!("schedule:{train}");
 
+        // The final DTO (not the raw upstream payload) is cached, so a hit
+        // replays the winning source's full response shape verbatim,
+        // including its honest `data_source`.
+        if let Some(cached) = state.cache.get(&key) {
+            if let Ok(resp) = serde_json::from_value(cached) {
+                return Ok(resp);
+            }
+        }
+
         // Ask DISHA / CoRover primary (works worldwide): a disabled module or
         // any failure degrades to the NTES branch without extra latency cost.
         let corover_failure = match corover_schedule(state, train).await {

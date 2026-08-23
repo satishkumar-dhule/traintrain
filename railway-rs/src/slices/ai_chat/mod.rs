@@ -32,6 +32,10 @@ pub struct AiStatus {
     /// Whether an API key is configured (`false` = keyless free tier).
     pub keyed: bool,
     pub base: String,
+    /// Active backend tag (`zen` gateway or `local` in-process engine).
+    pub backend: String,
+    /// Once-per-request fallback backend tag under `local-first`.
+    pub fallback: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -80,16 +84,38 @@ async fn chat_handler(
         service::validate_messages(&req.messages)?,
         service::HISTORY_MAX_CHARS,
     );
-    messages.insert(0, ChatMessage::system(service::PERSONA));
 
     // Fail fast: round 1 is established here, before any headers are
-    // committed, so pre-stream failures surface as honest JSON errors.
+    // committed, so pre-stream failures surface as honest JSON errors. The
+    // persona matches the resolved backend, and `local-first` setups get one
+    // fallback attempt on the other backend before giving up.
     let schemas = tools::schemas();
-    let first = state.ai.chat_stream_with_tools(&messages, &schemas).await?;
+    let primary = state.ai.clone();
+    let mut chosen = primary.clone();
+    messages.insert(0, ChatMessage::system(service::persona_for(primary.tag())));
+    let first = match primary.chat_stream_with_tools(&messages, &schemas).await {
+        Ok(s) => s,
+        Err(e) => {
+            let Some(fb) = state.ai_fallback.clone() else {
+                return Err(e);
+            };
+            tracing::warn!(
+                error = %e.message(),
+                from = %primary.tag(),
+                to = %fb.tag(),
+                "primary ai backend failed pre-stream; failing over"
+            );
+            messages[0] = ChatMessage::system(service::persona_for(fb.tag()));
+            let stream = fb.chat_stream_with_tools(&messages, &schemas).await?;
+            chosen = fb;
+            stream
+        }
+    };
     let budget = tools::Budget::new(tools::DEFAULT_BUDGET_CHARS);
 
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(64);
     tokio::spawn(async move {
+        let backend = chosen;
         let mut rounds = 0usize;
         // Last successful projection per executed tool, feeding next-actions.
         let mut last_results: Vec<(String, Value)> = Vec::new();
@@ -105,7 +131,7 @@ async fn chat_handler(
             let start = Instant::now();
             let mut stream = match current.take() {
                 Some(s) => s,
-                None => match state.ai.chat_stream_with_tools(&messages, &schemas).await {
+                None => match backend.chat_stream_with_tools(&messages, &schemas).await {
                     Ok(s) => Box::pin(s),
                     Err(e) => {
                         tracing::warn!(
@@ -113,7 +139,9 @@ async fn chat_handler(
                             round = rounds,
                             "ai chat round failed"
                         );
-                        state.metrics.record_source_latency("zen", start.elapsed());
+                        state
+                            .metrics
+                            .record_source_latency(backend.tag(), start.elapsed());
                         let _ = tx.send(Ok(service::error_frame(&e.message()))).await;
                         break;
                     }
@@ -139,7 +167,9 @@ async fn chat_handler(
                 }
             }
             drop(stream);
-            state.metrics.record_source_latency("zen", start.elapsed());
+            state
+                .metrics
+                .record_source_latency(backend.tag(), start.elapsed());
 
             if calls.is_empty() {
                 if !errored {
@@ -153,8 +183,8 @@ async fn chat_handler(
                         .await;
                     let _ = tx.send(Ok(service::done_frame(usage.0, usage.1))).await;
                     tracing::info!(
-                        source = "zen",
-                        model = %state.config.ai_model,
+                        source = %backend.tag(),
+                        model = %backend.model(),
                         latency_ms = start.elapsed().as_millis() as u64,
                         prompt_tokens = usage.0,
                         completion_tokens = usage.1,

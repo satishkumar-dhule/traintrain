@@ -9,6 +9,7 @@
   import { Button } from '$lib/components/ui/button/index.js'
   import AutoCompleteInput from '$lib/components/AutoCompleteInput.svelte'
   import DateStrip from '$lib/components/DateStrip.svelte'
+  import { pickNearbyStation } from '$lib/nearby.svelte.js'
   import { StationCodeBadge } from '$lib/components/badges/index.js'
   import TrainFront from 'lucide-svelte/icons/train-front'
   import Building2 from 'lucide-svelte/icons/building-2'
@@ -16,7 +17,6 @@
   import Ticket from 'lucide-svelte/icons/ticket'
   import SearchIcon from 'lucide-svelte/icons/search'
   import MapPinIcon from 'lucide-svelte/icons/map-pin'
-  import LocateFixedIcon from 'lucide-svelte/icons/locate-fixed'
   import XIcon from 'lucide-svelte/icons/x'
 
   const popularTrains = [12951, 12309, 12002]
@@ -33,7 +33,8 @@
   let pnrErr = $state('')
 
   // ---- Plan from where you are -------------------------------------------
-  // Step 1: locate -> list every nearby station and let the user pick one.
+  // Step 1: "Stations near me" opens a blocking dialog that locates the user
+  // and lists every nearby station; picking one sets the trip origin here.
   // Step 2: pick a destination (+ date) -> jump straight to the availability
   // page for that trip instead of mutating the home page.
   function todayISO() {
@@ -42,12 +43,9 @@
   }
   const TODAY = todayISO()
   const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
-  const NEARBY_CAP = 8
 
-  let nearPhase = $state('idle') // idle | locating | loading | msg | ok
-  let nearMsg = $state('')
-  let nearbyStations = $state([])
   let originCode = $state('')
+  let originName = $state('')
 
   let destQuery = $state('')
   let journeyDate = $state(TODAY)
@@ -56,61 +54,17 @@
   const destCode = $derived(norm(destQuery))
   const canPlan = $derived(Boolean(originCode) && destCode.length > 0)
 
-  function findNearby() {
-    if (!('geolocation' in navigator)) {
-      nearPhase = 'msg'
-      nearMsg = 'Geolocation is not available in this browser.'
-      return
-    }
-    nearPhase = 'locating'
-    navigator.geolocation.getCurrentPosition(
-      async ({ coords }) => {
-        nearPhase = 'loading'
-        const res = await api(
-          `/rail-api/askdisha/nearby?lat=${encodeURIComponent(coords.latitude)}&lng=${encodeURIComponent(coords.longitude)}`
-        )
-        const list =
-          res.ok && Array.isArray(res.data?.stations)
-            ? res.data.stations.slice(0, NEARBY_CAP)
-            : null
-        if (!list) {
-          nearPhase = 'msg'
-          nearMsg = res.error
-            ? `Nearby lookup unavailable — ${res.error}`
-            : 'Nearby station lookup is unavailable right now.'
-          return
-        }
-        if (list.length === 0) {
-          nearPhase = 'msg'
-          nearMsg = 'No stations found around your location.'
-          return
-        }
-        nearbyStations = list
-        if (!list.some((s) => s.code === originCode)) originCode = list[0].code
-        nearPhase = 'ok'
-      },
-      (err) => {
-        nearPhase = 'msg'
-        nearMsg =
-          err && err.code === 1
-            ? 'Location permission denied — allow location access to find nearby stations.'
-            : (err && err.message) || 'Could not determine your location.'
-      },
-      { timeout: 10000, maximumAge: 60000 },
-    )
+  async function pickOrigin() {
+    const picked = await pickNearbyStation()
+    if (!picked || !picked.code) return
+    originCode = picked.code
+    originName = picked.name || ''
+    if (canPlan && DATE_RE.test(journeyDate)) submitPlan()
   }
 
   function clearOrigin() {
     originCode = ''
-  }
-
-  function chooseOrigin(code) {
-    originCode = code
-  }
-
-  function nearbyDistance(km) {
-    const n = Number(km)
-    return Number.isFinite(n) ? `${n.toFixed(1)} km` : null
+    originName = ''
   }
 
   function onDestPick(item) {
@@ -321,7 +275,7 @@
 <section class="grid gap-8">
   <div class="grid gap-3">
     <h1 class="text-3xl font-semibold tracking-tight">Train Bro</h1>
-    <p class="max-w-xl text-muted-foreground">
+    <p class="max-lg:hidden max-w-xl text-muted-foreground">
       Live train status, station boards, journey planning and PNR — free, no accounts.
     </p>
 
@@ -330,7 +284,7 @@
       {#each popularTrains as n (n)}
         <button
           type="button"
-          class="inline-flex h-6 items-center rounded-full border px-2.5 font-mono text-xs transition-colors hover:bg-muted hover:text-foreground"
+          class="inline-flex h-6 items-center rounded-full border px-2.5 font-mono text-xs transition-colors hover:bg-muted hover:text-foreground max-lg:h-11 max-lg:px-4"
           onclick={() => navigate(`/train/${n}`)}
         >
           {n}
@@ -347,85 +301,35 @@
         </span>
         <div class="grid gap-0.5">
           <h2 class="text-base font-semibold">Plan from where you are</h2>
-          <p class="text-sm text-muted-foreground">
+          <p class="max-lg:hidden text-sm text-muted-foreground">
             Find stations around you, pick one as your start, then jump straight to trains and live seat availability.
           </p>
         </div>
       </div>
 
       <div class="flex flex-wrap items-center gap-2">
-        <Button
-          type="button"
-          variant="outline"
-          onclick={findNearby}
-          disabled={nearPhase === 'locating' || nearPhase === 'loading'}
-        >
-          {#if nearPhase === 'locating' || nearPhase === 'loading'}
-            <LocateFixedIcon />
-          {:else}
-            <MapPinIcon />
-          {/if}
-          {nearPhase === 'locating'
-            ? 'Locating…'
-            : nearPhase === 'loading'
-              ? 'Searching…'
-              : nearbyStations.length
-                ? 'Refresh nearby'
-                : 'Stations near me'}
+        <Button type="button" variant="outline" onclick={pickOrigin}>
+          <MapPinIcon />
+          {originCode ? 'Change start' : 'Stations near me'}
         </Button>
-        {#if originCode && nearbyStations.some((s) => s.code === originCode)}
-          {@const picked = nearbyStations.find((s) => s.code === originCode)}
+        {#if originCode}
           <span
             class="inline-flex items-center gap-1.5 rounded-full border border-primary/40 bg-primary/10 px-2.5 py-1 text-xs font-medium"
           >
             From
-            <StationCodeBadge code={picked.code} name={picked.name} link={false} size="xs" />
-            <span class="max-w-40 truncate">{picked.name}</span>
-            <button type="button" aria-label="Clear chosen station" onclick={clearOrigin}>
+            <StationCodeBadge code={originCode} name={originName} link={false} size="xs" />
+            <span class="max-w-40 truncate">{originName || originCode}</span>
+            <button
+              type="button"
+              aria-label="Clear chosen station"
+              class="inline-flex items-center justify-center max-lg:size-11 max-lg:-mr-2"
+              onclick={clearOrigin}
+            >
               <XIcon class="size-3 opacity-70 hover:opacity-100" />
             </button>
           </span>
         {/if}
       </div>
-
-      {#if nearPhase === 'msg'}
-        <p class="text-xs text-muted-foreground" role="status">{nearMsg}</p>
-      {:else if nearPhase === 'loading'}
-        <div class="flex flex-wrap gap-1.5" aria-busy="true">
-          {#each [0, 1, 2, 3] as i (i)}
-            <Skeleton class="h-8 w-44" />
-          {/each}
-        </div>
-      {:else if nearPhase === 'ok'}
-        <div class="grid gap-1">
-          <p class="text-xs text-muted-foreground">
-            {nearbyStations.length} station{nearbyStations.length === 1 ? '' : 's'} around you, closest first — pick one to start from:
-          </p>
-          <div class="flex flex-wrap gap-1.5" role="group" aria-label="Choose your starting station">
-            {#each nearbyStations as s (s.code)}
-              {@const active = s.code === originCode}
-              <button
-                type="button"
-                aria-pressed={active}
-                onclick={() => chooseOrigin(s.code)}
-                class={`inline-flex max-w-full cursor-pointer items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
-                  active
-                    ? 'border-primary bg-primary text-primary-foreground shadow-sm'
-                    : 'hover:border-primary/50 hover:bg-muted/50'
-                }`}
-              >
-                <span class="font-mono font-semibold tabular-nums">{s.code}</span>
-                <span class="min-w-0 max-w-36 truncate font-medium">{s.name}</span>
-                {#if nearbyDistance(s.distance_km)}
-                  <span class={`tabular-nums ${active ? 'opacity-80' : 'text-muted-foreground'}`}>
-                    {nearbyDistance(s.distance_km)}
-                  </span>
-                {/if}
-              </button>
-            {/each}
-          </div>
-        </div>
-      {/if}
 
         <div class="flex flex-wrap items-end gap-2">
           <div class="grid min-w-44 flex-1 gap-1.5">
@@ -445,7 +349,7 @@
         </div>
         <DateStrip id="home-plan-date" bind:value={journeyDate} min={TODAY} label="Journey date" />
       {#if planError}
-        <p class="text-xs text-destructive">{planError}</p>
+        <p class="text-xs text-destructive max-lg:text-sm">{planError}</p>
       {/if}
     </form>
   </Card.Root>
@@ -460,10 +364,10 @@
           <div class="grid gap-0.5">
             <a
               href="/train"
-              class="text-base font-semibold hover:underline"
+              class="hit-y text-base font-semibold hover:underline"
               onclick={(e) => { e.preventDefault(); navigate('/train') }}
             >Live train status</a>
-            <p class="text-sm text-muted-foreground">Where is my train right now, delay per station.</p>
+            <p class="max-lg:hidden text-sm text-muted-foreground">Where is my train right now, delay per station.</p>
           </div>
         </div>
         <div class="mt-auto flex items-end gap-2">
@@ -487,7 +391,7 @@
           </Button>
         </div>
         {#if trainErr}
-          <p class="text-xs text-destructive">{trainErr}</p>
+          <p class="text-xs text-destructive max-lg:text-sm">{trainErr}</p>
         {/if}
       </form>
     </Card.Root>
@@ -501,10 +405,10 @@
           <div class="grid gap-0.5">
             <a
               href="/station"
-              class="text-base font-semibold hover:underline"
+              class="hit-y text-base font-semibold hover:underline"
               onclick={(e) => { e.preventDefault(); navigate('/station') }}
             >Station boards</a>
-            <p class="text-sm text-muted-foreground">Arrivals and departures for the next hours.</p>
+            <p class="max-lg:hidden text-sm text-muted-foreground">Arrivals and departures for the next hours.</p>
           </div>
         </div>
         <div class="mt-auto flex items-end gap-2">
@@ -524,7 +428,7 @@
           </Button>
         </div>
         {#if stationErr}
-          <p class="text-xs text-destructive">{stationErr}</p>
+          <p class="text-xs text-destructive max-lg:text-sm">{stationErr}</p>
         {/if}
       </form>
     </Card.Root>
@@ -538,10 +442,10 @@
           <div class="grid gap-0.5">
             <a
               href="/journeys"
-              class="text-base font-semibold hover:underline"
+              class="hit-y text-base font-semibold hover:underline"
               onclick={(e) => { e.preventDefault(); navigate('/journeys') }}
             >Find journeys</a>
-            <p class="text-sm text-muted-foreground">Trains between any two stations, with run days.</p>
+            <p class="max-lg:hidden text-sm text-muted-foreground">Trains between any two stations, with run days.</p>
           </div>
         </div>
         <div class="flex flex-wrap items-end gap-2">
@@ -565,7 +469,7 @@
           </Button>
         </div>
         {#if journeyErr}
-          <p class="text-xs text-destructive">{journeyErr}</p>
+          <p class="text-xs text-destructive max-lg:text-sm">{journeyErr}</p>
         {/if}
       </form>
     </Card.Root>
@@ -579,10 +483,10 @@
           <div class="grid gap-0.5">
             <a
               href="/pnr"
-              class="text-base font-semibold hover:underline"
+              class="hit-y text-base font-semibold hover:underline"
               onclick={(e) => { e.preventDefault(); navigate('/pnr') }}
             >PNR status</a>
-            <p class="text-sm text-muted-foreground">Passenger reservation status with captcha retry.</p>
+            <p class="max-lg:hidden text-sm text-muted-foreground">Passenger reservation status with captcha retry.</p>
           </div>
         </div>
         <div class="grid flex-1 content-center gap-1.5">
@@ -602,7 +506,7 @@
             </Button>
           </div>
           {#if pnrErr}
-            <p class="text-xs text-destructive">{pnrErr}</p>
+            <p class="text-xs text-destructive max-lg:text-sm">{pnrErr}</p>
           {/if}
         </div>
       </form>
@@ -615,19 +519,19 @@
     <div class="flex flex-wrap items-end justify-between gap-2">
       <div class="grid gap-1">
         <h2 class="text-xl font-semibold tracking-tight">Stations explorer</h2>
-        <p class="text-sm text-muted-foreground">
+        <p class="max-lg:hidden text-sm text-muted-foreground">
           Browse the station index by letter or search a partial name, city or code.
         </p>
       </div>
       <span class="text-xs text-muted-foreground tabular-nums">{stationView.matched} matched</span>
     </div>
 
-    <div class="flex flex-wrap gap-0.5">
+    <div class="flex flex-wrap gap-0.5 max-lg:gap-1">
       {#each LETTERS as letter (letter)}
         <button
           type="button"
           aria-pressed={activeLetter === letter}
-          class="inline-flex h-6 min-w-6 items-center justify-center rounded-md border px-1 text-xs font-medium transition-colors {activeLetter === letter
+          class="inline-flex h-6 min-w-6 items-center justify-center rounded-md border px-1 text-xs font-medium transition-colors max-lg:h-11 max-lg:min-w-10 {activeLetter === letter
             ? 'border-primary bg-primary text-primary-foreground'
             : 'hover:bg-muted hover:text-foreground'}"
           onclick={() => selectLetter(letter)}
@@ -666,7 +570,7 @@
         {#each stationView.rows as st (st.code)}
           <button
             type="button"
-            class="flex min-w-0 items-center justify-between gap-2 rounded-lg border px-3 py-2 text-left transition-colors hover:border-primary/50 hover:bg-muted/50"
+            class="flex min-h-11 min-w-0 items-center justify-between gap-2 rounded-lg border px-3 py-2 text-left transition-colors hover:border-primary/50 hover:bg-muted/50"
             onclick={() => navigate(`/station/${encodeURIComponent(st.code)}`)}
           >
             <span class="min-w-0 flex-1 truncate text-sm">{st.name}</span>
