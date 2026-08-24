@@ -28,7 +28,7 @@
   {href}
   {size}
   title={name ? `${label} · ${name}` : label}
-  class="font-mono tabular-nums tracking-tight {className}"
+  class="data-num tracking-tight {className}"
   aria-label="Train {label}"
   onpointerenter={warm}
   ontouchstart={warm}

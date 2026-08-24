@@ -1,14 +1,15 @@
 <script module>
-  /* Semantic tone palette. Soft tinted chips that hold up in light and dark
-     themes; text uses -700/-400 pairs so contrast stays AA on both. */
+  /* Semantic tone palette on the Signal & Steel tokens: signal lamps for
+     go/hold/stop, coach indigo tint for info. Text uses the -ink variants
+     so contrast stays AA in both themes. */
   export const STATUS_TONES = {
     success:
-      'border-emerald-600/25 bg-emerald-500/10 text-emerald-700 dark:border-emerald-500/35 dark:bg-emerald-400/10 dark:text-emerald-400',
+      'border-signal-go/30 bg-signal-go/10 text-signal-go-ink dark:border-signal-go/40 dark:bg-signal-go/15',
     warning:
-      'border-amber-600/30 bg-amber-500/10 text-amber-700 dark:border-amber-500/35 dark:bg-amber-400/10 dark:text-amber-400',
+      'border-signal-hold/40 bg-signal-hold/15 text-signal-hold-ink dark:border-signal-hold/45 dark:bg-signal-hold/20',
     danger:
-      'border-red-600/30 bg-red-500/10 text-red-700 dark:border-red-500/35 dark:bg-red-400/10 dark:text-red-400',
-    info: 'border-sky-600/30 bg-sky-500/10 text-sky-700 dark:border-sky-500/35 dark:bg-sky-400/10 dark:text-sky-400',
+      'border-signal-stop/30 bg-signal-stop/10 text-signal-stop-ink dark:border-signal-stop/40 dark:bg-signal-stop/15',
+    info: 'border-primary/25 bg-primary/10 text-primary dark:border-primary/35 dark:bg-primary/15',
     neutral: 'border-border bg-muted/50 text-muted-foreground',
     outline: 'border-border text-foreground'
   };

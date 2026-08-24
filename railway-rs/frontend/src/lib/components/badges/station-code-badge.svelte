@@ -28,7 +28,7 @@
   {href}
   {size}
   title={name ? `${label} · ${name}` : label}
-  class="font-mono tracking-widest uppercase {className}"
+  class="data-num tracking-[0.14em] uppercase {className}"
   aria-label="Station {label}"
   onpointerenter={warm}
   ontouchstart={warm}

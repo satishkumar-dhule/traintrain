@@ -3,78 +3,113 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* ------------------------------------------------------------------
+   Signal & Steel — identity drawn from Indian Railways operations:
+   coach indigo, signal lamps, platform signage type, counterfoil data.
+   Palette lives on the blue-steel axis (258-272) so neutrals belong to
+   the brand instead of default zinc grey. Signals carry a base hue for
+   lamps/borders/tints and an "ink" variant guaranteed readable as text.
+   ------------------------------------------------------------------ */
+
 :root {
   color-scheme: light;
   --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.141 0.005 285.823);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.141 0.005 285.823);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.141 0.005 285.823);
-  --primary: oklch(0.21 0.006 285.885);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.967 0.001 286.375);
-  --secondary-foreground: oklch(0.21 0.006 285.885);
-  --muted: oklch(0.967 0.001 286.375);
-  --muted-foreground: oklch(0.552 0.016 285.938);
-  --accent: oklch(0.967 0.001 286.375);
-  --accent-foreground: oklch(0.21 0.006 285.885);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.92 0.004 286.32);
-  --input: oklch(0.92 0.004 286.32);
-  --ring: oklch(0.705 0.015 286.067);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.141 0.005 285.823);
-  --sidebar-primary: oklch(0.21 0.006 285.885);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.967 0.001 286.375);
-  --sidebar-accent-foreground: oklch(0.21 0.006 285.885);
-  --sidebar-border: oklch(0.92 0.004 286.32);
-  --sidebar-ring: oklch(0.705 0.015 286.067);
+  --background: oklch(0.975 0.005 255);
+  --foreground: oklch(0.235 0.028 265);
+  --card: oklch(0.995 0.003 255);
+  --card-foreground: oklch(0.235 0.028 265);
+  --popover: oklch(0.99 0.004 255);
+  --popover-foreground: oklch(0.235 0.028 265);
+  /* Coach indigo — carries warm paper-white text at AA ~6.6:1. */
+  --primary: oklch(0.40 0.13 272);
+  --primary-foreground: oklch(0.98 0.008 95);
+  --secondary: oklch(0.93 0.012 258);
+  --secondary-foreground: oklch(0.235 0.028 265);
+  --muted: oklch(0.94 0.01 258);
+  --muted-foreground: oklch(0.47 0.022 260);
+  --accent: oklch(0.925 0.015 258);
+  --accent-foreground: oklch(0.235 0.028 265);
+  --destructive: oklch(0.5 0.2 27);
+  --destructive-foreground: oklch(0.985 0.005 27);
+  --border: oklch(0.9 0.012 258);
+  --input: oklch(0.88 0.014 258);
+  --ring: oklch(0.52 0.1 269);
+  /* Saffron — brand warmth for highlights; dark ink sits on it. */
+  --saffron: oklch(0.74 0.18 65);
+  --saffron-ink: oklch(0.28 0.07 60);
+  /* Signal lamps: base for dots/borders/tints, ink for text. */
+  --signal-go: oklch(0.62 0.17 150);
+  --signal-go-ink: oklch(0.43 0.12 153);
+  --signal-hold: oklch(0.78 0.16 70);
+  --signal-hold-ink: oklch(0.46 0.11 75);
+  --signal-stop: oklch(0.6 0.21 27);
+  --signal-stop-ink: oklch(0.49 0.19 27);
+  --chart-1: oklch(0.45 0.14 272);
+  --chart-2: oklch(0.72 0.17 65);
+  --chart-3: oklch(0.6 0.11 190);
+  --chart-4: oklch(0.58 0.2 350);
+  --chart-5: oklch(0.66 0.1 230);
+  --sidebar: oklch(0.955 0.008 256);
+  --sidebar-foreground: oklch(0.235 0.028 265);
+  --sidebar-primary: oklch(0.40 0.13 272);
+  --sidebar-primary-foreground: oklch(0.98 0.008 95);
+  --sidebar-accent: oklch(0.92 0.014 258);
+  --sidebar-accent-foreground: oklch(0.235 0.028 265);
+  --sidebar-border: oklch(0.9 0.012 258);
+  --sidebar-ring: oklch(0.52 0.1 269);
 }
 
 .dark {
   color-scheme: dark;
-  --background: oklch(0.141 0.005 285.823);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.21 0.006 285.885);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.21 0.006 285.885);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.92 0.004 286.32);
-  --primary-foreground: oklch(0.21 0.006 285.885);
-  --secondary: oklch(0.274 0.006 286.033);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.274 0.006 286.033);
-  --muted-foreground: oklch(0.705 0.015 286.067);
-  --accent: oklch(0.274 0.006 286.033);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.552 0.016 285.938);
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.21 0.006 285.885);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.274 0.006 286.033);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --background: oklch(0.165 0.02 265);
+  --foreground: oklch(0.93 0.008 250);
+  --card: oklch(0.212 0.024 265);
+  --card-foreground: oklch(0.93 0.008 250);
+  --popover: oklch(0.225 0.026 265);
+  --popover-foreground: oklch(0.93 0.008 250);
+  /* Night indigo — dark ink text on it keeps AA ~6.5:1. */
+  --primary: oklch(0.68 0.135 272);
+  --primary-foreground: oklch(0.16 0.03 272);
+  --secondary: oklch(0.265 0.024 264);
+  --secondary-foreground: oklch(0.93 0.008 250);
+  --muted: oklch(0.26 0.022 264);
+  --muted-foreground: oklch(0.72 0.02 258);
+  --accent: oklch(0.285 0.026 264);
+  --accent-foreground: oklch(0.95 0.006 250);
+  --destructive: oklch(0.64 0.19 25);
+  --destructive-foreground: oklch(0.985 0.005 27);
+  --border: oklch(1 0 0 / 12%);
+  --input: oklch(1 0 0 / 16%);
+  --ring: oklch(0.55 0.08 270);
+  --saffron: oklch(0.78 0.16 68);
+  --saffron-ink: oklch(0.24 0.05 65);
+  --signal-go: oklch(0.72 0.16 150);
+  --signal-go-ink: oklch(0.8 0.13 150);
+  --signal-hold: oklch(0.8 0.15 72);
+  --signal-hold-ink: oklch(0.84 0.13 80);
+  --signal-stop: oklch(0.68 0.19 25);
+  --signal-stop-ink: oklch(0.74 0.16 23);
+  --chart-1: oklch(0.68 0.14 272);
+  --chart-2: oklch(0.78 0.15 68);
+  --chart-3: oklch(0.7 0.11 190);
+  --chart-4: oklch(0.68 0.19 350);
+  --chart-5: oklch(0.74 0.1 230);
+  --sidebar: oklch(0.185 0.022 266);
+  --sidebar-foreground: oklch(0.93 0.008 250);
+  --sidebar-primary: oklch(0.68 0.135 272);
+  --sidebar-primary-foreground: oklch(0.16 0.03 272);
+  --sidebar-accent: oklch(0.265 0.024 264);
+  --sidebar-accent-foreground: oklch(0.95 0.006 250);
   --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.552 0.016 285.938);
+  --sidebar-ring: oklch(0.55 0.08 270);
 }
 
 @theme inline {
+  /* Platform signage face (variable width+weight) doubles as the UI face;
+     all data numerals ride JetBrains Mono via font-mono. */
+  --font-sans: 'Archivo Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-display: 'Archivo Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, SFMono-Regular, Menlo, monospace;
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -94,9 +129,18 @@
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-saffron: var(--saffron);
+  --color-saffron-ink: var(--saffron-ink);
+  --color-signal-go: var(--signal-go);
+  --color-signal-go-ink: var(--signal-go-ink);
+  --color-signal-hold: var(--signal-hold);
+  --color-signal-hold-ink: var(--signal-hold-ink);
+  --color-signal-stop: var(--signal-stop);
+  --color-signal-stop-ink: var(--signal-stop-ink);
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
   --color-chart-3: var(--chart-3);
@@ -126,6 +170,7 @@
   }
   body {
     @apply bg-background text-foreground;
+    font-feature-settings: 'ss01' on; /* Archivo alternate glyphs, quieter UI */
   }
   html,
   body {
@@ -136,6 +181,34 @@
     text-size-adjust: 100%;
   }
 }
+
+/* ---------- Signature utilities ---------- */
+
+/* Platform-signage display treatment: page titles, hero numerals, codes. */
+@utility signage {
+  font-family: var(--font-display);
+  font-stretch: 112%;
+  font-weight: 750;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+}
+
+/* Track-rule divider: a rail with sleepers beneath it. Quiet, structural. */
+@utility track-rule {
+  height: 7px;
+  background:
+    linear-gradient(var(--border), var(--border)) top / 100% 1.5px no-repeat,
+    repeating-linear-gradient(90deg, var(--border) 0 2px, transparent 2px 9px);
+}
+
+/* Counterfoil data: any number the railway issued you. */
+@utility data-num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+/* ---------- Phone type scale & touch ergonomics ---------- */
 
 /* Phone: chat-feed density (AskDISHA-style compact cards) */
 @media (max-width: 639.98px) {
@@ -201,9 +274,24 @@
 .scrim-enter {
   animation: scrim-in 0.18s ease-out;
 }
+
+/* Signal lamp pulse — live states only; off under reduced motion. */
+@keyframes lamp-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in oklab, currentColor 45%, transparent);
+  }
+  60% {
+    box-shadow: 0 0 0 4px transparent;
+  }
+}
+.lamp-pulse {
+  animation: lamp-pulse 2.2s ease-out infinite;
+}
 @media (prefers-reduced-motion: reduce) {
   .sheet-enter,
-  .scrim-enter {
+  .scrim-enter,
+  .lamp-pulse {
     animation: none;
   }
 }
@@ -256,7 +344,7 @@
   color: var(--muted-foreground);
   padding: 0.05rem 0.3rem;
   border-radius: 0.3rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 0.85em;
 }
 
