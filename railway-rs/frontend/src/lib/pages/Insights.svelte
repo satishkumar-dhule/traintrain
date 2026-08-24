@@ -110,6 +110,16 @@
       clearTimeout(timer)
     }
   }
+
+  let autoRan = false
+
+  // Deep links (e.g. /insights/live_status/12951) arrive with complete
+  // params, so run the explanation once without waiting for a click.
+  $effect(() => {
+    if (autoRan || busy || result || errorMsg || !valid) return
+    autoRan = true
+    explain()
+  })
 </script>
 
 <section class="grid gap-6">

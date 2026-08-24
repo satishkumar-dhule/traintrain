@@ -303,7 +303,7 @@ import {
   <RunsOnBadges days={days} />
 {/snippet}
 
-<section class="grid grid-cols-[minmax(0,1fr)] gap-6" class:idle-center={!committedCode}>
+<section class="grid grid-cols-[minmax(0,1fr)] gap-4 md:gap-6" class:idle-center={!committedCode}>
   <div class="grid gap-1">
     <h1 class="text-2xl font-semibold tracking-tight">Station board</h1>
     <p class="max-lg:hidden text-sm text-muted-foreground">Live board and full-day timetable for any station.</p>
@@ -376,7 +376,7 @@ import {
     id="stn-date"
     bind:value={dateInput}
     label="Timetable date"
-    class="sticky top-14 z-20 lg:top-0"
+    class="z-20 lg:sticky lg:top-0"
     onchange={() => {
       if (tab === 'timetable') ensureTimetable()
     }}
@@ -413,7 +413,7 @@ import {
         </Alert.Root>
       {:else if live}
         <Card.Root>
-          <Card.Header class="flex-row items-center justify-between space-y-0">
+          <Card.Header class="flex flex-col items-start justify-between gap-3 space-y-0 sm:flex-row sm:items-center">
             <div class="grid gap-1">
               <Card.Title>{live.station ?? '—'} departures &amp; arrivals</Card.Title>
               <Card.Description>
@@ -460,7 +460,7 @@ import {
         </Alert.Root>
       {:else if timetable}
         <Card.Root>
-          <Card.Header class="flex-row items-center justify-between space-y-0">
+          <Card.Header class="flex flex-col items-start justify-between gap-3 space-y-0 sm:flex-row sm:items-center">
             <div class="grid gap-1">
               <Card.Title>{timetable.station_name ?? timetable.station ?? '—'} timetable</Card.Title>
               <Card.Description>{timetable.total ?? timetable.trains?.length ?? 0} trains{timetable.date ? ` · ${timetable.date}` : ''}</Card.Description>

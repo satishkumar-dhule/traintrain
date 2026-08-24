@@ -12,7 +12,7 @@ import CalendarX2Icon from 'lucide-svelte/icons/calendar-x-2'
 import DataTable from '$lib/components/DataTable.svelte'
 import EmptyState from '$lib/components/EmptyState.svelte'
 import RecentSearches from '$lib/components/RecentSearches.svelte'
-import { ExceptionKindBadge, StatusBadge } from '$lib/components/badges/index.js'
+import { ExceptionKindBadge, StatusBadge, TrainNumberBadge } from '$lib/components/badges/index.js'
 import { loadRecent, rememberRecent, clearStored } from '$lib/recent.js'
 
   let { number = '', kind = '' } = $props()
@@ -202,11 +202,11 @@ import { loadRecent, rememberRecent, clearStored } from '$lib/recent.js'
     {@const route =
       [train.source, train.destination].filter((s) => s && String(s).trim()).join(' → ')}
     <Card.Root>
-      <Card.Header class="flex-row items-center justify-between space-y-0">
+      <Card.Header class="flex flex-col items-start justify-between gap-3 space-y-0 sm:flex-row sm:items-center">
         <div class="grid gap-1">
-          <Card.Title>
-            {train.number ? `${train.number}` : norm(number)}
-            {train.name ? ` · ${train.name}` : ''}
+          <Card.Title class="flex flex-wrap items-center gap-x-2">
+            <TrainNumberBadge number={train.number || norm(number)} name={train.name} />
+            {#if train.name}<span>{train.name}</span>{/if}
           </Card.Title>
           <Card.Description>
             {entries.length} exception{entries.length === 1 ? '' : 's'}{route ? ` · ${route}` : ''}

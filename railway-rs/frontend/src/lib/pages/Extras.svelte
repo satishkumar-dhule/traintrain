@@ -183,7 +183,7 @@ import {
   ]
 
   const parcelCols = [
-    { key: 'number', label: 'Number', class: 'w-24', cellClass: 'font-mono text-xs text-muted-foreground', value: (t) => fmt(t.number) },
+    { key: 'number', label: 'Number', class: 'w-24', value: (t) => fmt(t.number) },
     { key: 'name', label: 'Name', cellClass: 'max-w-40 truncate font-medium', value: (t) => fmt(t.name) },
     { key: 'route', label: 'Route', cellClass: 'max-w-56 truncate', value: (t) => fmt(t.route) },
     {
@@ -240,6 +240,10 @@ import {
   </div>
 {/snippet}
 
+{#snippet pNumberCell(t)}
+  <TrainNumberBadge number={t.number} name={t.name} />
+{/snippet}
+
 {#snippet pDaysCell(t)}
   {@const days = dayFlags(t.days_of_run)}
   {#if days.any}
@@ -292,7 +296,7 @@ import {
         </Alert.Root>
       {:else if hData}
         <Card.Root>
-          <Card.Header class="flex-row items-center justify-between space-y-0">
+          <Card.Header class="flex flex-col items-start justify-between gap-3 space-y-0 sm:flex-row sm:items-center">
             <div class="grid gap-1">
               <Card.Title>Heritage trains</Card.Title>
               <Card.Description class="flex flex-wrap items-center gap-x-1">
@@ -339,7 +343,7 @@ import {
         </Alert.Root>
       {:else if pData}
         <Card.Root>
-          <Card.Header class="flex-row items-center justify-between space-y-0">
+          <Card.Header class="flex flex-col items-start justify-between gap-3 space-y-0 sm:flex-row sm:items-center">
             <div class="grid gap-1">
               <Card.Title>Parcel special trains</Card.Title>
               <Card.Description>{pTotal} train{pTotal === 1 ? '' : 's'} currently listed</Card.Description>
@@ -352,7 +356,7 @@ import {
               rows={pTrains}
               primary="name"
               rowKey={(t, i) => `${i}|${str(t.number)}|${str(t.name)}`}
-              cells={{ days: pDaysCell }}
+              cells={{ days: pDaysCell, number: pNumberCell }}
               empty="No parcel special trains are currently listed."
             />
           </Card.Content>

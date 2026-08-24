@@ -30,11 +30,13 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
   import CalendarX2Icon from 'lucide-svelte/icons/calendar-x-2'
   import ChartColumnIcon from 'lucide-svelte/icons/chart-no-axes-column'
   import MapIcon from 'lucide-svelte/icons/map'
+  import SparklesIcon from 'lucide-svelte/icons/sparkles'
 
   let { number = '', view = '' } = $props()
 
   let query = $state('')
-  let auto = $state(false)
+  let auto = $state(loadAutoPref(asText(number)))
+  let nextIn = $state(30)
   let activeTab = $state('status')
   let committed = $state('')
 
@@ -67,7 +69,30 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
   let runTouched = $state(false)
 
   const RECENT_KEY = 'rc-train-recent'
+  const AUTO_KEY = 'rc-train-auto'
   let recent = $state(loadRecent(RECENT_KEY))
+
+  function loadAutoPref(t) {
+    try {
+      const map = JSON.parse(localStorage.getItem(AUTO_KEY) ?? '{}')
+      return map?.[t] === true
+    } catch {
+      return false
+    }
+  }
+
+  function saveAutoPref(t, v) {
+    try {
+      const map = JSON.parse(localStorage.getItem(AUTO_KEY) ?? '{}')
+      map[t] = v
+      localStorage.setItem(AUTO_KEY, JSON.stringify(map))
+    } catch {}
+  }
+
+  function setAuto(v) {
+    auto = v
+    if (committed) saveAutoPref(committed, v)
+  }
 
   function rememberTrain(t, d) {
     const number = String(d?.train_number ?? t).trim()
@@ -90,6 +115,8 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
   async function loadStatus(t) {
     const fresh = `${data?.train_number}` !== `${t}`
     phase = fresh ? 'loading' : 'refreshing'
+    errorMsg = null
+    nextIn = 30
     errorMsg = null
     const res = await api(`/rail-api/live-status?train=${encodeURIComponent(t)}`)
     if (`${committed}` !== `${t}`) return
@@ -214,9 +241,14 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
 
   $effect(() => {
     if (!auto) return
+    nextIn = 30
     const timer = setInterval(() => {
-      if (committed) loadStatus(committed)
-    }, 30000)
+      nextIn -= 1
+      if (nextIn <= 0) {
+        nextIn = 30
+        if (committed) loadStatus(committed)
+      }
+    }, 1000)
     return () => clearInterval(timer)
   })
 
@@ -519,7 +551,7 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
   {/if}
 {/snippet}
 
-<section class="grid gap-6" class:idle-center={!committed}>
+<section class="grid gap-4 md:gap-6" class:idle-center={!committed}>
   <div class="grid gap-1">
     <h1 class="text-2xl font-semibold tracking-tight">Live train status</h1>
     <p class="max-lg:hidden text-sm text-muted-foreground">Spot any train by number or name. Data refreshes honestly from the live API.</p>
@@ -549,8 +581,14 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
         {phase === 'refreshing' ? 'Refreshing…' : 'Track'}
       </Button>
       <label class="mb-0.5 flex min-h-11 cursor-pointer items-center gap-2 py-2 text-sm text-muted-foreground">
-        <input type="checkbox" bind:checked={auto} class="size-5 accent-[var(--primary)]" />
+        <input
+          type="checkbox"
+          checked={auto}
+          onchange={(e) => setAuto(e.currentTarget.checked)}
+          class="size-5 accent-[var(--primary)]"
+        />
         Auto 30s
+        {#if auto}<span class="font-mono text-xs">next {nextIn}s</span>{/if}
       </label>
     </Card.Content>
   </Card.Root>
@@ -591,7 +629,7 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
         </Alert.Root>
       {:else if data}
         <Card.Root>
-          <Card.Header class="flex-row items-center justify-between space-y-0">
+          <Card.Header class="flex flex-col items-start justify-between gap-3 space-y-0 sm:flex-row sm:items-center">
             <div class="grid gap-1">
               <Card.Title class="flex flex-wrap items-center gap-2">
                 <TrainNumberBadge number={data.train_number} name={data.train_name} />
@@ -610,6 +648,15 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
                 onclick={() => navigate(`/insights/live_status/${encodeURIComponent(committed || data.train_number)}`)}
               >
                 <LightbulbIcon class="mr-2 size-4" />Explain
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                title="Ask the assistant about this train"
+                onclick={() => navigate(`/assistant/${encodeURIComponent('live status of ' + number)}`)}
+              >
+                <SparklesIcon class="mr-2 size-4" />Ask Train Bro
               </Button>
               <Button
                 type="button"

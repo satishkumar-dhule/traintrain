@@ -82,6 +82,41 @@
       document.body.style.overflow = prev
     }
   })
+
+  /* Scroll-aware chrome: slide the mobile bars out of the way while scrolling
+     down so results own the screen; reveal on scroll up, near top, or focus. */
+  let chromeHidden = $state(false)
+  let lastY = 0
+  let scrollRaf = false
+
+  function onScroll() {
+    if (scrollRaf) return
+    scrollRaf = true
+    requestAnimationFrame(() => {
+      scrollRaf = false
+      const y = window.scrollY
+      const dy = y - lastY
+      lastY = y
+      if (y <= 48) chromeHidden = false
+      else if (dy > 8) chromeHidden = true
+      else if (dy < -8) chromeHidden = false
+    })
+  }
+
+  function revealChrome() {
+    chromeHidden = false
+  }
+
+  $effect(() => {
+    window.addEventListener('scroll', onScroll, { passive: true })
+    return () => window.removeEventListener('scroll', onScroll)
+  })
+
+  /* Fresh navigation always starts with visible chrome. */
+  $effect(() => {
+    void route.path
+    chromeHidden = false
+  })
 </script>
 
 <div class="min-h-screen bg-background">
@@ -125,7 +160,10 @@
   </aside>
 
   <header
-    class="sticky top-0 z-30 flex h-[calc(3.5rem+env(safe-area-inset-top))] items-center gap-0.5 border-b bg-background/95 px-2 pt-[env(safe-area-inset-top)] backdrop-blur supports-[backdrop-filter]:bg-background/80 lg:hidden"
+    onfocusin={revealChrome}
+    class={`sticky top-0 z-30 flex h-[calc(3.5rem+env(safe-area-inset-top))] items-center gap-0.5 border-b bg-background/95 px-2 pt-[env(safe-area-inset-top)] backdrop-blur transition-transform duration-200 supports-[backdrop-filter]:bg-background/80 motion-reduce:transition-none lg:hidden ${
+      chromeHidden ? 'max-lg:-translate-y-full' : 'translate-y-0'
+    }`}
   >
     <a
       class="mr-1 flex min-h-11 min-w-11 items-center gap-2 rounded-lg px-2 transition-colors hover:bg-accent"
@@ -200,7 +238,7 @@
   <div class="lg:pl-60">
     <VisitTrail />
     <main
-      class="mx-auto w-full max-w-5xl px-4 pt-6 md:px-8 md:pt-10 max-lg:pb-[calc(5.5rem+env(safe-area-inset-bottom))] lg:pb-[calc(2.5rem+env(safe-area-inset-bottom))]"
+      class="mx-auto w-full max-w-5xl px-4 pt-4 md:px-8 md:pt-10 max-lg:pb-[calc(5.5rem+env(safe-area-inset-bottom))] lg:pb-[calc(2.5rem+env(safe-area-inset-bottom))]"
     >
       {@render children()}
     </main>
@@ -208,7 +246,10 @@
 
   <!-- Bottom tab bar: primary destinations thumb-reachable; the rest in "More". -->
   <nav
-    class="fixed inset-x-0 bottom-0 z-40 border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/85 lg:hidden"
+    onfocusin={revealChrome}
+    class={`fixed inset-x-0 bottom-0 z-40 border-t bg-background/95 backdrop-blur transition-transform duration-200 supports-[backdrop-filter]:bg-background/85 motion-reduce:transition-none lg:hidden ${
+      chromeHidden ? 'max-lg:translate-y-full' : 'translate-y-0'
+    }`}
     aria-label="Primary"
   >
     <div class="mx-auto grid max-w-xl grid-cols-5">

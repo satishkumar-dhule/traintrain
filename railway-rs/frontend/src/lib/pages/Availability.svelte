@@ -71,11 +71,12 @@ import { journeysHref, trainHref } from '$lib/utils.js'
   let view = $state(prefs.view === 'matrix' ? 'matrix' : 'cards')
   let sortKey = $state(SORTS.some(([k]) => k === prefs.sortKey) ? prefs.sortKey : 'departure')
   let availableOnly = $state(prefs.availableOnly === true)
+  let source = $state(SOURCES.some(([k]) => k === prefs.source) ? prefs.source : 'auto')
   let hiddenClasses = $state([])
 
   $effect(() => {
     try {
-      localStorage.setItem(PREFS_KEY, JSON.stringify({ view, sortKey, availableOnly }))
+      localStorage.setItem(PREFS_KEY, JSON.stringify({ view, sortKey, availableOnly, source }))
     } catch {}
   })
 
@@ -89,8 +90,9 @@ import { journeysHref, trainHref } from '$lib/utils.js'
 
   function pickRecent(r) {
     const [s, d] = String(r?.id ?? '').split('|')
-    const dt = String(r?.date ?? '')
+    let dt = String(r?.date ?? '')
     if (!s || !d || !DATE_RE.test(dt)) return
+    if (dt < today()) dt = today()
     from = s
     to = d
     journeyDate = dt
@@ -147,6 +149,10 @@ import { journeysHref, trainHref } from '$lib/utils.js'
 
   const rowsOf = (tr) => (Array.isArray(tr?.availability) ? tr.availability : [])
   const classCode = (row) => asText(row?.class).toUpperCase()
+  const quotaLabel = (row) => {
+    const q = asText(row?.quota)
+    return q && !/^(gn|general)$/i.test(q) ? q.toUpperCase() : ''
+  }
 
   const allClasses = $derived.by(() => {
     const seen = []
@@ -240,7 +246,7 @@ import { journeysHref, trainHref } from '$lib/utils.js'
     phase = 'loading'
     errorMsg = null
     const res = await api(
-      `/rail-api/availability?src=${encodeURIComponent(s)}&dst=${encodeURIComponent(d)}&date=${encodeURIComponent(dt)}`
+      `/rail-api/availability?src=${encodeURIComponent(s)}&dst=${encodeURIComponent(d)}&date=${encodeURIComponent(dt)}&source=${encodeURIComponent(source)}`
     )
     if (committed !== key) return
     if (res.ok) {
@@ -322,7 +328,17 @@ import { journeysHref, trainHref } from '$lib/utils.js'
   {@const fare = numOrNull(row?.fare)}
   <div class={`overflow-hidden rounded-md border px-2 py-1 ${tone}`}>
     <div class="flex items-baseline justify-between gap-2">
-      <span class="font-mono text-[11px] max-lg:text-xs font-semibold">{fmt(classCode(row))}</span>
+      <span class="flex min-w-0 items-baseline gap-1">
+        <span class="font-mono text-[11px] max-lg:text-xs font-semibold">{fmt(classCode(row))}</span>
+        {#if quotaLabel(row)}
+          <span
+            class="rounded border border-border bg-muted px-1 text-[9px] leading-tight font-medium tracking-wide uppercase text-muted-foreground"
+            title={`${quotaLabel(row)} quota`}
+          >
+            {quotaLabel(row)}
+          </span>
+        {/if}
+      </span>
       <span class="font-mono text-[11px] max-lg:text-xs tabular-nums">{fare != null ? `₹${fare.toLocaleString('en-IN')}` : ''}</span>
     </div>
     <div class="flex min-w-0 items-center gap-1 text-[10px] max-lg:text-sm max-lg:font-medium">
@@ -390,7 +406,7 @@ import { journeysHref, trainHref } from '$lib/utils.js'
   <DateStrip
     id="av-date"
     bind:value={journeyDate}
-    class="sticky top-14 z-20 lg:top-0"
+    class="z-20 lg:sticky lg:top-0"
     onchange={() => {
       if (canSearch) search()
     }}
@@ -526,6 +542,25 @@ import { journeysHref, trainHref } from '$lib/utils.js'
             </button>
           {/if}
           <div class="ml-auto flex items-center gap-2">
+            <Select.Root
+              type="single"
+              bind:value={source}
+              onchange={() => {
+                if (committed) {
+                  const [s, d, dt] = committed.split('/')
+                  runSearch(s, d, dt, committed)
+                }
+              }}
+            >
+              <Select.Trigger class="w-24 text-xs max-lg:text-sm" aria-label="Availability data source">
+                {SOURCES.find(([k]) => k === source)?.[1] ?? 'Auto'}
+              </Select.Trigger>
+              <Select.Content>
+                {#each SOURCES as [k, label] (k)}
+                  <Select.Item value={k} {label} />
+                {/each}
+              </Select.Content>
+            </Select.Root>
             <Select.Root type="single" bind:value={sortKey}>
               <Select.Trigger class="w-32 text-xs max-lg:text-sm" aria-label="Sort trains by">
                 {SORTS.find(([k]) => k === sortKey)?.[1] ?? 'Departure'}

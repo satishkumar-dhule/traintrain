@@ -17,6 +17,7 @@
   import Ticket from 'lucide-svelte/icons/ticket'
   import SearchIcon from 'lucide-svelte/icons/search'
   import MapPinIcon from 'lucide-svelte/icons/map-pin'
+  import ArrowLeftRight from 'lucide-svelte/icons/arrow-left-right'
   import XIcon from 'lucide-svelte/icons/x'
 
   const popularTrains = [12951, 12309, 12002]
@@ -53,6 +54,35 @@
 
   const destCode = $derived(norm(destQuery))
   const canPlan = $derived(Boolean(originCode) && destCode.length > 0)
+
+  const PLAN_LAST_KEY = 'rc-plan-last'
+
+  function prefillFromLast() {
+    let raw = null
+    try {
+      raw = JSON.parse(localStorage.getItem(PLAN_LAST_KEY) || 'null')
+    } catch {
+      return
+    }
+    const from = norm(raw?.from)
+    const to = norm(raw?.to)
+    if (!from || !to || from === to) return
+    if (!originCode) {
+      originCode = from
+      originName = String(raw?.fromName || '')
+    }
+    if (!norm(destQuery)) destQuery = to
+  }
+  prefillFromLast()
+
+  function swapPlan() {
+    if (!canPlan) return
+    const prevOrigin = norm(originCode)
+    originCode = destCode
+    originName = ''
+    destQuery = prevOrigin
+    planError = ''
+  }
 
   async function pickOrigin() {
     const picked = await pickNearbyStation()
@@ -91,6 +121,12 @@
       return
     }
     planError = ''
+    try {
+      localStorage.setItem(
+        PLAN_LAST_KEY,
+        JSON.stringify({ from: norm(originCode), to: destCode, fromName: originName })
+      )
+    } catch {}
     navigate(
       `/availability/${encodeURIComponent(originCode)}/${encodeURIComponent(destCode)}/${encodeURIComponent(journeyDate)}`
     )
@@ -181,10 +217,12 @@
   const DISPLAY_CAP = 48
 
   let stationIndex = $state([])
-  let idxLoading = $state(true)
+  let idxLoading = $state(false)
   let idxError = $state('')
   let query = $state('')
   let activeLetter = $state('All')
+  let explorerOpen = $state(false)
+  let explorerLoaded = false
   let reqSeq = 0
   let debounceId = null
 
@@ -240,12 +278,22 @@
     runFetch(letter)
   }
 
-  $effect(() => {
+  function loadStationSweep() {
     const seq = ++reqSeq
     idxLoading = true
     Promise.all(LETTERS.slice(1).map((letter) => fetchStations(letter, seq))).then(() => {
       if (seq === reqSeq) idxLoading = false
     })
+  }
+
+  function expandExplorer() {
+    explorerOpen = true
+    if (explorerLoaded) return
+    explorerLoaded = true
+    loadStationSweep()
+  }
+
+  $effect(() => {
     return () => {
       reqSeq++
       if (debounceId) clearTimeout(debounceId)
@@ -328,6 +376,12 @@
               <XIcon class="size-3 opacity-70 hover:opacity-100" />
             </button>
           </span>
+        {/if}
+        {#if canPlan}
+          <Button type="button" variant="outline" onclick={swapPlan}>
+            <ArrowLeftRight />
+            Swap
+          </Button>
         {/if}
       </div>
 
@@ -523,10 +577,31 @@
           Browse the station index by letter or search a partial name, city or code.
         </p>
       </div>
-      <span class="text-xs text-muted-foreground tabular-nums">{stationView.matched} matched</span>
+      {#if explorerOpen}
+        <span class="text-xs text-muted-foreground tabular-nums">{stationView.matched} matched</span>
+      {/if}
     </div>
 
-    <div class="flex flex-wrap gap-0.5 max-lg:gap-1">
+    {#if !explorerOpen}
+      <Card.Root class="transition-colors hover:border-primary/50">
+        <button
+          type="button"
+          class="flex w-full items-start gap-3 p-6 text-left"
+          onclick={expandExplorer}
+        >
+          <span class="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+            <Building2 class="size-5" />
+          </span>
+          <div class="grid gap-0.5">
+            <span class="text-base font-semibold">Browse stations A–Z</span>
+            <span class="max-lg:hidden text-sm text-muted-foreground">
+              Opens the letter index and station search — loads on demand.
+            </span>
+          </div>
+        </button>
+      </Card.Root>
+    {:else}
+      <div class="flex flex-wrap gap-0.5 max-lg:gap-1">
       {#each LETTERS as letter (letter)}
         <button
           type="button"
@@ -581,6 +656,7 @@
       {#if stationView.hidden > 0}
         <p class="text-xs text-muted-foreground">+{stationView.hidden} more</p>
       {/if}
+    {/if}
     {/if}
   </section>
 </section>

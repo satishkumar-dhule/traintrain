@@ -66,7 +66,7 @@
     }
   }
 
-  let phase = $state('boot') // boot | disabled | statusError | ready
+  let phase = $state('boot') // boot | degraded | statusError | ready
   let model = $state('')
   let statusError = $state(null)
   let turns = $state(untrack(loadHistory))
@@ -75,7 +75,9 @@
   let streamError = $state(null)
   let scroller = $state(null)
 
-  const canSend = $derived(!streaming && phase === 'ready' && draft.trim().length > 0)
+  const canSend = $derived(
+    !streaming && (phase === 'ready' || phase === 'degraded') && draft.trim().length > 0
+  )
 
   function persist() {
     try {
@@ -100,7 +102,7 @@
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         const body = await res.json()
         model = String(body?.model ?? '')
-        phase = body?.enabled ? 'ready' : 'disabled'
+        phase = body?.enabled ? 'ready' : 'degraded'
       })
       .catch((err) => {
         phase = 'statusError'
@@ -156,7 +158,7 @@
 
   async function sendText(text) {
     text = (text ?? '').trim()
-    if (!text || streaming || phase !== 'ready') return
+    if (!text || streaming || (phase !== 'ready' && phase !== 'degraded')) return
 
     // Local-first gate: serve what we can without the LLM.
     const verdict = classify(text, sessionMemory)
@@ -176,6 +178,7 @@
       streamError = null
       draft = ''
       streaming = true
+      let toolFailure = null
       try {
         const dto = await executePlan(verdict.plan, (u) => fetch(u))
         const data = PROJECTORS[verdict.plan.cardKind](dto)
@@ -198,11 +201,21 @@
         persist()
         return
       } catch (e) {
-        // Tool path failed (unresolved station, upstream 5xx) -> LLM fallback.
+        // Tool path failed (unresolved station, upstream 5xx) -> LLM fallback,
+        // or an inline error when the LLM itself is off.
+        toolFailure = e
       } finally {
         // Success clears it before returning; on fallback streamLlm re-sets it.
         streaming = false
       }
+      if (toolFailure && phase !== 'ready') {
+        streamError = toolFailure?.message ? toolFailure.message : String(toolFailure)
+        return
+      }
+    }
+    if (phase !== 'ready') {
+      streamError = 'AI is disabled'
+      return
     }
     await streamLlm(text)
   }
@@ -287,21 +300,22 @@
     </p>
   </div>
 
-  {#if phase === 'disabled'}
-    <Alert.Root>
-      <BotMessageSquareIcon class="size-4" />
-      <Alert.Title>AI assistant is disabled</Alert.Title>
-      <Alert.Description>
-        This server runs without the AI feature. An operator must set RAILWAY_AI_ENABLED=1
-        (optionally RAILWAY_AI_BASE / RAILWAY_AI_MODEL) to enable it.
-      </Alert.Description>
-    </Alert.Root>
-  {:else if phase === 'statusError'}
+  {#if phase === 'statusError'}
     <Alert.Root variant="destructive" role="alert">
       <Alert.Title>Could not reach the AI status endpoint</Alert.Title>
       <Alert.Description>{statusError}</Alert.Description>
     </Alert.Root>
   {:else}
+    {#if phase === 'degraded'}
+      <Alert.Root>
+        <BotMessageSquareIcon class="size-4" />
+        <Alert.Title>AI answers unavailable — live-data lookups still work</Alert.Title>
+        <Alert.Description>
+          This server runs without the AI feature (RAILWAY_AI_ENABLED=0), so free-form answers are
+          off. Live status, routes, boards and delay lookups keep working below.
+        </Alert.Description>
+      </Alert.Root>
+    {/if}
     <Card.Root>
       <Card.Content class="grid gap-3">
         {#if phase === 'boot'}
@@ -373,6 +387,15 @@
               >
                 Ask anything about Indian Railways — trains, stations, tickets.
               </div>
+              <div class="flex flex-wrap justify-center gap-1.5" data-testid="starter-chips">
+                {#each DEFAULT_CHIPS as c (c.label)}
+                  <button
+                    type="button"
+                    class="rounded-full border bg-muted/60 px-2.5 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground max-lg:min-h-11 max-lg:items-center max-lg:px-4 max-lg:inline-flex"
+                    onclick={() => sendText(c.prompt)}
+                  >{c.label}</button>
+                {/each}
+              </div>
             {/each}
           </div>
 
@@ -387,10 +410,12 @@
             <Textarea
               bind:value={draft}
               placeholder={
-                phase === 'ready' ? 'Ask about trains, PNR rules, stations…' : 'Waiting for AI…'
+                phase === 'ready' || phase === 'degraded'
+                  ? 'Ask about trains, PNR rules, stations…'
+                  : 'Waiting for AI…'
               }
               rows={2}
-              disabled={streaming || phase !== 'ready'}
+              disabled={streaming || (phase !== 'ready' && phase !== 'degraded')}
               onkeydown={onKeydown}
             ></Textarea>
             <div class="flex items-center justify-between gap-2">

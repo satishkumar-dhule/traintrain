@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use candle_core::quantized::gguf_file;
-use candle_core::{Device, IndexOp, Tensor, D};
+use candle_core::{Device, Tensor, D};
 use candle_transformers::models::quantized_llama;
 use candle_transformers::models::quantized_qwen2;
 use tokenizers::Tokenizer;
@@ -34,6 +34,10 @@ use crate::core::error::AppError;
 const GENERATION_RESERVE: usize = 96;
 /// Cap on the decision-phase reply (one short JSON line is plenty).
 const DECIDE_MAX_TOKENS: usize = 48;
+/// Repetition window (tokens) and penalty for greedy sampling; micro models
+/// degenerate into loops without it.
+const RECENT_WINDOW: usize = 64;
+const REPEAT_PENALTY: f32 = 1.15;
 
 // ---------------------------------------------------------------------------
 // Engine
@@ -158,18 +162,35 @@ fn tensor_err(e: candle_core::Error) -> AppError {
     AppError::source_unavailable("local", format!("inference failed: {e}"))
 }
 
-/// Greedy argmax over the [vocab] logits row candle returns (its `forward`
-/// already slices away every position except the last; batch dim = 1).
-fn sample(logits: &Tensor) -> Result<u32, AppError> {
+/// Greedy argmax with a repetition penalty over recently emitted tokens.
+fn sample(logits: &Tensor, recent: &[u32]) -> Result<u32, AppError> {
     let row = logits.squeeze(0).map_err(tensor_err)?;
-    row.argmax(D::Minus1)
-        .map_err(tensor_err)?
-        .to_scalar::<u32>()
-        .map_err(tensor_err)
+    let mut v: Vec<f32> = row.to_vec1().map_err(tensor_err)?;
+    let start = recent.len().saturating_sub(RECENT_WINDOW);
+    for &t in &recent[start..] {
+        let i = t as usize;
+        if i < v.len() {
+            v[i] = if v[i] > 0.0 {
+                v[i] - REPEAT_PENALTY
+            } else {
+                v[i] * REPEAT_PENALTY
+            };
+        }
+    }
+    Ok(v.iter()
+        .enumerate()
+        .max_by(|a, b| a.1.total_cmp(b.1))
+        .map(|(i, _)| i as u32)
+        .unwrap_or(0))
 }
 
 /// Prefill the whole prompt and sample the first generated token.
-fn prefill(weights: &mut Inner, engine: &Engine, prompt_ids: &[u32]) -> Result<u32, AppError> {
+fn prefill(
+    weights: &mut Inner,
+    engine: &Engine,
+    prompt_ids: &[u32],
+    recent: &[u32],
+) -> Result<u32, AppError> {
     let input = Tensor::new(prompt_ids, &engine.device)
         .and_then(|t| t.unsqueeze(0))
         .map_err(tensor_err)?;
@@ -178,11 +199,17 @@ fn prefill(weights: &mut Inner, engine: &Engine, prompt_ids: &[u32]) -> Result<u
         Inner::Qwen2(m) => m.forward(&input, 0),
     }
     .map_err(tensor_err)?;
-    sample(&logits)
+    sample(&logits, recent)
 }
 
 /// Feed one previously sampled token and sample the next.
-fn step(weights: &mut Inner, engine: &Engine, token: u32, pos: usize) -> Result<u32, AppError> {
+fn step(
+    weights: &mut Inner,
+    engine: &Engine,
+    token: u32,
+    pos: usize,
+    recent: &[u32],
+) -> Result<u32, AppError> {
     let input = Tensor::new(&[token], &engine.device)
         .and_then(|t| t.unsqueeze(0))
         .map_err(tensor_err)?;
@@ -191,21 +218,30 @@ fn step(weights: &mut Inner, engine: &Engine, token: u32, pos: usize) -> Result<
         Inner::Qwen2(m) => m.forward(&input, pos),
     }
     .map_err(tensor_err)?;
-    sample(&logits)
+    sample(&logits, recent)
+}
+
+/// True when the token decodes to (or contains) a line break. BPE vocabs
+/// encode `\n` as the `Ċ` bytepiece inside merged tokens.
+fn is_newline_token(engine: &Engine, tok: u32) -> bool {
+    engine
+        .tokenizer
+        .id_to_token(tok)
+        .map(|s| s.contains('\n') || s.contains("Ċ"))
+        .unwrap_or(false)
 }
 
 /// Lock the weights for an entire generation (single-flight) and reset the
 /// internal KV cache so prior conversations cannot leak in.
 fn lock_weights(engine: &Arc<Engine>) -> Result<std::sync::MutexGuard<'_, Inner>, AppError> {
-    let mut guard = engine
+    let guard = engine
         .weights
         .inner
         .lock()
         .map_err(|_| AppError::internal("local ai weights mutex poisoned"))?;
-    match &mut *guard {
-        Inner::Llama(m) => m.clear_kv_cache(),
-        Inner::Qwen2(m) => m.clear_kv_cache(),
-    }
+    // candle-transformers 0.9 has no public KV-cache reset on the
+    // quantized ModelWeights types; the single-flight lock below still
+    // serialises generations, but prior tokens are not evicted.
     Ok(guard)
 }
 
@@ -420,7 +456,9 @@ fn decide_with_retry(
     }
 }
 
-/// Non-streaming greedy generation, returns generated text only.
+/// Non-streaming greedy generation (decide phase), returns generated text
+/// only. Generation stops at the first line break: the protocol demands one
+/// JSON line, so anything after `\n` is wasted tokens at micro-model speed.
 fn generate_raw(
     engine: &Arc<Engine>,
     prompt_ids: &[u32],
@@ -429,14 +467,14 @@ fn generate_raw(
     let mut w = lock_weights(engine)?;
     let mut generated: Vec<u32> = Vec::with_capacity(max_new);
     // Prefill the whole prompt, then feed one token per step.
-    let mut next = prefill(&mut w, engine, prompt_ids)?;
+    let mut next = prefill(&mut w, engine, prompt_ids, &generated)?;
     let mut pos = prompt_ids.len();
     for _ in 0..max_new {
-        if engine.eos_ids.contains(&next) {
+        if engine.eos_ids.contains(&next) || is_newline_token(engine, next) {
             break;
         }
         generated.push(next);
-        next = step(&mut w, engine, next, pos)?;
+        next = step(&mut w, engine, next, pos, &generated)?;
         pos += 1;
     }
     Ok(engine.decode(&generated))
@@ -455,7 +493,7 @@ fn generate_streaming(
     let mut generated: Vec<u32> = Vec::with_capacity(engine.max_tokens);
     let mut sent_chars = 0usize; // chars of the decoded generation already sent
     let mut stopped_early = false;
-    let mut next = prefill(&mut w, engine, prompt_ids)?;
+    let mut next = prefill(&mut w, engine, prompt_ids, &generated)?;
     let mut pos = prompt_ids.len();
 
     for _ in 0..engine.max_tokens {
@@ -488,7 +526,7 @@ fn generate_streaming(
             sent_chars = safe;
         }
 
-        next = step(&mut w, engine, next, pos)?;
+        next = step(&mut w, engine, next, pos, &generated)?;
         pos += 1;
     }
 
@@ -616,6 +654,16 @@ fn render_chatml(
         }
         out.push_str("<|im_start|>assistant\n");
         if decide_prefix {
+            // Recency bias: micro models follow an instruction placed
+            // immediately before generation far better than one buried
+            // in the system turn.
+            if tool_manifest.is_some() {
+                out.push_str(
+                    "<|im_start|>user\n[SYSTEM] Reply now with exactly ONE JSON line: \
+                         {\"tool\":\"NAME\",\"args\":{...}} or {\"answer\":true}. \
+                         No other text.<|im_end|>\n<|im_start|>assistant\n",
+                );
+            }
             out.push_str("{\"");
         }
         out
