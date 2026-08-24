@@ -252,7 +252,7 @@ impl AiClient {
             match ev? {
                 AiEvent::Delta(t) => text.push_str(&t),
                 AiEvent::Reasoning(_) => {}
-                // Insights never advertise tools, but stay total anyway.
+                // Single-shot callers never advertise tools, but stay total anyway.
                 AiEvent::ToolCalls(_) => {}
                 AiEvent::Done {
                     prompt_tokens,

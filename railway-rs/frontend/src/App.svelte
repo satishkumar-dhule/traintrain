@@ -10,7 +10,6 @@
   import Exceptions from '$lib/pages/Exceptions.svelte'
   import Extras from '$lib/pages/Extras.svelte'
   import Assistant from '$lib/pages/Assistant.svelte'
-  import Insights from '$lib/pages/Insights.svelte'
   import System from '$lib/pages/System.svelte'
   import About from '$lib/pages/About.svelte'
 
@@ -31,18 +30,11 @@
   {:else if segs[0] === 'pnr'}
     <Pnr pnr={segs[1] ?? ''} />
   {:else if segs[0] === 'exceptions'}
-    <Exceptions number={segs[1] ?? ''} kind={segs[2] ?? ''} />
+    <Exceptions number={segs[1] ?? ''} />
   {:else if segs[0] === 'extras'}
     <Extras view={segs[1] ?? ''} selection={segs[2] ?? ''} />
   {:else if segs[0] === 'assistant'}
     <Assistant seed={segs[1] ? decodeURIComponent(segs[1]) : ''} />
-  {:else if segs[0] === 'insights'}
-    <Insights
-      kind={segs[1] ?? ''}
-      train={segs[2] ?? ''}
-      src={segs[3] ?? ''}
-      dst={segs[4] ?? ''}
-    />
   {:else if segs[0] === 'system'}
     <System />
   {:else if segs[0] === 'about'}

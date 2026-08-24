@@ -322,17 +322,19 @@
 
 <section class="grid gap-8">
   <div class="grid gap-3">
-    <h1 class="text-3xl font-semibold tracking-tight">Train Bro</h1>
+    <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight">Train Bro</h1>
     <p class="max-lg:hidden max-w-xl text-muted-foreground">
       Live train status, station boards, journey planning and PNR — free, no accounts.
     </p>
 
-    <div class="flex flex-wrap items-center gap-2 pt-2">
+    <div
+      class="flex flex-wrap items-center gap-2 pt-2 max-lg:-mx-4 max-lg:px-4 max-lg:flex-nowrap max-lg:overflow-x-auto max-lg:snap-x [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+    >
       <span class="text-xs text-muted-foreground">Popular trains</span>
       {#each popularTrains as n (n)}
         <button
           type="button"
-          class="inline-flex h-6 items-center rounded-full border px-2.5 font-mono text-xs transition-colors hover:bg-muted hover:text-foreground max-lg:h-11 max-lg:px-4"
+          class="inline-flex h-6 items-center rounded-full border px-2.5 font-mono text-xs transition-colors hover:bg-muted hover:text-foreground max-lg:h-11 max-lg:px-4 max-lg:shrink-0 max-lg:snap-start"
           onclick={() => navigate(`/train/${n}`)}
         >
           {n}
@@ -342,7 +344,7 @@
   </div>
 
   <Card.Root class="transition-colors hover:border-primary/50">
-    <form class="grid grid-cols-[minmax(0,1fr)] gap-4 p-6" onsubmit={submitPlan}>
+    <form class="grid grid-cols-[minmax(0,1fr)] gap-3 max-lg:gap-2 p-6" onsubmit={submitPlan}>
       <div class="flex items-start gap-3">
         <span class="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
           <MapPinIcon class="size-5" />

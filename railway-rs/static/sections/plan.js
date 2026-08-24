@@ -293,6 +293,7 @@ function viewAvailability(container, ctx, params) {
 
 function renderAvailability(res, ui, ctx) {
   const trains = res.trains || [];
+  const hasClasses = Array.isArray(trains) && trains.some((t) => Array.isArray(t.classes) && t.classes.length);
   return [ui.el('div', { class: 'card-sm' },
     ui.el('div', { class: 'row align-center' },
       ui.el('h2', { class: 'card-title', text: 'Trains' }),
@@ -301,6 +302,7 @@ function renderAvailability(res, ui, ctx) {
       ui.badge(res.dst || '', 'blue'),
       ui.badge(ctx.ui.friendlyDate(res.date), 'slate'),
     ),
+    !hasClasses && res.notice ? ctx.ui.notice(res.notice) : null,
     Array.isArray(trains) && trains.length
       ? ui.collapsibleTable(['No.', 'Train', 'Departure', 'Arrival', 'Duration', 'Classes', 'Availability'],
           trains.map((t) => [

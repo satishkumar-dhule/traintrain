@@ -18,8 +18,21 @@ impl Service {
     /// from non-India IPs too. NTES (`enquiry.indianrail.gov.in`) is the
     /// first fallback and Railyatri's SSR page the final one; the winning
     /// source is reported honestly in `data_source`.
+    ///
+    /// Every candidate is sanity-checked against the local timetable master
+    /// list: when the indexed name implies stations (e.g. "AKOT-AKOLA
+    /// PASSENGER" -> AKOT/AK) that a served route never touches, that
+    /// payload is treated as stale and the chain moves on; a final fallback
+    /// that still conflicts is served with a caution notice.
     pub async fn get_schedule(state: &AppState, train: &str) -> Result<ScheduleResponse, AppError> {
         let key = format!("schedule:{train}");
+
+        // The local timetable master list is the identity anchor. Aggregators
+        // sometimes serve years-stale routes under a reused number (e.g.
+        // 77608 still answering as MEDCHAL-SECUNDERABAD DEMU after the number
+        // moved to the AKOT-AKOLA shuttle), so every candidate route must
+        // touch at least one station implied by the indexed train name.
+        let expected_stations = index_route_stations(state, train);
 
         // The final DTO (not the raw upstream payload) is cached, so a hit
         // replays the winning source's full response shape verbatim,
@@ -34,13 +47,29 @@ impl Service {
         // any failure degrades to the NTES branch without extra latency cost.
         let corover_failure = match corover_schedule(state, train).await {
             Ok(resp) => {
-                tracing::info!(
+                let stop_codes: Vec<&str> = resp
+                    .stops
+                    .iter()
+                    .flatten()
+                    .map(|s| s.code.as_str())
+                    .collect();
+                if route_reaches_expected(&expected_stations, &stop_codes) {
+                    tracing::info!(
+                        %train,
+                        source = "CoRover",
+                        "schedule resolved from CoRover"
+                    );
+                    state.cache.set(&key, serde_json::to_value(&resp)?);
+                    return Ok(resp);
+                }
+                tracing::warn!(
                     %train,
+                    expected = ?expected_stations,
+                    got = ?stop_codes,
                     source = "CoRover",
-                    "schedule resolved from CoRover"
+                    "upstream route conflicts with the timetable index; trying next source"
                 );
-                state.cache.set(&key, serde_json::to_value(&resp)?);
-                return Ok(resp);
+                route_conflict_message("CoRover", &expected_stations, &stop_codes)
             }
             Err(e) => e.message(),
         };
@@ -53,15 +82,31 @@ impl Service {
                     .record_source_latency("ntes", ntes_started.elapsed());
                 match ntes_schedule_response(train, &data, state.config.cache_ttl.as_secs()) {
                     Ok(resp) => {
-                        tracing::info!(
+                        let stop_codes: Vec<&str> = resp
+                            .stops
+                            .iter()
+                            .flatten()
+                            .map(|s| s.code.as_str())
+                            .collect();
+                        if route_reaches_expected(&expected_stations, &stop_codes) {
+                            tracing::info!(
+                                %train,
+                                source = "NTES",
+                                latency_ms = ntes_started.elapsed().as_millis(),
+                                %corover_failure,
+                                "schedule resolved from NTES after CoRover failure"
+                            );
+                            state.cache.set(&key, serde_json::to_value(&resp)?);
+                            return Ok(resp);
+                        }
+                        tracing::warn!(
                             %train,
+                            expected = ?expected_stations,
+                            got = ?stop_codes,
                             source = "NTES",
-                            latency_ms = ntes_started.elapsed().as_millis(),
-                            %corover_failure,
-                            "schedule resolved from NTES after CoRover failure"
+                            "upstream route conflicts with the timetable index; trying next source"
                         );
-                        state.cache.set(&key, serde_json::to_value(&resp)?);
-                        return Ok(resp);
+                        route_conflict_message("NTES", &expected_stations, &stop_codes)
                     }
                     Err(e) => e.message(),
                 }
@@ -70,14 +115,32 @@ impl Service {
         };
 
         match railyatri_schedule(state, train).await {
-            Ok(resp) => {
-                tracing::warn!(
-                    %train,
-                    source = "Railyatri",
-                    %corover_failure,
-                    %ntes_failure,
-                    "schedule resolved from Railyatri after CoRover and NTES failures"
-                );
+            Ok(mut resp) => {
+                let stop_codes: Vec<&str> = resp
+                    .stops
+                    .iter()
+                    .flatten()
+                    .map(|s| s.code.as_str())
+                    .collect();
+                if !route_reaches_expected(&expected_stations, &stop_codes) {
+                    tracing::warn!(
+                        %train,
+                        expected = ?expected_stations,
+                        got = ?stop_codes,
+                        source = "Railyatri",
+                        "final fallback route conflicts with the timetable index; serving with a caution notice"
+                    );
+                    let mut notice = resp.notice.take().unwrap_or_default();
+                    if !notice.is_empty() {
+                        notice.push(' ');
+                    }
+                    notice.push_str(&format!(
+                        "Caution: this route never reaches {} — upstream sources may be serving stale data for train {train}.",
+                        expected_stations.join("/")
+                    ));
+                    resp.notice = Some(notice);
+                }
+                tracing::info!(%train, source = "Railyatri", "schedule resolved");
                 state.cache.set(&key, serde_json::to_value(&resp)?);
                 Ok(resp)
             }
@@ -91,6 +154,88 @@ impl Service {
             )),
         }
     }
+}
+
+/// Station codes implied by the timetable-index name of `train`
+/// ("AKOT-AKOLA PASSENGER" -> ["AKOT", "AK"]). A token counts when it is a
+/// known station code or exactly matches a known station name. Service-type
+/// words ("DEMU", "SF") are excluded even though they collide with real
+/// stations, and trains whose name yields nothing ("TEJAS RAJ") disable the
+/// route check entirely.
+fn index_route_stations(state: &AppState, train: &str) -> Vec<String> {
+    let Some(name) = state.datasets.train_name(train) else {
+        return Vec::new();
+    };
+    let mut out: Vec<String> = Vec::new();
+    for token in plausible_station_tokens(name) {
+        if state.datasets.station_name(token).is_some() {
+            if !out.iter().any(|c| c == token) {
+                out.push(token.to_string());
+            }
+        } else if let Some(code) = state.datasets.station_code_by_name(token) {
+            if !out.iter().any(|c| c.eq_ignore_ascii_case(code)) {
+                out.push(code.to_string());
+            }
+        }
+    }
+    out
+}
+
+/// Tokens of an indexed train name that could plausibly denote a station:
+/// alphanumeric words of 2-6 characters minus service-type words.
+fn plausible_station_tokens(name: &str) -> Vec<&str> {
+    const NON_STATION_WORDS: &[&str] = &[
+        "EXPRESS",
+        "SUPERFAST",
+        "SPECIAL",
+        "PASSENGER",
+        "MAIL",
+        "DEMU",
+        "MEMU",
+        "DMU",
+        "EMU",
+        "SF",
+        "SHATABDI",
+        "RAJDHANI",
+        "DURONTO",
+        "TEJAS",
+        "GARIB",
+        "RATH",
+        "KRANTI",
+        "SAMPARK",
+        "VANDE",
+        "BHARAT",
+        "FAST",
+        "EXP",
+        "AC",
+        "HUMSAFAR",
+        "ANTYODAYA",
+        "JAN",
+        "LINK",
+    ];
+    name.split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|t| (2..=6).contains(&t.len()))
+        .filter(|t| {
+            let upper = t.to_ascii_uppercase();
+            !NON_STATION_WORDS.contains(&upper.as_str())
+        })
+        .collect()
+}
+
+/// A candidate schedule passes when it touches at least one expected station;
+/// trains without derivable expectations always pass.
+fn route_reaches_expected(expected: &[String], stop_codes: &[&str]) -> bool {
+    expected.is_empty()
+        || expected
+            .iter()
+            .any(|e| stop_codes.iter().any(|s| s.eq_ignore_ascii_case(e)))
+}
+
+fn route_conflict_message(source: &str, expected: &[String], stop_codes: &[&str]) -> String {
+    format!(
+        "{source} route ({}) never reaches timetable-index stations {expected:?}",
+        stop_codes.join(">"),
+    )
 }
 
 /// Normalize a NTES `GetTrainSchedule` response into the wire model.
@@ -440,5 +585,38 @@ mod tests {
         assert_eq!(stops[0].departure, "");
         assert_eq!(stops[0].distance_km, None);
         assert_eq!(stops[0].day, None);
+    }
+
+    #[test]
+    fn station_tokens_skip_service_words_and_keep_places() {
+        assert_eq!(
+            plausible_station_tokens("AKOT-AKOLA PASSENGER"),
+            vec!["AKOT", "AKOLA"]
+        );
+        // The 77608 stale payload's name: no usable anchor beyond the places.
+        assert_eq!(
+            plausible_station_tokens("MEDCHAL - SECUNDERABAD DEMU"),
+            vec!["MEDCHAL", "SECUNDERABAD"]
+        );
+        // Service words that collide with real stations (DEMU/SF) are dropped.
+        assert_eq!(
+            plausible_station_tokens("AKOLA KHANDWA DEMU"),
+            vec!["AKOLA", "KHANDWA"]
+        );
+        assert_eq!(plausible_station_tokens("NDLS TEJAS RAJ"), vec!["NDLS"]);
+        assert_eq!(plausible_station_tokens("GARIB RATH"), Vec::<&str>::new());
+    }
+
+    #[test]
+    fn route_check_passes_when_any_expected_station_is_touched() {
+        let expected = vec!["AKOT".to_string(), "AK".to_string()];
+        let medchal_route = ["MED", "SC"];
+        assert!(!route_reaches_expected(&expected, &medchal_route));
+        let akot_route = ["AKOT", "PAR", "AK"];
+        assert!(route_reaches_expected(&expected, &akot_route));
+        // Case-insensitive match against upstream spellings.
+        assert!(route_reaches_expected(&expected, &["akot"]));
+        // No derivable expectation -> always pass.
+        assert!(route_reaches_expected(&[], &["MED"]));
     }
 }

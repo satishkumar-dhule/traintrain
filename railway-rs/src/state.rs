@@ -127,29 +127,4 @@ impl AppState {
     pub fn uptime_secs(&self) -> u64 {
         self.started_at.elapsed().as_secs()
     }
-
-    /// Single-shot completion with the once-per-request fallback policy:
-    /// primary backend first; on failure, `ai_fallback` (local-first setups)
-    /// gets one attempt. Returns `(text, prompt_tokens, completion_tokens,
-    /// effective_backend_tag)`.
-    pub async fn ai_chat_complete(
-        &self,
-        messages: &[crate::core::ai::ChatMessage],
-    ) -> Result<(String, u64, u64, &'static str), crate::core::error::AppError> {
-        match self.ai.chat_complete(messages).await {
-            Ok((text, pt, ct)) => Ok((text, pt, ct, self.ai.tag())),
-            Err(e) => match &self.ai_fallback {
-                Some(fb) => {
-                    tracing::warn!(
-                        error = %e.message(),
-                        fallback = %fb.tag(),
-                        "primary ai backend failed; failing over"
-                    );
-                    let (text, pt, ct) = fb.chat_complete(messages).await?;
-                    Ok((text, pt, ct, fb.tag()))
-                }
-                None => Err(e),
-            },
-        }
-    }
 }

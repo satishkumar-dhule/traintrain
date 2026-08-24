@@ -22,7 +22,7 @@ pub trait AiBackend: Send + Sync {
     /// Stable source tag for metrics, logs and status ("zen", "local").
     fn tag(&self) -> &'static str;
 
-    /// Model identifier surfaced in status and insights.
+    /// Model identifier surfaced in status.
     fn model(&self) -> &str;
 
     /// Stream one chat completion, advertising local function tools. When the

@@ -25,7 +25,6 @@
   import Ticket from 'lucide-svelte/icons/ticket'
   import Package from 'lucide-svelte/icons/package'
   import Sparkles from 'lucide-svelte/icons/sparkles'
-  import Lightbulb from 'lucide-svelte/icons/lightbulb'
 
   let obs = $state({ phase: 'loading', data: null })
 
@@ -124,7 +123,6 @@
     { href: '/exceptions', label: 'Exceptions', icon: TriangleAlert },
     { href: '/extras', label: 'Heritage & Parcel', icon: Package },
     { href: '/assistant', label: 'Ask Train Bro', icon: Sparkles },
-    { href: '/insights', label: 'Insights', icon: Lightbulb },
     { href: '/system', label: 'System', icon: Activity },
   ]
 

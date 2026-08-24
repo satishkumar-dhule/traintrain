@@ -3,7 +3,7 @@
   import * as Command from '$lib/components/ui/command/index.js'
   import { api } from '$lib/api.js'
   import { navigate } from '$lib/router.svelte.js'
-  import { theme, setTheme, contrast, setContrast } from '$lib/theme.svelte.js'
+  import { theme, toggleTheme } from '$lib/theme.svelte.js'
   import { palette, closePalette } from '$lib/palette.svelte.js'
 
   let q = $state('')
@@ -86,19 +86,8 @@
     closePalette()
   }
 
-  const displayThemes = [
-    ['system', 'System theme'],
-    ['light', 'Light theme'],
-    ['dark', 'Dark theme']
-  ]
-  const displayContrasts = [
-    ['off', 'Normal contrast'],
-    ['high', 'High contrast'],
-    ['invert', 'Invert contrast']
-  ]
-
-  function pickDisplay(fn, value) {
-    fn(value)
+  function pickTheme() {
+    toggleTheme()
     closePalette()
   }
 </script>
@@ -153,16 +142,9 @@
           {/each}
         </Command.Group>
         <Command.Group heading="Display">
-          {#each displayThemes as [value, label] (value)}
-            <Command.Item value={`display-theme-${value}`} onSelect={() => pickDisplay(setTheme, value)}>
-              <span>{theme.mode === value ? '✓ ' : ''}{label}</span>
-            </Command.Item>
-          {/each}
-          {#each displayContrasts as [value, label] (value)}
-            <Command.Item value={`display-contrast-${value}`} onSelect={() => pickDisplay(setContrast, value)}>
-              <span>{contrast.mode === value ? '✓ ' : ''}{label}</span>
-            </Command.Item>
-          {/each}
+          <Command.Item value="display-toggle-theme" onSelect={pickTheme}>
+            <span>{theme.mode === 'dark' ? 'Switch to bright theme' : 'Switch to dark theme'}</span>
+          </Command.Item>
         </Command.Group>
       </Command.List>
     </Command.Root>

@@ -166,3 +166,51 @@ async fn corover_is_primary_source_with_distance_and_day() {
     // Cache key is shared with the other sources.
     assert!(app.state.cache.get("schedule:12951").is_some());
 }
+
+#[tokio::test]
+async fn stale_upstream_route_falls_through_to_index_matching_source() {
+    let app = TestApp::spawn().await;
+
+    // CoRover still serves 77608 under its pre-renumbering identity: a
+    // MEDCHAL-SECUNDERABAD DEMU whose route never touches AKOT/AK - exactly
+    // what the timetable index ("AKOT-AKOLA PASSENGER") rules out.
+    let corover_payload = json!({
+        "trainNumber": "77608",
+        "trainName": "MEDCHAL - SECUNDERABAD DEMU",
+        "stationFrom": "MEDCHAL",
+        "stationTo": "SECUNDERABAD JN",
+        "trainRunsOnMon": true,
+        "trainRunsOnTue": true,
+        "trainRunsOnWed": true,
+        "trainRunsOnThu": true,
+        "trainRunsOnFri": true,
+        "trainRunsOnSat": true,
+        "trainRunsOnSun": false,
+        "errorMessage": null,
+        "serverId": "test",
+        "timeStamp": "2026-08-24T00:00:00Z",
+        "stationList": [
+            {"stationCode":"MED","stationName":"MEDCHAL","arrivalTime":"--","departureTime":"11:35","routeNumber":"1","haltTime":"--","distance":"0","dayCount":"1","stnSerialNumber":"1"},
+            {"stationCode":"SC","stationName":"SECUNDERABAD JN","arrivalTime":"12:35","departureTime":"--","routeNumber":"1","haltTime":"--","distance":"221","dayCount":"1","stnSerialNumber":"2"}
+        ]
+    });
+    app.mocks["corover"].route_json("/dishaAPI/bot/trnscheduleEnq/77608", corover_payload);
+
+    // NTES knows the real AKOT-AKOLA shuttle.
+    let ntes_payload = r#"{"trainNo":"77608","trainName":"AKOT-AKOLA PASSENGER","trainScheduleList":[{"stationCode":"AKOT","stationName":"AKOT","arrivalTime":"--","departureTime":"09:00","day":1,"stopNumber":1},{"stationCode":"AK","stationName":"AKOLA JN","arrivalTime":"10:10","departureTime":"--","day":1,"stopNumber":2}]}"#;
+    app.mocks["ntes"].route_json(
+        "/crisns/AppServAnd",
+        json!({ "jsonIn": NtesCrypto::build(ntes_payload) }),
+    );
+
+    let (status, body) = app.get("/rail-api/schedule?train=77608").await;
+    assert_eq!(status, StatusCode::OK);
+    // The conflicting primary was rejected; the index-matching source wins.
+    assert_eq!(body["data_source"], "NTES");
+    assert_eq!(body["train_name"], "AKOT-AKOLA PASSENGER");
+    let stops = body["stops"].as_array().unwrap();
+    assert_eq!(stops[0]["code"], "AKOT");
+    assert_eq!(stops.last().unwrap()["code"], "AK");
+    // Proves the primary was genuinely consulted before being discarded.
+    assert_eq!(app.mocks["corover"].calls().len(), 1);
+}

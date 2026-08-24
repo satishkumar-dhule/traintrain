@@ -50,13 +50,15 @@ impl Service {
             Err(e) => e,
         };
 
+        // A definitive "no reservable trains" answer from a booking platform
+        // still leaves room for unreserved Passenger/DEMU services, which
+        // never appear in reservation searches (no bookable classes). Ask
+        // NTES before giving up.
+        if matches!(primary_err, AppError::NotFound(_)) {
+            return unreserved_fallback(state, &cache_key, src, dst, date, primary_err).await;
+        }
+
         if let Some(fallback) = fallback {
-            // A definitive "no direct trains" answer settles the question —
-            // the fallback would only repeat it. Return the clean message
-            // instead of merging outage details from both sources.
-            if matches!(primary_err, AppError::NotFound(_)) {
-                return Err(primary_err);
-            }
             tracing::warn!(
                 %src,
                 %dst,
@@ -80,6 +82,144 @@ impl Service {
 
         Err(primary_err)
     }
+}
+
+/// When a booking source reports "no direct trains", unreserved
+/// Passenger/DEMU/DMU services may still run between the pair — they are
+/// invisible to reservation searches because they have no bookable classes.
+/// Ask the NTES trains-between form for the real list; if it finds any,
+/// return them (without availability data, plus an explanatory notice)
+/// instead of the dead-end `NotFound`. Any NTES failure returns the
+/// original error untouched.
+async fn unreserved_fallback(
+    state: &AppState,
+    cache_key: &str,
+    src: &str,
+    dst: &str,
+    date: &str,
+    original: AppError,
+) -> Result<AvailabilityResponse, AppError> {
+    let started = Instant::now();
+    let from_name = state.datasets.station_name(src).unwrap_or(src).to_string();
+    let to_name = state.datasets.station_name(dst).unwrap_or(dst).to_string();
+    match state
+        .ntes_web
+        .trains_between(src, &from_name, dst, &to_name)
+        .await
+    {
+        Ok(data) => {
+            state
+                .metrics
+                .record_source_latency("ntes", started.elapsed());
+            match map_ntes_unreserved(&data, src, &from_name, dst, &to_name, date) {
+                Some(resp) => {
+                    tracing::info!(
+                        %src,
+                        %dst,
+                        "booking sources report no reservable trains; NTES supplied unreserved services"
+                    );
+                    state.cache.set(cache_key, serde_json::to_value(&resp)?);
+                    Ok(resp)
+                }
+                None => Err(original),
+            }
+        }
+        Err(e) => {
+            tracing::debug!(%src, %dst, error = %e.message(), "NTES unreserved lookup failed");
+            Err(original)
+        }
+    }
+}
+
+/// Map the raw NTES trains-between payload to an availability response with
+/// empty classes/availability. `None` when no trains are listed.
+fn map_ntes_unreserved(
+    data: &Value,
+    src: &str,
+    from_name: &str,
+    dst: &str,
+    to_name: &str,
+    date: &str,
+) -> Option<AvailabilityResponse> {
+    let list = data
+        .get("trainBtwStationList")
+        .or_else(|| data.get("trainList"))
+        .and_then(Value::as_array)?;
+    if list.is_empty() {
+        return None;
+    }
+
+    let trains: Vec<AvailabilityTrain> = list
+        .iter()
+        .map(|entry| map_unreserved_train(entry, src, from_name, dst, to_name))
+        .collect();
+    Some(AvailabilityResponse {
+        src: Some(src.to_string()),
+        dst: Some(dst.to_string()),
+        date: Some(date.to_string()),
+        trains: Some(trains),
+        data_source: Some("NTES".to_string()),
+        notice: Some(format!(
+            "No reserved-class trains run between {src} and {dst}; these unreserved Passenger/DEMU/DMU services operate on this route. They have no IRCTC reservation chart or bookable classes, so class-wise availability does not apply — general tickets are sold at station counters and via UTS."
+        )),
+    })
+}
+
+fn map_unreserved_train(
+    entry: &Value,
+    src: &str,
+    from_name: &str,
+    dst: &str,
+    to_name: &str,
+) -> AvailabilityTrain {
+    let name = str_field(entry, "trainName");
+    AvailabilityTrain {
+        number: str_field(entry, "trainNo"),
+        train_type: unreserved_kind(&name).to_string(),
+        name,
+        from_code: src.to_string(),
+        from_name: from_name.to_string(),
+        to_code: dst.to_string(),
+        to_name: to_name.to_string(),
+        departure_time: str_field(entry, "depTime"),
+        arrival_time: str_field(entry, "arrTime"),
+        duration: String::new(),
+        distance: String::new(),
+        classes: Vec::new(),
+        runs_on: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+            .iter()
+            .map(|d| day_bool(entry, d))
+            .collect(),
+        availability: Vec::new(),
+    }
+}
+
+/// Best-effort service kind from the NTES train name; empty when unknown.
+fn unreserved_kind(name: &str) -> &str {
+    let upper = name.to_ascii_uppercase();
+    for (token, kind) in [
+        ("DEMU", "DEMU"),
+        ("MEMU", "MEMU"),
+        ("DMU", "DMU"),
+        ("PASSENGER", "Passenger"),
+    ] {
+        if upper.contains(token) {
+            return kind;
+        }
+    }
+    ""
+}
+
+/// Accept both the documented `runOn<Day>` and community `runsOn<Day>` spellings.
+fn day_bool(entry: &Value, day: &str) -> bool {
+    entry
+        .get(format!("runOn{day}"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+        || entry
+            .get(format!("runsOn{day}"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
 }
 
 /// Fetch from one named source (`"paytm"` / `"irctc"`) and normalize to the
@@ -204,4 +344,90 @@ fn str_field(entry: &Value, key: &str) -> String {
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// NTES mobile-shape payload as parsed from the TrainsBetweenStation HTML
+    /// (AKOT→AK reality: three daily unreserved shuttles).
+    fn ntes_akot_ak() -> Value {
+        json!({
+            "trainBtwStationList": [
+                {"trainNo": "77608", "trainName": "AKOT-AKOLA PASSENGER",
+                 "depTime": "09:00", "arrTime": "10:10",
+                 "runOnMon": true, "runOnTue": true, "runOnWed": true,
+                 "runOnThu": true, "runOnFri": true, "runOnSat": true, "runOnSun": true},
+                {"trainNo": "77610", "trainName": "AKOT-AK DMU",
+                 "depTime": "14:30", "arrTime": "15:40",
+                 "runsOnMon": true, "runsOnTue": true, "runsOnWed": true,
+                 "runsOnThu": true, "runsOnFri": true, "runsOnSat": true, "runsOnSun": false}
+            ]
+        })
+    }
+
+    #[test]
+    fn unreserved_mapping_lists_trains_without_classes() {
+        let resp = map_ntes_unreserved(
+            &ntes_akot_ak(),
+            "AKOT",
+            "AKOT",
+            "AK",
+            "AKOLA JN",
+            "2026-08-24",
+        )
+        .expect("trains expected");
+
+        assert_eq!(resp.src.as_deref(), Some("AKOT"));
+        assert_eq!(resp.dst.as_deref(), Some("AK"));
+        assert_eq!(resp.date.as_deref(), Some("2026-08-24"));
+        assert_eq!(resp.data_source.as_deref(), Some("NTES"));
+
+        let trains = resp.trains.unwrap();
+        assert_eq!(trains.len(), 2);
+        let first = &trains[0];
+        assert_eq!(first.number, "77608");
+        assert_eq!(first.name, "AKOT-AKOLA PASSENGER");
+        assert_eq!(first.train_type, "Passenger");
+        assert_eq!(first.departure_time, "09:00");
+        assert_eq!(first.arrival_time, "10:10");
+        assert_eq!(first.from_code, "AKOT");
+        assert_eq!(first.to_code, "AK");
+        // Unreserved: no bookable classes, no per-class availability.
+        assert!(first.classes.is_empty());
+        assert!(first.availability.is_empty());
+        // Runs all seven days (documented `runOn<Day>` spelling).
+        assert_eq!(first.runs_on, vec![true; 7]);
+        // Second train uses the community `runsOn<Day>` spelling.
+        assert_eq!(
+            trains[1].runs_on,
+            vec![true, true, true, true, true, true, false]
+        );
+
+        let notice = resp.notice.unwrap();
+        assert!(notice.contains("unreserved"), "{notice}");
+    }
+
+    #[test]
+    fn unreserved_mapping_returns_none_for_empty_list() {
+        let empty = json!({"trainBtwStationList": []});
+        assert!(
+            map_ntes_unreserved(&empty, "AKOT", "AKOT", "AK", "AKOLA JN", "2026-08-24").is_none()
+        );
+        assert!(
+            map_ntes_unreserved(&json!({}), "AKOT", "AKOT", "AK", "AKOLA JN", "2026-08-24")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn unreserved_kind_detects_service_type_from_name() {
+        assert_eq!(unreserved_kind("AKOT-AKOLA PASSENGER"), "Passenger");
+        assert_eq!(unreserved_kind("Akot - Akola DEMU"), "DEMU");
+        assert_eq!(unreserved_kind("SECUNDERABAD-MEDCHAL MEMU"), "MEMU");
+        assert_eq!(unreserved_kind("AKOLA-KHANDWA DMU"), "DMU");
+        assert_eq!(unreserved_kind("57561 EXPRESS"), "");
+    }
 }

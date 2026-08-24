@@ -430,7 +430,7 @@ import { journeysHref, trainHref } from '$lib/utils.js'
         <Card.Root>
           <Card.Content class="grid gap-2 py-2.5">
             <Skeleton class="h-4 w-72 max-w-full" />
-            <div class="grid grid-cols-[repeat(auto-fill,minmax(9.5rem,1fr))] gap-1.5">
+            <div class="grid grid-cols-[repeat(auto-fill,minmax(9.5rem,1fr))] max-lg:grid-cols-[repeat(auto-fill,minmax(8.25rem,1fr))] gap-1.5">
               <Skeleton class="h-12" />
               <Skeleton class="h-12" />
               <Skeleton class="h-12" />
@@ -458,7 +458,7 @@ import { journeysHref, trainHref } from '$lib/utils.js'
         hint="No availability data returned for this route and date."
       />
     {:else}
-      <div class="rounded-lg border bg-card px-3 py-1.5">
+      <div class="rounded-lg border bg-card px-3 py-1.5 max-lg:px-2.5">
         <div
           class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs"
           role="status"
@@ -541,7 +541,7 @@ import { journeysHref, trainHref } from '$lib/utils.js'
               Reset ({filteredTrains.length}/{trains.length})
             </button>
           {/if}
-          <div class="ml-auto flex items-center gap-2">
+          <div class="ml-auto flex items-center gap-2 min-w-0 max-lg:flex-wrap">
             <Select.Root
               type="single"
               bind:value={source}
@@ -700,14 +700,14 @@ import { journeysHref, trainHref } from '$lib/utils.js'
         <div class="grid gap-2.5">
           {#each filteredTrains as tr, i (asText(tr?.number) || `c-${i}`)}
             {@const flags = dayFlags(tr?.runs_on)}
-            <article class="rounded-lg border bg-card">
-              <div class="flex flex-wrap items-center gap-x-2.5 gap-y-1 px-3 py-2">
+            <article class="min-w-0 overflow-hidden rounded-lg border bg-card">
+              <div class="flex flex-wrap items-center gap-x-2.5 gap-y-1 px-3 py-2 min-w-0">
                 <div class="flex min-w-0 items-center gap-2">
                   <TrainNumberBadge number={tr?.number} name={tr?.name} />
                   <span class="truncate text-sm font-medium">{asText(tr?.name) || 'Unknown train'}</span>
                   <TrainDelayBadge number={tr?.number} name={tr?.name} compact />
                 </div>
-                <div class="ml-auto flex flex-wrap items-center gap-2">
+                <div class="ml-auto flex flex-wrap items-center gap-2 min-w-0 max-lg:w-full">
                   {#if flags}
                     <RunsOnBadges {flags} format="letter" />
                   {/if}
@@ -728,7 +728,7 @@ import { journeysHref, trainHref } from '$lib/utils.js'
                   {/if}
                 </div>
               </div>
-              <div class="grid grid-cols-[repeat(auto-fill,minmax(9.5rem,1fr))] gap-1.5 border-t px-3 py-2">
+              <div class="grid grid-cols-[repeat(auto-fill,minmax(9.5rem,1fr))] max-lg:grid-cols-[repeat(auto-fill,minmax(8.25rem,1fr))] gap-1.5 border-t px-3 py-2 [&>*]:min-w-0">
                 {#each visibleRows(tr) as r, j (j)}
                   {@render avlChip(r)}
                 {:else}

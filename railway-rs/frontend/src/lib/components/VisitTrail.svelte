@@ -60,7 +60,7 @@
 {#if visitTrail.entries.length > 1}
   <div
     bind:this={stripEl}
-    class="z-20 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80 lg:sticky lg:top-0"
+    class="max-lg:hidden z-20 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80 lg:sticky lg:top-0"
   >
     <nav aria-label={title} data-hidden={hidden} class="mx-auto w-full max-w-5xl min-w-0 px-4 md:px-8">
       <Breadcrumb.List bind:ref={listEl} class="min-w-0 flex-nowrap overflow-hidden py-1.5">

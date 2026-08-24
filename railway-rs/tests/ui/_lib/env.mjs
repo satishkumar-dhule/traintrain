@@ -30,7 +30,7 @@ export const VIEWPORTS = (
 /* Every primary route the SPA must render without errors or overflow.
    Mirrors the nav table in frontend/src/lib/Layout.svelte. */
 export const ROUTES = (process.env.UI_ROUTES ||
-  '/,/train,/station,/journeys,/availability,/pnr,/exceptions,/extras,/assistant,/insights,/system,/about'
+  '/,/train,/station,/journeys,/availability,/pnr,/exceptions,/extras,/assistant,/system,/about'
 ).split(',')
 
 export function loadPlaywright() {

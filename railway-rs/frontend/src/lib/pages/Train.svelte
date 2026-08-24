@@ -1,6 +1,7 @@
 <script>
   import { api } from '$lib/api.js'
   import { navigate, route } from '$lib/router.svelte.js'
+  import { viewport } from '$lib/media.svelte.js'
   import * as Card from '$lib/components/ui/card/index.js'
   import * as Tabs from '$lib/components/ui/tabs/index.js'
   import AutoCompleteInput from '$lib/components/AutoCompleteInput.svelte'
@@ -9,6 +10,7 @@
   import { Skeleton } from '$lib/components/ui/skeleton/index.js'
   import * as Alert from '$lib/components/ui/alert/index.js'
 import DataTable from '$lib/components/DataTable.svelte'
+import ChevronDownIcon from 'lucide-svelte/icons/chevron-down'
 import EmptyState from '$lib/components/EmptyState.svelte'
 import RecentSearches from '$lib/components/RecentSearches.svelte'
 import { loadRecent, rememberRecent, clearStored } from '$lib/recent.js'
@@ -25,7 +27,7 @@ import {
 import { primeTrainDelay } from '$lib/trainDelay.svelte.js'
 import RouteMap from '$lib/components/RouteMap.svelte'
 import ActivityIcon from 'lucide-svelte/icons/activity'
-  import LightbulbIcon from 'lucide-svelte/icons/lightbulb'
+
   import CalendarClockIcon from 'lucide-svelte/icons/calendar-clock'
   import CalendarX2Icon from 'lucide-svelte/icons/calendar-x-2'
   import ChartColumnIcon from 'lucide-svelte/icons/chart-no-axes-column'
@@ -39,6 +41,13 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
   let nextIn = $state(30)
   let activeTab = $state('status')
   let committed = $state('')
+
+  /* On phones the search form collapses to a one-line bar once tracking
+     starts, so live station data leads the page. */
+  let searchOpen = $state(true)
+  $effect(() => {
+    if (committed && viewport.narrow) searchOpen = false
+  })
 
   let phase = $state('idle')
   let errorMsg = $state(null)
@@ -553,45 +562,58 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
 
 <section class="grid gap-4 md:gap-6" class:idle-center={!committed}>
   <div class="grid gap-1">
-    <h1 class="text-2xl font-semibold tracking-tight">Live train status</h1>
+    <h1 class="text-xl md:text-2xl font-semibold tracking-tight">Live train status</h1>
     <p class="max-lg:hidden text-sm text-muted-foreground">Spot any train by number or name. Data refreshes honestly from the live API.</p>
   </div>
 
-  <Card.Root>
-    <Card.Content class="flex flex-wrap items-end gap-3">
-      <div
-        class="grid min-w-48 flex-1 gap-2"
-        onkeydown={(e) => {
-          if (e.key === 'Enter' && !e.defaultPrevented) track()
-        }}
-      >
-        <Label for="train-no">Train</Label>
-        <AutoCompleteInput
-          id="train-no"
-          bind:value={query}
-          kind="train"
-          placeholder="Train number or name…"
-          onpick={(item) => {
-            query = String(item.number)
-            track(item.number)
+  {#if committed && viewport.narrow && !searchOpen}
+    <button
+      type="button"
+      class="flex min-h-11 w-full items-center gap-2 rounded-lg border bg-card px-3 text-left transition-colors hover:bg-accent/50"
+      onclick={() => (searchOpen = true)}
+      aria-expanded="false"
+    >
+      <span class="min-w-0 flex-1 truncate font-mono text-sm font-medium">{committed}</span>
+      <span class="text-xs font-medium text-primary">Change</span>
+      <ChevronDownIcon class="size-4 shrink-0 text-muted-foreground" />
+    </button>
+  {:else}
+    <Card.Root>
+      <Card.Content class="flex flex-wrap items-end gap-3">
+        <div
+          class="grid min-w-48 flex-1 gap-2"
+          onkeydown={(e) => {
+            if (e.key === 'Enter' && !e.defaultPrevented) track()
           }}
-        />
-      </div>
-      <Button type="button" onclick={() => track()} disabled={phase === 'loading' || phase === 'refreshing'}>
-        {phase === 'refreshing' ? 'Refreshing…' : 'Track'}
-      </Button>
-      <label class="mb-0.5 flex min-h-11 cursor-pointer items-center gap-2 py-2 text-sm text-muted-foreground">
-        <input
-          type="checkbox"
-          checked={auto}
-          onchange={(e) => setAuto(e.currentTarget.checked)}
-          class="size-5 accent-[var(--primary)]"
-        />
-        Auto 30s
-        {#if auto}<span class="font-mono text-xs">next {nextIn}s</span>{/if}
-      </label>
-    </Card.Content>
-  </Card.Root>
+        >
+          <Label for="train-no" class="max-lg:hidden">Train</Label>
+          <AutoCompleteInput
+            id="train-no"
+            bind:value={query}
+            kind="train"
+            placeholder="Train number or name…"
+            onpick={(item) => {
+              query = String(item.number)
+              track(item.number)
+            }}
+          />
+        </div>
+        <Button type="button" onclick={() => track()} disabled={phase === 'loading' || phase === 'refreshing'}>
+          {phase === 'refreshing' ? 'Refreshing…' : 'Track'}
+        </Button>
+        <label class="mb-0.5 flex min-h-11 cursor-pointer items-center gap-2 py-2 text-sm text-muted-foreground">
+          <input
+            type="checkbox"
+            checked={auto}
+            onchange={(e) => setAuto(e.currentTarget.checked)}
+            class="size-5 accent-[var(--primary)]"
+          />
+          Auto 30s
+          {#if auto}<span class="font-mono text-xs">next {nextIn}s</span>{/if}
+        </label>
+      </Card.Content>
+    </Card.Root>
+  {/if}
 
   {#if !committed && recent.length > 0}
     <RecentSearches
@@ -615,7 +637,7 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
       <Tabs.Trigger value="map"><MapIcon class="mr-2 size-4" />Map</Tabs.Trigger>
     </Tabs.List>
 
-    <Tabs.Content value="status" class="mt-4 grid gap-4">
+    <Tabs.Content value="status" class="mt-3 grid gap-4">
       {#if phase === 'loading'}
         <div class="grid gap-2" aria-busy="true">
           {#each [0, 1, 2, 3] as i (i)}
@@ -640,34 +662,28 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
                 {#if runPosition}{runPosition}{:else}{statusRows.length} stations on this run{/if}
               </Card.Description>
             </div>
-            <div class="flex items-center gap-2">
+            <div class="flex flex-wrap items-center gap-2">
               <Button
                 type="button"
                 size="sm"
                 variant="outline"
-                onclick={() => navigate(`/insights/live_status/${encodeURIComponent(committed || data.train_number)}`)}
-              >
-                <LightbulbIcon class="mr-2 size-4" />Explain
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
+                aria-label="Ask Train Bro"
                 title="Ask the assistant about this train"
                 onclick={() => navigate(`/assistant/${encodeURIComponent('live status of ' + number)}`)}
               >
-                <SparklesIcon class="mr-2 size-4" />Ask Train Bro
+                <SparklesIcon class="size-4 max-lg:mr-0" /><span class="max-lg:hidden">Ask Train Bro</span>
               </Button>
               <Button
                 type="button"
                 size="sm"
                 variant="outline"
+                aria-label="Exceptions"
                 title="Cancelled / rescheduled / diverted dates for this train"
-                onclick={() => navigate(`/exceptions/${encodeURIComponent(committed || data.train_number)}/cancelled`)}
+                onclick={() => navigate(`/exceptions/${encodeURIComponent(committed || data.train_number)}`)}
               >
-                <CalendarX2Icon class="mr-2 size-4" />Exceptions
+                <CalendarX2Icon class="size-4 max-lg:mr-0" /><span class="max-lg:hidden">Exceptions</span>
               </Button>
-              <StatusBadge tone={auto ? 'info' : 'outline'} dot={auto}>{auto ? 'auto 30s' : 'manual'}</StatusBadge>
+              <StatusBadge tone={auto ? 'info' : 'outline'} dot={auto} class="max-lg:hidden">{auto ? 'auto 30s' : 'manual'}</StatusBadge>
             </div>
           </Card.Header>
           <Card.Content class="grid gap-3">
@@ -709,7 +725,7 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
       {/if}
     </Tabs.Content>
 
-    <Tabs.Content value="schedule" class="mt-4 grid gap-4">
+    <Tabs.Content value="schedule" class="mt-3 grid gap-4">
       {#if !committed}
         <EmptyState
           icon={CalendarClockIcon}
@@ -762,7 +778,7 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
       {/if}
     </Tabs.Content>
 
-    <Tabs.Content value="avg" class="mt-4 grid gap-4">
+    <Tabs.Content value="avg" class="mt-3 grid gap-4">
       {#if !committed}
         <EmptyState
           icon={ChartColumnIcon}
@@ -822,7 +838,7 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
       {/if}
     </Tabs.Content>
 
-    <Tabs.Content value="map" class="mt-4 grid gap-4">
+    <Tabs.Content value="map" class="mt-3 grid gap-4">
       {#if !committed}
         <EmptyState
           icon={MapIcon}
@@ -831,7 +847,7 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
         />
       {:else}
         <Card.Root>
-          <Card.Content class="flex flex-wrap items-end gap-3">
+          <Card.Content class="flex flex-wrap items-end gap-3 max-lg:gap-2">
             <div class="grid min-w-48 flex-1 gap-2"
               onkeydown={(e) => {
                 if (e.key === 'Enter' && !e.defaultPrevented) applyMapStation()

@@ -105,7 +105,7 @@
     type="button"
     variant="ghost"
     size="icon"
-    class="size-8 shrink-0 hit-y max-lg:size-11"
+    class="size-8 shrink-0 hit-y max-lg:size-10"
     onclick={() => stepDay(-1)}
     aria-label="Previous day"
     title="Previous day"
@@ -147,7 +147,7 @@
     type="button"
     variant="ghost"
     size="icon"
-    class="size-8 shrink-0 hit-y max-lg:size-11"
+    class="size-8 shrink-0 hit-y max-lg:size-10"
     onclick={() => stepDay(1)}
     aria-label="Next day"
     title="Next day"
@@ -165,6 +165,6 @@
     }}
     aria-label={`${label} (calendar)`}
     title="Calendar"
-    class="h-10 w-36 shrink-0"
+    class="h-10 w-36 shrink-0 max-md:hidden"
   />
 </div>

@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use candle_core::quantized::gguf_file;
-use candle_core::{Device, Tensor, D};
+use candle_core::{Device, Tensor};
 use candle_transformers::models::quantized_llama;
 use candle_transformers::models::quantized_qwen2;
 use tokenizers::Tokenizer;
@@ -431,7 +431,12 @@ fn decide_with_retry(
         }
         let prompt = render_chatml(engine, &msgs, Some(&manifest), true, DECIDE_MAX_TOKENS)?;
         let ids = engine.encode(&prompt)?;
-        generate_raw(engine, &ids, DECIDE_MAX_TOKENS)
+        // render_chatml seeds the assistant turn with `{"`; generate_raw only
+        // returns what came AFTER that seed, so restore it before parsing.
+        Ok(format!(
+            "{{\"{}",
+            generate_raw(engine, &ids, DECIDE_MAX_TOKENS)?
+        ))
     };
 
     let raw = attempt(None)?;
@@ -493,7 +498,9 @@ fn generate_streaming(
     let mut generated: Vec<u32> = Vec::with_capacity(engine.max_tokens);
     let mut sent_chars = 0usize; // chars of the decoded generation already sent
     let mut stopped_early = false;
+    let prefill_done = std::time::Instant::now();
     let mut next = prefill(&mut w, engine, prompt_ids, &generated)?;
+    let prefill_ms = prefill_done.elapsed().as_millis() as u64;
     let mut pos = prompt_ids.len();
 
     for _ in 0..engine.max_tokens {
@@ -540,9 +547,11 @@ fn generate_streaming(
         }
     }
 
-    let elapsed = started.elapsed().as_secs_f64();
-    let tps = if elapsed > 0.0 {
-        generated.len() as f64 / elapsed
+    // Decode throughput measured over the generation window only (prefill
+    // excluded); prefill cost is reported separately.
+    let gen_elapsed = prefill_done.elapsed().as_secs_f64();
+    let tps = if gen_elapsed > 0.0 {
+        generated.len() as f64 / gen_elapsed
     } else {
         0.0
     };
@@ -550,6 +559,7 @@ fn generate_streaming(
         prompt_tokens = prompt_ids.len(),
         completion_tokens = generated.len(),
         decode_tps = format!("{tps:.1}"),
+        prefill_ms,
         latency_ms = started.elapsed().as_millis() as u64,
         "local ai round complete"
     );
@@ -622,11 +632,14 @@ fn render_chatml(
             }
             match msg.role.as_str() {
                 "system" => {
+                    // Decide phase swaps the persona for a one-liner.
+                    let base = if tool_manifest.is_some() {
+                        DECIDE_SYSTEM
+                    } else {
+                        msg.content.as_str()
+                    };
                     let suffix = extra.clone().unwrap_or_default();
-                    out.push_str(&format!(
-                        "<|im_start|>system\n{}{}<|im_end|>\n",
-                        msg.content, suffix
-                    ));
+                    out.push_str(&format!("<|im_start|>system\n{base}{suffix}<|im_end|>\n"));
                 }
                 "user" => {
                     out.push_str(&format!("<|im_start|>user\n{}<|im_end|>\n", msg.content));
@@ -644,6 +657,11 @@ fn render_chatml(
                     ));
                 }
                 "assistant" => {
+                    // In decide mode, prior assistant prose adds nothing to
+                    // classification and costs prefill passes.
+                    if tool_manifest.is_some() {
+                        continue;
+                    }
                     out.push_str(&format!(
                         "<|im_start|>assistant\n{}<|im_end|>\n",
                         msg.content
@@ -659,9 +677,7 @@ fn render_chatml(
             // in the system turn.
             if tool_manifest.is_some() {
                 out.push_str(
-                    "<|im_start|>user\n[SYSTEM] Reply now with exactly ONE JSON line: \
-                         {\"tool\":\"NAME\",\"args\":{...}} or {\"answer\":true}. \
-                         No other text.<|im_end|>\n<|im_start|>assistant\n",
+                    "<|im_start|>user\n[SYSTEM] One JSON line now.<|im_end|>\n<|im_start|>assistant\n",
                 );
             }
             out.push_str("{\"");
@@ -691,10 +707,14 @@ fn render_chatml(
 }
 
 const DECISION_PROTOCOL: &str = "\
-TOOL PROTOCOL: You may call ONE tool per turn. To call one, reply with exactly \
-one JSON line: {\"tool\":\"NAME\",\"args\":{\"param\":\"value\"}}. When you have \
-enough information, reply exactly {\"answer\":true}. After [TOOL RESULT] blocks \
-appear, prefer answering. Use station codes when known.";
+TOOL PROTOCOL: Reply with ONE JSON line and nothing else.\n\
+Call a tool like: {\"tool\":\"trains_between\",\"args\":{\"src\":\"NDLS\",\"dst\":\"CNB\"}}\n\
+No tool needed: {\"answer\":true}\n\
+Never invent train data yourself. Use the station codes from the request.";
+
+/// Decide-phase system prompt: classification only, no persona. Every token
+/// here costs a prefill forward pass, so this stays minimal.
+const DECIDE_SYSTEM: &str = "You convert railway requests into tool calls.";
 
 /// Compact one-line-per-tool manifest from OpenAI envelopes.
 fn compact_manifest(tools: &[serde_json::Value]) -> String {
@@ -765,6 +785,9 @@ fn parse_decision(raw: &str, tools: &[serde_json::Value]) -> Decision {
     let Some(name) = v.get("tool").and_then(|t| t.as_str()) else {
         return Decision::Invalid("missing 'tool' key".into());
     };
+    if name.eq_ignore_ascii_case("name") {
+        return Decision::Invalid("template echoed; replace NAME with an actual tool".into());
+    }
     if matches!(name, "none" | "answer" | "") {
         return Decision::Answer;
     }

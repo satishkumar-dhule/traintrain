@@ -2,7 +2,32 @@ modules = ["rust-stable", "web", "nodejs-20", "bash"]
 
 [nix]
 channel = "stable-25_05"
-packages = ["linuxquota"]
+packages = [
+  "linuxquota",
+  "tint2",
+  "feh",
+  "rofi",
+  "pcmanfm",
+  "lxappearance",
+  "arc-theme",
+  "papirus-icon-theme",
+  "xfce.xfce4-terminal",
+  "xfce.thunar",
+  "firefox",
+  "chromium",
+  "geany",
+  "flameshot",
+  "xdotool",
+  "xorg.xrandr",
+  "xorg.xset",
+  "xorg.xrdb",
+  "hsetroot",
+  "nitrogen",
+  "lxde.lxpanel",
+  "openbox",
+  "tigervnc",
+  "novnc"
+]
 
 [agent]
 expertMode = true

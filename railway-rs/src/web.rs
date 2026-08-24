@@ -71,7 +71,6 @@ pub fn router(state: AppState, static_dir: PathBuf) -> Router {
 
     let streaming = Router::new()
         .merge(slices::ai_chat::router())
-        .merge(slices::ai_insight::router())
         .layer(CatchPanicLayer::new())
         .layer(TraceLayer::new_for_http());
 

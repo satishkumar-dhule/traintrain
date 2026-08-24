@@ -16,7 +16,6 @@
   import TriangleAlert from 'lucide-svelte/icons/triangle-alert'
   import Package from 'lucide-svelte/icons/package'
   import Sparkles from 'lucide-svelte/icons/sparkles'
-  import Lightbulb from 'lucide-svelte/icons/lightbulb'
   import Info from 'lucide-svelte/icons/info'
   import Search from 'lucide-svelte/icons/search'
   import XIcon from 'lucide-svelte/icons/x'
@@ -26,23 +25,22 @@
 
   let mobileOpen = $state(false)
 
-  /* Primary destinations get thumb-reachable slots; everything else lives in
-     the "More" sheet. Bottom-nav pattern: ≤5 visible items. */
+  /* Top destinations come first on mobile (Live Tracking, PNR); everything
+     else follows. Bottom-nav pattern: ≤5 visible items. */
   const primaryItems = [
-    { href: '/', label: 'Home', icon: House, exact: true },
-    { href: '/train', label: 'Live', icon: TrainFront },
-    { href: '/station', label: 'Board', icon: Building2 },
-    { href: '/journeys', label: 'Journeys', icon: RouteIcon }
+    { href: '/train', label: 'Live Tracking', short: 'Live', icon: TrainFront },
+    { href: '/pnr', label: 'PNR Status', short: 'PNR', icon: Ticket },
+    { href: '/', label: 'Home', short: 'Home', icon: House, exact: true }
   ]
 
   const items = [
     ...primaryItems,
+    { href: '/station', label: 'Station Board', icon: Building2 },
+    { href: '/journeys', label: 'Journeys', icon: RouteIcon },
     { href: '/availability', label: 'Availability', icon: CalendarDays },
-    { href: '/pnr', label: 'PNR Status', icon: Ticket },
     { href: '/exceptions', label: 'Exceptions', icon: TriangleAlert },
     { href: '/extras', label: 'Heritage & Parcel', icon: Package },
     { href: '/assistant', label: 'Ask Train Bro', icon: Sparkles },
-    { href: '/insights', label: 'Insights', icon: Lightbulb },
     { href: '/system', label: 'System', icon: Activity },
     { href: '/about', label: 'About', icon: Info }
   ]
@@ -161,7 +159,7 @@
 
   <header
     onfocusin={revealChrome}
-    class={`sticky top-0 z-30 flex h-[calc(3.5rem+env(safe-area-inset-top))] items-center gap-0.5 border-b bg-background/95 px-2 pt-[env(safe-area-inset-top)] backdrop-blur transition-transform duration-200 supports-[backdrop-filter]:bg-background/80 motion-reduce:transition-none lg:hidden ${
+    class={`sticky top-0 z-30 flex h-[calc(3.25rem+env(safe-area-inset-top))] items-center gap-0.5 border-b bg-background/95 px-2 pt-[env(safe-area-inset-top)] backdrop-blur transition-transform duration-200 supports-[backdrop-filter]:bg-background/80 motion-reduce:transition-none lg:hidden ${
       chromeHidden ? 'max-lg:-translate-y-full' : 'translate-y-0'
     }`}
   >
@@ -184,7 +182,7 @@
       >
         <Search class="size-5" />
       </button>
-      <DisplaySettings placement="down" compact />
+      <DisplaySettings compact />
     </div>
   </header>
 
@@ -229,7 +227,7 @@
             <Search class="size-5 shrink-0" />
             <span>Search everything</span>
           </button>
-          <DisplaySettings placement="down" />
+          <DisplaySettings />
         </div>
       </nav>
     </div>
@@ -252,7 +250,7 @@
     }`}
     aria-label="Primary"
   >
-    <div class="mx-auto grid max-w-xl grid-cols-5">
+    <div class="mx-auto grid max-w-xl grid-cols-4">
       {#each primaryItems as item (item.href)}
         <a
           href={item.href}
@@ -263,7 +261,7 @@
           }`}
         >
           <item.icon class="size-6" />
-          {item.label}
+          {item.short ?? item.label}
         </a>
       {/each}
       <button

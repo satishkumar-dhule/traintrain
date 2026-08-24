@@ -2,11 +2,14 @@
 	import { tv } from "tailwind-variants";
 
 	export const tabsListVariants = tv({
-		base: "rounded-lg p-[3px] group-data-horizontal/tabs:h-8 group-data-horizontal/tabs:max-lg:h-11 data-[variant=line]:rounded-none group/tabs-list inline-flex w-fit items-center justify-center text-muted-foreground group-data-[orientation=vertical]/tabs:h-fit group-data-[orientation=vertical]/tabs:flex-col max-lg:w-full max-lg:max-w-full max-lg:overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
+		base: "group/tabs-list inline-flex w-fit items-end gap-1 text-muted-foreground max-lg:w-full max-lg:max-w-full max-lg:overflow-x-auto max-lg:overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
 		variants: {
 			variant: {
-				default: "cn-tabs-list-variant-default bg-muted",
-				line: "cn-tabs-list-variant-line gap-1 bg-transparent",
+				/* Windows-style folder strip: flat row sitting on a full-width
+				   hairline; the active trigger (card surface, top corners, side
+				   borders) reads as the open folder attached to the panel below. */
+				default: "cn-tabs-list-variant-default rounded-t-md border-b border-border",
+				line: "cn-tabs-list-variant-line gap-1 border-b border-transparent",
 			},
 		},
 		defaultVariants: {

@@ -251,8 +251,9 @@ import {
   }
 
   function onTabChange(next) {
-    if (!next || next === tab) return
-    tab = next
+    // bits-ui updates the bound value before calling this callback, so compare
+    // against the URL-derived prop rather than `tab`.
+    if (!next || next === view) return
     if (committedCode) navigate(`/station/${committedCode}/${next}`)
   }
 
@@ -305,7 +306,7 @@ import {
 
 <section class="grid grid-cols-[minmax(0,1fr)] gap-4 md:gap-6" class:idle-center={!committedCode}>
   <div class="grid gap-1">
-    <h1 class="text-2xl font-semibold tracking-tight">Station board</h1>
+    <h1 class="text-xl md:text-2xl font-semibold tracking-tight">Station board</h1>
     <p class="max-lg:hidden text-sm text-muted-foreground">Live board and full-day timetable for any station.</p>
     {#if infoNames.length}
       <p class="text-sm text-muted-foreground">{infoNames.join(' · ')}</p>
@@ -316,9 +317,9 @@ import {
   </div>
 
   <Card.Root>
-    <Card.Content class="flex flex-wrap items-end gap-3">
+    <Card.Content class="flex flex-wrap items-end gap-3 max-lg:gap-2">
       <div class="grid min-w-56 flex-1 gap-2">
-        <Label for="stn-code">Station</Label>
+        <Label for="stn-code" class="max-lg:hidden">Station</Label>
         <AutoCompleteInput
           id="stn-code"
           kind="station"
@@ -329,7 +330,7 @@ import {
       </div>
       {#if tab === 'live'}
         <div class="grid min-w-44 flex-1 gap-2">
-          <Label for="stn-dest">Going to (optional)</Label>
+          <Label for="stn-dest" class="max-lg:hidden">Going to (optional)</Label>
           <AutoCompleteInput
             id="stn-dest"
             kind="station"
@@ -341,7 +342,7 @@ import {
         </div>
       {/if}
       <div class="grid gap-2">
-        <Label>Window</Label>
+        <Label class="max-lg:hidden">Window</Label>
         <Select.Root type="single" bind:value={hours}>
           <Select.Trigger class="w-32" aria-label="Time window">
             {hours} hour{hours === '1' ? '' : 's'}
@@ -363,7 +364,7 @@ import {
           : 'Show board'}
       </Button>
       <div class="grid gap-2">
-        <Label>Nearby</Label>
+        <Label class="max-lg:hidden">Nearby</Label>
         <Button variant="outline" onclick={pickNearbyBoard}>
           <MapPinIcon />
           Nearby stations
@@ -399,7 +400,7 @@ import {
       <Tabs.Trigger value="timetable"><CalendarClockIcon class="mr-2 size-4" />Timetable</Tabs.Trigger>
     </Tabs.List>
 
-    <Tabs.Content value="live" class="mt-4 grid gap-4">
+    <Tabs.Content value="live" class="mt-3 grid gap-4">
       {#if livePhase === 'loading'}
         <div class="grid gap-2" aria-busy="true">
           {#each [0, 1, 2, 3] as i (i)}
@@ -446,7 +447,7 @@ import {
       {/if}
     </Tabs.Content>
 
-    <Tabs.Content value="timetable" class="mt-4 grid gap-4">
+    <Tabs.Content value="timetable" class="mt-3 grid gap-4">
       {#if ttPhase === 'loading'}
         <div class="grid gap-2" aria-busy="true">
           {#each [0, 1, 2, 3] as i (i)}

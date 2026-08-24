@@ -11,7 +11,6 @@ const SECTIONS = [
   { seg: 'exceptions',  label: 'Exceptions' },
   { seg: 'extras',      label: 'Heritage & Parcel' },
   { seg: 'assistant',   label: 'Ask Train Bro' },
-  { seg: 'insights',    label: 'Insights' },
   { seg: 'system',      label: 'System' },
   { seg: 'about',       label: 'About' }
 ]

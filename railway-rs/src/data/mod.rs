@@ -332,12 +332,24 @@ impl Datasets {
     }
 
     /// Official name for a station code (`NDLS` -> `NEW DELHI`), used by the
-    /// NTES web forms which need the human-readable name alongside the code.
+    /// NTES web forms which need the human-readable station name alongside the code.
     pub fn station_name(&self, code: &str) -> Option<&str> {
         self.stations
             .iter()
             .find(|s| s.code.eq_ignore_ascii_case(code))
             .map(|s| s.name.as_str())
+    }
+
+    /// Reverse lookup: code for an exact official station name (`AKOLA` ->
+    /// `AK`). Case-insensitive, first match wins; `None` when no station is
+    /// named exactly that. Used to sanity-check upstream train schedules
+    /// against the stations implied by the local timetable index.
+    pub fn station_code_by_name(&self, name: &str) -> Option<&str> {
+        let wanted = name.to_ascii_uppercase();
+        self.stations
+            .iter()
+            .find(|s| s.name.to_ascii_uppercase() == wanted)
+            .map(|s| s.code.as_str())
     }
 
     /// Official name for a train number (`12951` -> `NDLS TEJAS RAJ`).

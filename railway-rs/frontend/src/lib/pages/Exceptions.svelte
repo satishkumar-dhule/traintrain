@@ -4,7 +4,6 @@
   import * as Card from '$lib/components/ui/card/index.js'
   import { Button } from '$lib/components/ui/button/index.js'
   import { Label } from '$lib/components/ui/label/index.js'
-  import * as Select from '$lib/components/ui/select/index.js'
   import { Skeleton } from '$lib/components/ui/skeleton/index.js'
   import * as Alert from '$lib/components/ui/alert/index.js'
 import AutoCompleteInput from '$lib/components/AutoCompleteInput.svelte'
@@ -15,18 +14,11 @@ import RecentSearches from '$lib/components/RecentSearches.svelte'
 import { ExceptionKindBadge, StatusBadge, TrainNumberBadge } from '$lib/components/badges/index.js'
 import { loadRecent, rememberRecent, clearStored } from '$lib/recent.js'
 
-  let { number = '', kind = '' } = $props()
+  let { number = '' } = $props()
 
-  const KINDS = ['cancelled', 'rescheduled', 'diverted']
-  const KIND_LABELS = {
-    cancelled: 'Cancelled dates',
-    rescheduled: 'Rescheduled dates',
-    diverted: 'Diverted dates'
-  }
   const MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
 
   let query = $state('')
-  let selectedKind = $state('')
   let phase = $state('idle')
   let errorMsg = $state(null)
   let data = $state(null)
@@ -35,19 +27,18 @@ import { loadRecent, rememberRecent, clearStored } from '$lib/recent.js'
   const RECENT_KEY = 'rc-exceptions-recent'
   let recent = $state(loadRecent(RECENT_KEY))
 
-  function rememberException(n, k) {
+  function rememberException(n) {
     recent = rememberRecent(
       RECENT_KEY,
-      { id: `${n}|${k}`, label: n, sub: KIND_LABELS[k] ?? k },
+      { id: n, label: n, sub: 'All exceptions' },
       (r) => r && typeof r?.id === 'string',
     )
   }
 
   function pickRecent(r) {
-    const [n, k] = String(r?.id ?? '').split('|')
-    if (!n || !KINDS.includes(k)) return
+    const n = String(r?.id ?? '')
+    if (!n) return
     query = n
-    selectedKind = k
     search()
   }
 
@@ -67,19 +58,19 @@ import { loadRecent, rememberRecent, clearStored } from '$lib/recent.js'
     return `${m[3]}-${MONTHS[Number(m[2]) - 1] ?? m[2]}-${m[1]}`
   }
 
-  async function load(n, k) {
+  async function load(n) {
     seq += 1
     const my = seq
     phase = 'loading'
     errorMsg = null
     const res = await api(
-      `/rail-api/ntes/exceptional?train=${encodeURIComponent(n)}&type=${encodeURIComponent(k)}`
+      `/rail-api/ntes/exceptional?train=${encodeURIComponent(n)}`
     )
     if (my !== seq) return
     if (res.ok) {
       data = res.data
       phase = 'ok'
-      rememberException(n, k)
+      rememberException(n)
     } else {
       data = null
       phase = 'error'
@@ -89,24 +80,21 @@ import { loadRecent, rememberRecent, clearStored } from '$lib/recent.js'
 
   function search() {
     const n = norm(query)
-    const k = KINDS.includes(selectedKind) ? selectedKind : ''
-    if (!n || !k) return
-    if (norm(number) === n && kind === k) load(n, k)
-    else navigate(`/exceptions/${encodeURIComponent(n)}/${k}`)
+    if (!n) return
+    if (norm(number) === n) load(n)
+    else navigate(`/exceptions/${encodeURIComponent(n)}`)
   }
 
   $effect(() => {
     const n = norm(number)
-    const k = KINDS.includes(kind) ? kind : ''
     query = n
-    selectedKind = k
-    if (!n || !k) {
+    if (!n) {
       phase = 'idle'
       data = null
       errorMsg = null
       return
     }
-    load(n, k)
+    load(n)
   })
 
   const cols = [
@@ -152,20 +140,7 @@ import { loadRecent, rememberRecent, clearStored } from '$lib/recent.js'
           bind:value={query}
         />
       </div>
-      <div class="grid gap-2">
-        <Label>Exception type</Label>
-        <Select.Root type="single" bind:value={selectedKind}>
-          <Select.Trigger class="w-44" aria-label="Exception type">
-            {KIND_LABELS[selectedKind] ?? 'Select a type'}
-          </Select.Trigger>
-          <Select.Content>
-            {#each KINDS as k (k)}
-              <Select.Item value={k} label={KIND_LABELS[k]} />
-            {/each}
-          </Select.Content>
-        </Select.Root>
-      </div>
-      <Button onclick={search} disabled={!norm(query) || !KINDS.includes(selectedKind)}>
+      <Button onclick={search} disabled={!norm(query)}>
         Search
       </Button>
     </Card.Content>
@@ -212,7 +187,7 @@ import { loadRecent, rememberRecent, clearStored } from '$lib/recent.js'
             {entries.length} exception{entries.length === 1 ? '' : 's'}{route ? ` · ${route}` : ''}
           </Card.Description>
         </div>
-        <StatusBadge tone="neutral">{KIND_LABELS[data.type] ?? KIND_LABELS[kind] ?? kind}</StatusBadge>
+        <StatusBadge tone="neutral">All exceptions</StatusBadge>
       </Card.Header>
       <Card.Content class="grid gap-4">
         {#if entries.length > 0}
@@ -232,7 +207,7 @@ import { loadRecent, rememberRecent, clearStored } from '$lib/recent.js'
         {:else}
           <div class="flex flex-col items-center gap-2 rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
             <CalendarX2Icon class="size-5" />
-            No {KIND_LABELS[data.type]?.toLowerCase() ?? 'exception'} records found for this train.
+            No exception records found for this train.
           </div>
         {/if}
         {#if Number(data.cache_ttl) > 0}
@@ -244,7 +219,7 @@ import { loadRecent, rememberRecent, clearStored } from '$lib/recent.js'
     <EmptyState
       icon={CalendarX2Icon}
       title="Nothing searched yet"
-      hint="Pick a train and an exception type, then search to see its exceptional running days."
+      hint="Pick a train number, then search to see all its exceptional running days."
     />
   {/if}
 </section>

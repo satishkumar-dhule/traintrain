@@ -153,7 +153,9 @@ import {
   }
 
   function onTabChange(next) {
-    if (!next || next === tab) return
+    // bits-ui updates the bound value before calling this callback, so compare
+    // against the URL-derived prop rather than `tab`.
+    if (!next || next === view) return
     navigate(`/extras/${next}`)
   }
 
@@ -213,7 +215,7 @@ import {
       if (nextTab === 'heritage') {
         if (selInput !== sel) selInput = sel
         if (!hBusy && hKey !== sel) loadHeritage(sel)
-      } else if (!pStarted) {
+      } else if (!pStarted || pPhase === 'error') {
         loadParcel()
       }
     })
@@ -324,7 +326,7 @@ import {
         <EmptyState
           icon={LandmarkIcon}
           title="Heritage list not loaded"
-          hint="Press Filter to list heritage trains."
+          hint="Heritage trains load automatically — press Filter to narrow by keyword."
         />
       {/if}
     </Tabs.Content>
@@ -365,7 +367,7 @@ import {
         <EmptyState
           icon={PackageIcon}
           title="Parcel list not loaded"
-          hint="Open the Parcel tab to list running parcel special trains."
+          hint="Parcel specials load automatically when you open this tab — switch tabs and back to retry."
         />
       {/if}
     </Tabs.Content>

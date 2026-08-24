@@ -7,6 +7,7 @@
   import ArrowDownIcon from 'lucide-svelte/icons/arrow-down'
   import ArrowUpDownIcon from 'lucide-svelte/icons/arrow-down-up'
   import SearchIcon from 'lucide-svelte/icons/search'
+  import ListFilterIcon from 'lucide-svelte/icons/list-filter'
 
   let {
     columns = [],
@@ -135,66 +136,92 @@
   }
 
   const EMPTY_VALUES = new Set(['', '-', '--', '—'])
+
+  /* Mobile toolbar: filter input is hidden behind a toggle so the sort chips
+     row doubles as the only control row. */
+  let filterOpen = $state(false)
 </script>
 
 {#if viewport.narrow}
   <!-- ===== Mobile: search + sort chips + stacked cards (no <table>) ===== -->
   <div class="grid gap-2">
-    <div class="relative">
-      <SearchIcon
-        class="pointer-events-none absolute top-1/2 left-3 size-[1.125rem] -translate-y-1/2 text-muted-foreground"
-      />
-      <Input
-        type="text"
-        placeholder={`Filter ${rows.length} rows…`}
-        aria-label="Filter rows"
-        bind:value={mobileQuery}
-        onkeydown={(e) => {
-          if (e.key === 'Enter') e.preventDefault()
-        }}
-        class="h-12 pl-11 max-lg:pl-11"
-      />
-    </div>
-
-    {#if sortableCols.length > 0}
-      <div
-        class="-mx-4 flex snap-x gap-1 overflow-x-auto px-4 pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-        role="group"
-        aria-label="Sort by"
-      >
-        {#each sortableCols as col (col.key)}
-          {@const activeSort = sorting && sortKey === col.key}
-          <button
-            type="button"
-            aria-pressed={activeSort}
-            onclick={() => toggleSort(col)}
-            class={`flex min-h-11 shrink-0 snap-start items-center gap-1.5 rounded-full border px-4 text-sm font-medium transition-colors ${
-              activeSort
-                ? 'border-primary bg-primary text-primary-foreground'
-                : 'border-border bg-card text-muted-foreground hover:bg-muted hover:text-foreground'
-            }`}
-          >
-            {col.label}
-            {#if activeSort}
-              {#if sortDir === 1}
-                <ArrowUpIcon class="size-3.5" />
-              {:else}
-                <ArrowDownIcon class="size-3.5" />
-              {/if}
-            {:else}
-              <ArrowUpDownIcon class="size-3.5 opacity-40" />
-            {/if}
-          </button>
-        {/each}
+    {#if filterOpen}
+      <div class="relative">
+        <SearchIcon
+          class="pointer-events-none absolute top-1/2 left-3 size-[1.125rem] -translate-y-1/2 text-muted-foreground"
+        />
+        <Input
+          type="text"
+          placeholder={`Filter ${rows.length} rows…`}
+          aria-label="Filter rows"
+          bind:value={mobileQuery}
+          onkeydown={(e) => {
+            if (e.key === 'Enter') e.preventDefault()
+          }}
+          class="h-11 pl-11"
+        />
       </div>
     {/if}
 
-    <ul class="grid gap-2">
+    <div class="flex items-center gap-1">
+      {#if sortableCols.length > 0}
+        <div
+          class="-ml-4 flex min-w-0 flex-1 snap-x gap-1 overflow-x-auto pr-1 pl-4 pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          role="group"
+          aria-label="Sort by"
+        >
+          {#each sortableCols as col (col.key)}
+            {@const activeSort = sorting && sortKey === col.key}
+            <button
+              type="button"
+              aria-pressed={activeSort}
+              onclick={() => toggleSort(col)}
+              class={`flex min-h-11 shrink-0 snap-start items-center gap-1.5 rounded-full border px-4 text-sm font-medium transition-colors ${
+                activeSort
+                  ? 'border-primary bg-primary text-primary-foreground'
+                  : 'border-border bg-card text-muted-foreground hover:bg-muted hover:text-foreground'
+              }`}
+            >
+              {col.label}
+              {#if activeSort}
+                {#if sortDir === 1}
+                  <ArrowUpIcon class="size-3.5" />
+                {:else}
+                  <ArrowDownIcon class="size-3.5" />
+                {/if}
+              {:else}
+                <ArrowUpDownIcon class="size-3.5 opacity-40" />
+              {/if}
+            </button>
+          {/each}
+        </div>
+      {:else}
+        <div class="min-w-0 flex-1"></div>
+      {/if}
+      {#if rows.length > 3}
+        <button
+          type="button"
+          onclick={() => (filterOpen = !filterOpen)}
+          aria-expanded={filterOpen}
+          aria-label="Filter rows"
+          title="Filter rows"
+          class={`flex size-11 shrink-0 items-center justify-center rounded-full border transition-colors ${
+            filterOpen || mobileQuery
+              ? 'border-primary bg-primary text-primary-foreground'
+              : 'border-border bg-card text-muted-foreground hover:bg-muted hover:text-foreground'
+          }`}
+        >
+          <ListFilterIcon class="size-4" />
+        </button>
+      {/if}
+    </div>
+
+    <ul class="grid gap-1.5">
       {#each visible as row, i (keyOf(row, i))}
         {@const title = titleOf(row)}
         <li class="rounded-lg border bg-card">
-          <div class="flex items-center gap-2 border-b px-3.5 py-3">
-            <div class="min-w-0 flex-1 text-base font-medium break-words">
+          <div class="flex items-center gap-2 border-b px-3 py-2.5">
+            <div class="min-w-0 flex-1 text-[0.95rem] leading-snug font-medium break-words">
               {#if primaryCol && cells && cells[primaryCol]}
                 {@render cells[primaryCol](row, primaryCol)}
               {:else}
@@ -203,7 +230,7 @@
             </div>
           </div>
           {#if chipCols.length}
-            <div class="grid grid-cols-[repeat(auto-fill,minmax(7rem,1fr))] gap-x-3 gap-y-2.5 px-3.5 py-3">
+            <div class="grid grid-cols-[repeat(auto-fill,minmax(6.25rem,1fr))] gap-x-2.5 gap-y-2 px-3 py-2.5">
               {#each chipCols as col (col.key)}
                 {@const v = textOf(row, col)}
                 {#if !EMPTY_VALUES.has(v)}
