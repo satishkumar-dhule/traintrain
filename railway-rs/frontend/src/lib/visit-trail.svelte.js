@@ -8,7 +8,6 @@ const SECTIONS = [
   { seg: 'journeys',    label: 'Journeys' },
   { seg: 'availability',label: 'Availability' },
   { seg: 'pnr',         label: 'PNR Status' },
-  { seg: 'exceptions',  label: 'Exceptions' },
   { seg: 'extras',      label: 'Heritage & Parcel' },
   { seg: 'assistant',   label: 'Ask Train Bro' },
   { seg: 'system',      label: 'System' },

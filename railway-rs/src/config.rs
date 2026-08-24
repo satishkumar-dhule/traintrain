@@ -39,9 +39,9 @@ pub enum AiBackendPolicy {
 ///   `local-first` (local engine, fall back to Zen once per request if it is
 ///   unavailable or fails before streaming)
 /// - `RAILWAY_LOCAL_MODEL_PATH` (default `models/trainbro.gguf`)
-/// - `RAILWAY_LOCAL_CTX`     (default `2048`) — local context window (tokens)
+/// - `RAILWAY_LOCAL_CTX`     (default `1024`) — local context window (tokens)
 /// - `RAILWAY_LOCAL_THREADS` (default `0` = auto: min(cores, 4))
-/// - `RAILWAY_LOCAL_MAX_TOKENS` (default `320`) — generation cap per round
+/// - `RAILWAY_LOCAL_MAX_TOKENS` (default `192`) — generation cap per round
 /// - `ASKDISHA_ENABLED`    (default `true`) — feature gate for the AskDISHA
 ///   module; set `0`/`false`/`no`/`off` (case-insensitive) to hard-disable every
 ///   outbound CoRover call
@@ -75,11 +75,11 @@ pub struct Config {
     pub ai_backend: AiBackendPolicy,
     /// GGUF file for the in-process engine (`RAILWAY_LOCAL_MODEL_PATH`).
     pub ai_local_model_path: PathBuf,
-    /// Local context window in tokens (`RAILWAY_LOCAL_CTX`, default 2048).
+    /// Local context window in tokens (`RAILWAY_LOCAL_CTX`, default 1024).
     pub ai_local_ctx: usize,
     /// Local CPU threads (`RAILWAY_LOCAL_THREADS`, default 0 = auto).
     pub ai_local_threads: usize,
-    /// Generation cap per local round (`RAILWAY_LOCAL_MAX_TOKENS`, default 320).
+    /// Generation cap per local round (`RAILWAY_LOCAL_MAX_TOKENS`, default 192).
     pub ai_local_max_tokens: usize,
     /// AskDISHA module feature gate (`ASKDISHA_ENABLED`, default `true`).
     pub askdisha_enabled: bool,

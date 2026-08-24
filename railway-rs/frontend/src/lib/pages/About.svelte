@@ -120,7 +120,6 @@
     { href: '/journeys', label: 'Journeys', icon: RouteIcon },
     { href: '/availability', label: 'Availability', icon: CalendarDays },
     { href: '/pnr', label: 'PNR Status', icon: Ticket },
-    { href: '/exceptions', label: 'Exceptions', icon: TriangleAlert },
     { href: '/extras', label: 'Heritage & Parcel', icon: Package },
     { href: '/assistant', label: 'Ask Train Bro', icon: Sparkles },
     { href: '/system', label: 'System', icon: Activity },
@@ -156,14 +155,14 @@
       {/each}
     </svg>
 
-    <div class="relative flex items-center gap-4 sm:gap-5">
+    <div class="relative flex items-center gap-4 sm:gap-5 min-w-0">
       <div
         class="grid size-16 shrink-0 place-items-center rounded-2xl bg-primary text-primary-foreground shadow-lg sm:size-20"
       >
         <TrainFront class="size-9 sm:size-11" />
       </div>
-      <div class="grid gap-2">
-        <h1 class="text-2xl font-bold tracking-tight sm:text-3xl">Train Bro</h1>
+      <div class="grid gap-2 min-w-0">
+        <h1 class="text-2xl font-bold tracking-tight sm:text-3xl break-words">Train Bro</h1>
         <div class="flex flex-wrap items-center gap-1.5">
           <span
             class="rounded-full border bg-background px-2.5 py-0.5 text-xs font-medium text-muted-foreground"

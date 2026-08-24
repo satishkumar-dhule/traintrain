@@ -33,7 +33,7 @@ packages = [
 expertMode = true
 
 [run]
-command = "export PATH=\"$HOME/.cargo/bin:$PATH\" && export CARGO_HOME=\"$HOME/.cargo\" && export RAILWAY_PORT=3000 && cargo run --release"
+command = "export PATH=\"$HOME/.cargo/bin:$PATH\" && export CARGO_HOME=\"$HOME/.cargo\" && export RAILWAY_PORT=3000 && export RAILWAY_AI_BACKEND=local-first && export RAILWAY_LOCAL_THREADS=4 && cargo run --release"
 workdir = "railway-rs"
 
 [packager]

@@ -212,7 +212,8 @@
    middle of the viewport instead of pinning it to the top. Auto margins keep
    content reachable (no clipping) when it outgrows the viewport. */
 .idle-center {
-  min-height: calc(100svh - 5rem);
+  min-height: calc(100svh - 5rem - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  min-height: calc(100dvh - 5rem - env(safe-area-inset-top) - env(safe-area-inset-bottom));
 }
 .idle-center > :first-child {
   margin-block-start: auto;
@@ -222,14 +223,16 @@
 }
 @media (max-width: 1023.98px) {
   .idle-center {
-    /* mobile header h-[3.25rem] + main pt-6 + bottom tab bar ~3.25rem clearance */
-    min-height: calc(100svh - 8.5rem);
+    /* mobile header h-[3.25rem] + main pt-4 + bottom tab bar ~3.5rem clearance */
+    min-height: calc(100svh - 8.5rem - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    min-height: calc(100dvh - 8.5rem - env(safe-area-inset-top) - env(safe-area-inset-bottom));
   }
 }
 @media (min-width: 768px) and (max-width: 1023.98px) {
   .idle-center {
     /* mobile header h-[3.25rem] + main md:pt-10 + bottom tab bar */
-    min-height: calc(100svh - 9.75rem);
+    min-height: calc(100dvh - 9.75rem - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    min-height: calc(100svh - 9.75rem - env(safe-area-inset-top) - env(safe-area-inset-bottom));
   }
 }
 
@@ -263,11 +266,14 @@
   border-radius: 0.5rem;
   padding: 0.6rem 0.8rem;
   overflow-x: auto;
+  max-width: 100%;
   margin: 0.4rem 0 0.6rem;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
 }
-.md-pre code { background: transparent; padding: 0; font-size: 0.85em; }
+.md-pre code { background: transparent; padding: 0; font-size: 0.85em; overflow-wrap: anywhere; }
 
-.md-table-wrap { overflow-x: auto; margin: 0.4rem 0 0.6rem; }
+.md-table-wrap { overflow-x: auto; margin: 0.4rem 0 0.6rem; max-width: 100%; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain; }
 .md-table { border-collapse: collapse; width: 100%; font-size: 0.85em; }
 .md-table th,
 .md-table td {
@@ -275,6 +281,7 @@
   padding: 0.3rem 0.55rem;
   text-align: left;
   vertical-align: top;
+  overflow-wrap: anywhere;
 }
 .md-table th { background: var(--muted); font-weight: 600; white-space: nowrap; }
 

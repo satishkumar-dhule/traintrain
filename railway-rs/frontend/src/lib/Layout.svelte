@@ -13,36 +13,60 @@
   import Ticket from 'lucide-svelte/icons/ticket'
   import Activity from 'lucide-svelte/icons/activity'
   import CalendarDays from 'lucide-svelte/icons/calendar-days'
-  import TriangleAlert from 'lucide-svelte/icons/triangle-alert'
   import Package from 'lucide-svelte/icons/package'
   import Sparkles from 'lucide-svelte/icons/sparkles'
   import Info from 'lucide-svelte/icons/info'
   import Search from 'lucide-svelte/icons/search'
   import XIcon from 'lucide-svelte/icons/x'
   import EllipsisIcon from 'lucide-svelte/icons/ellipsis'
+  import SourceTrustChip from '$lib/components/SourceTrustChip.svelte'
 
   let { children } = $props()
 
   let mobileOpen = $state(false)
 
-  /* Top destinations come first on mobile (Live Tracking, PNR); everything
-     else follows. Bottom-nav pattern: ≤5 visible items. */
-  const primaryItems = [
-    { href: '/train', label: 'Live Tracking', short: 'Live', icon: TrainFront },
-    { href: '/pnr', label: 'PNR Status', short: 'PNR', icon: Ticket },
-    { href: '/', label: 'Home', short: 'Home', icon: House, exact: true }
+  /* Ungrouped top-level Home link (also reachable via the logo). */
+  const homeItem = { href: '/', label: 'Home', short: 'Home', icon: House, exact: true }
+
+  /* Grouped sidebar navigation. */
+  const groups = [
+    {
+      label: 'Now',
+      items: [
+        { href: '/train', label: 'Live Train', short: 'Track', icon: TrainFront },
+        { href: '/station', label: 'Station Board', icon: Building2 },
+        { href: '/pnr', label: 'PNR Status', short: 'PNR', icon: Ticket }
+      ]
+    },
+    {
+      label: 'Plan a trip',
+      items: [
+        { href: '/plan', label: 'Plan a trip', short: 'Plan', icon: RouteIcon }
+      ]
+    },
+    {
+      label: 'Explore',
+      items: [{ href: '/extras', label: 'Heritage & Parcel', icon: Package }]
+    },
+    {
+      label: 'Tools',
+      items: [{ href: '/assistant', label: 'Ask Train Bro', icon: Sparkles }]
+    },
+    {
+      label: 'App',
+      items: [
+        { href: '/system', label: 'System & Sources', icon: Activity },
+        { href: '/about', label: 'About', icon: Info }
+      ]
+    }
   ]
 
-  const items = [
-    ...primaryItems,
-    { href: '/station', label: 'Station Board', icon: Building2 },
-    { href: '/journeys', label: 'Journeys', icon: RouteIcon },
-    { href: '/availability', label: 'Availability', icon: CalendarDays },
-    { href: '/exceptions', label: 'Exceptions', icon: TriangleAlert },
-    { href: '/extras', label: 'Heritage & Parcel', icon: Package },
-    { href: '/assistant', label: 'Ask Train Bro', icon: Sparkles },
-    { href: '/system', label: 'System', icon: Activity },
-    { href: '/about', label: 'About', icon: Info }
+  /* Mobile bottom bar: four primary destinations plus the existing More button. */
+  const primaryItems = [
+    { href: '/train', label: 'Live Train', short: 'Track', icon: TrainFront },
+    { href: '/plan', label: 'Plan a trip', short: 'Plan', icon: RouteIcon },
+    { href: '/pnr', label: 'PNR Status', short: 'PNR', icon: Ticket },
+    { href: '/assistant', label: 'Ask Train Bro', short: 'Ask', icon: Sparkles }
   ]
 
   function isActive(item) {
@@ -128,22 +152,38 @@
       <span class="font-semibold tracking-tight">Train Bro</span>
     </a>
     <nav class="flex-1 space-y-1 overflow-y-auto p-3">
-      {#each items as item (item.href)}
-        <a
-          href={item.href}
-          onclick={(e) => go(e, item.href)}
-          class={`flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
-            isActive(item)
-              ? 'bg-primary text-primary-foreground'
-              : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
-          }`}
-        >
-          <item.icon class="size-4" />
-          {item.label}
-        </a>
+      <a
+        href={homeItem.href}
+        onclick={(e) => go(e, homeItem.href)}
+        class={`flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
+          isActive(homeItem)
+            ? 'bg-primary text-primary-foreground'
+            : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+        }`}
+      >
+        <homeItem.icon class="size-4" />
+        {homeItem.label}
+      </a>
+      {#each groups as group (group.label)}
+        <div class="px-3 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{group.label}</div>
+        {#each group.items as item (item.href)}
+          <a
+            href={item.href}
+            onclick={(e) => go(e, item.href)}
+            class={`flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
+              isActive(item)
+                ? 'bg-primary text-primary-foreground'
+                : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+            }`}
+          >
+            <item.icon class="size-4" />
+            {item.label}
+          </a>
+        {/each}
       {/each}
     </nav>
     <div class="space-y-2 border-t p-3">
+      <SourceTrustChip />
       <button
         type="button"
         class="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
@@ -173,7 +213,8 @@
       </span>
       <span class="whitespace-nowrap font-semibold tracking-tight">Train Bro</span>
     </a>
-    <div class="ml-auto flex items-center">
+    <div class="ml-auto flex items-center gap-1">
+      <SourceTrustChip />
       <button
         type="button"
         class="flex size-11 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
@@ -203,20 +244,36 @@
             <XIcon class="size-5" />
           </button>
         </div>
-        {#each items as item (item.href)}
-          <a
-            href={item.href}
-            onclick={(e) => go(e, item.href)}
-            aria-current={isActive(item) ? 'page' : undefined}
-            class={`mt-1 flex min-h-12 items-center gap-3.5 rounded-lg px-3.5 text-base transition-colors ${
-              isActive(item)
-                ? 'bg-primary text-primary-foreground'
-                : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
-            }`}
-          >
-            <item.icon class="size-[22px] shrink-0" />
-            {item.label}
-          </a>
+        <a
+          href={homeItem.href}
+          onclick={(e) => go(e, homeItem.href)}
+          aria-current={isActive(homeItem) ? 'page' : undefined}
+          class={`mt-1 flex min-h-12 items-center gap-3.5 rounded-lg px-3.5 text-base transition-colors ${
+            isActive(homeItem)
+              ? 'bg-primary text-primary-foreground'
+              : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+          }`}
+        >
+          <homeItem.icon class="size-[22px] shrink-0" />
+          {homeItem.label}
+        </a>
+        {#each groups as group (group.label)}
+          <div class="px-3.5 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{group.label}</div>
+          {#each group.items as item (item.href)}
+            <a
+              href={item.href}
+              onclick={(e) => go(e, item.href)}
+              aria-current={isActive(item) ? 'page' : undefined}
+              class={`mt-1 flex min-h-12 items-center gap-3.5 rounded-lg px-3.5 text-base transition-colors ${
+                isActive(item)
+                  ? 'bg-primary text-primary-foreground'
+                  : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+              }`}
+            >
+              <item.icon class="size-[22px] shrink-0" />
+              {item.label}
+            </a>
+          {/each}
         {/each}
         <div class="mt-3 space-y-1 border-t pt-3">
           <button

@@ -4,8 +4,7 @@
   import Home from '$lib/pages/Home.svelte'
   import Train from '$lib/pages/Train.svelte'
   import Station from '$lib/pages/Station.svelte'
-  import Journeys from '$lib/pages/Journeys.svelte'
-  import Availability from '$lib/pages/Availability.svelte'
+  import Plan from '$lib/pages/Plan.svelte'
   import Pnr from '$lib/pages/Pnr.svelte'
   import Exceptions from '$lib/pages/Exceptions.svelte'
   import Extras from '$lib/pages/Extras.svelte'
@@ -23,14 +22,16 @@
     <Train number={segs[1] ?? ''} view={segs[2] ?? ''} />
   {:else if segs[0] === 'station'}
     <Station code={segs[1] ?? ''} view={segs[2] ?? ''} />
+  {:else if segs[0] === 'plan'}
+    <Plan src={segs[1] ?? ''} dst={segs[2] ?? ''} date={segs[3] ?? ''} tab={segs[1] === 'availability' ? 'availability' : 'trains'} />
   {:else if segs[0] === 'journeys'}
-    <Journeys src={segs[1] ?? ''} dst={segs[2] ?? ''} />
+    <Plan src={segs[1] ?? ''} dst={segs[2] ?? ''} tab="trains" />
   {:else if segs[0] === 'availability'}
-    <Availability src={segs[1] ?? ''} dst={segs[2] ?? ''} date={segs[3] ?? ''} />
+    <Plan src={segs[1] ?? ''} dst={segs[2] ?? ''} date={segs[3] ?? ''} tab="availability" />
   {:else if segs[0] === 'pnr'}
     <Pnr pnr={segs[1] ?? ''} />
   {:else if segs[0] === 'exceptions'}
-    <Exceptions number={segs[1] ?? ''} />
+    <Exceptions />
   {:else if segs[0] === 'extras'}
     <Extras view={segs[1] ?? ''} selection={segs[2] ?? ''} />
   {:else if segs[0] === 'assistant'}

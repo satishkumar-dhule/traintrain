@@ -15,17 +15,23 @@ import EmptyState from '$lib/components/EmptyState.svelte'
 import RecentSearches from '$lib/components/RecentSearches.svelte'
 import { loadRecent, rememberRecent, clearStored } from '$lib/recent.js'
 import {
-  TrainNumberBadge,
   StationCodeBadge,
   DelayBadge,
   TrainDelayBadge,
   RunsOnBadges,
   HaltStatusBadge,
   StatusBadge,
+  ExceptionKindBadge,
   parseDelayMinutes
 } from '$lib/components/badges/index.js'
 import { primeTrainDelay } from '$lib/trainDelay.svelte.js'
 import RouteMap from '$lib/components/RouteMap.svelte'
+import PageHeader from '$lib/components/PageHeader.svelte'
+import Breadcrumbs from '$lib/components/Breadcrumbs.svelte'
+import RouteContextBar from '$lib/components/RouteContextBar.svelte'
+import EntityChip from '$lib/components/EntityChip.svelte'
+import ResultMeta from '$lib/components/ResultMeta.svelte'
+import StatPill from '$lib/components/StatPill.svelte'
 import ActivityIcon from 'lucide-svelte/icons/activity'
 
   import CalendarClockIcon from 'lucide-svelte/icons/calendar-clock'
@@ -71,6 +77,11 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
   let mapFor = null
   let mapStation = $state('')
 
+  let excPhase = $state('idle')
+  let excErr = $state(null)
+  let excData = $state(null)
+  let excFor = null
+
   /* Run-instance selection (the NTES "start date" tabs): index into
      data.instances, plus whether the user manually picked one so a 30s
      auto-refresh doesn't yank them back to the active run. */
@@ -113,7 +124,7 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
     )
   }
 
-  const VIEW_TO_TAB = { status: 'status', schedule: 'schedule', delay: 'avg', map: 'map' }
+  const VIEW_TO_TAB = { status: 'status', schedule: 'schedule', delay: 'avg', map: 'map', exceptions: 'exceptions' }
   const TAB_TO_VIEW = Object.fromEntries(Object.entries(VIEW_TO_TAB).map(([v, t]) => [t, v]))
   const RUN_MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
 
@@ -195,6 +206,21 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
     }
   }
 
+  async function loadExceptions(t) {
+    excFor = t
+    excPhase = 'loading'
+    excErr = null
+    const res = await api(`/rail-api/ntes/exceptional?train=${encodeURIComponent(t)}`)
+    if (`${excFor}` !== `${t}`) return
+    if (res.ok) {
+      excData = res.data
+      excPhase = 'ok'
+    } else {
+      excErr = res.error || `HTTP ${res.status}`
+      excPhase = 'error'
+    }
+  }
+
   /* Station-code spot lookup from the map tab's input. */
   function applyMapStation() {
     if (!committed) return
@@ -245,6 +271,8 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
          Deliberately does NOT read mapStation (an input keystroke would
          otherwise re-trigger this effect and refetch). */
       if (!String(mapFor ?? '').startsWith(`${t}|`)) loadMap(t)
+    } else if (tab === 'exceptions') {
+      if (`${excFor}` !== `${t}`) loadExceptions(t)
     }
   })
 
@@ -444,6 +472,23 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
     },
   ]
 
+  const excCols = [
+    {
+      key: 'date',
+      label: 'Date',
+      class: 'w-36',
+      value: (e) => fmtExcDate(e.date),
+      sortValue: (e) => String(e.date ?? '').trim() || null,
+    },
+    { key: 'kind', label: 'Kind', class: 'w-40', value: (e) => e.kind || 'unknown' },
+    {
+      key: 'note',
+      label: 'Note',
+      cellClass: 'max-w-md whitespace-normal break-words text-sm text-muted-foreground',
+      value: (e) => e.note || '',
+    },
+  ]
+
   /* NTES spot strings ("On Time", "Delayed …") → sortable minutes when
      parseable; on-time sorts first, unparseable text last. */
   function spotDelayMins(v) {
@@ -494,6 +539,16 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
     const n = avgDelayMins(v)
     if (n == null) return '—'
     return `${Math.round(n)}m`
+  }
+
+  /* ISO exception dates → NTES-style DD-MMM-YYYY for display. */
+  function fmtExcDate(iso) {
+    const raw = String(iso ?? '').trim()
+    if (!raw) return '—'
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw)
+    if (!m) return raw
+    const mo = (RUN_MONTHS[Number(m[2]) - 1] ?? '').toUpperCase()
+    return mo ? `${m[3]}-${mo}-${m[1]}` : raw
   }
 </script>
 
@@ -560,28 +615,53 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
   {/if}
 {/snippet}
 
+{#snippet excDateCell(e)}
+  <span class="font-mono text-xs max-lg:text-sm">{fmtExcDate(e.date)}</span>
+{/snippet}
+
+{#snippet excKindCell(e)}
+  <ExceptionKindBadge kind={e.kind} />
+{/snippet}
+
 <section class="grid gap-4 md:gap-6" class:idle-center={!committed}>
-  <div class="grid gap-1">
-    <h1 class="text-xl md:text-2xl font-semibold tracking-tight">Live train status</h1>
-    <p class="max-lg:hidden text-sm text-muted-foreground">Spot any train by number or name. Data refreshes honestly from the live API.</p>
-  </div>
+  <PageHeader title="Live train status" description="Spot any train by number or name. Data refreshes honestly from the live API.">
+    {#snippet children()}
+      <Breadcrumbs items={[{ label: 'Home', href: '/' }, { label: 'Live Train', href: '/train' }, { label: 'Train ' + (committed || number) }]} />
+    {/snippet}
+  </PageHeader>
+
+  {#if committed && viewport.narrow}
+    <RouteContextBar
+      from={committed}
+      to={data?.train_name ?? ''}
+      onEdit={() => { query = ''; searchOpen = true }}
+    />
+  {/if}
+
+  {#if !viewport.narrow}
+    <PageHeader title="Live train status" description="Spot any train by number or name. Data refreshes honestly from the live API.">
+      {#snippet children()}
+        <Breadcrumbs items={[{ label: 'Home', href: '/' }, { label: 'Live Train', href: '/train' }, { label: 'Train ' + (committed || number) }]} />
+      {/snippet}
+    </PageHeader>
+  {/if}
 
   {#if committed && viewport.narrow && !searchOpen}
     <button
       type="button"
-      class="flex min-h-11 w-full items-center gap-2 rounded-lg border bg-card px-3 text-left transition-colors hover:bg-accent/50"
+      class="flex min-h-9 w-full items-center gap-2 rounded-lg border bg-card px-3 text-left text-sm transition-colors hover:bg-accent/50"
       onclick={() => (searchOpen = true)}
       aria-expanded="false"
     >
-      <span class="min-w-0 flex-1 truncate font-mono text-sm font-medium">{committed}</span>
+      <span class="min-w-0 flex-1 truncate font-mono font-medium">{committed}</span>
       <span class="text-xs font-medium text-primary">Change</span>
       <ChevronDownIcon class="size-4 shrink-0 text-muted-foreground" />
     </button>
   {:else}
     <Card.Root>
-      <Card.Content class="flex flex-wrap items-end gap-3">
+      <Card.Content class="flex flex-wrap items-end gap-3 max-lg:p-3">
         <div
-          class="grid min-w-48 flex-1 gap-2"
+          class="grid min-w-0 sm:min-w-48 flex-1 gap-2"
           onkeydown={(e) => {
             if (e.key === 'Enter' && !e.defaultPrevented) track()
           }}
@@ -598,15 +678,15 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
             }}
           />
         </div>
-        <Button type="button" onclick={() => track()} disabled={phase === 'loading' || phase === 'refreshing'}>
+        <Button type="button" onclick={() => track()} disabled={phase === 'loading' || phase === 'refreshing'} class="shrink-0 max-lg:min-h-9 max-lg:w-full sm:w-auto">
           {phase === 'refreshing' ? 'Refreshing…' : 'Track'}
         </Button>
-        <label class="mb-0.5 flex min-h-11 cursor-pointer items-center gap-2 py-2 text-sm text-muted-foreground">
+        <label class="mb-0.5 flex min-h-9 cursor-pointer items-center gap-2 py-2 text-sm text-muted-foreground shrink-0">
           <input
             type="checkbox"
             checked={auto}
             onchange={(e) => setAuto(e.currentTarget.checked)}
-            class="size-5 accent-[var(--primary)]"
+            class="size-4 accent-[var(--primary)]"
           />
           Auto 30s
           {#if auto}<span class="font-mono text-xs">next {nextIn}s</span>{/if}
@@ -630,11 +710,12 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
   {/if}
 
   <Tabs.Root class="min-w-0" bind:value={activeTab} onValueChange={onTabChange}>
-    <Tabs.List class="w-full justify-start overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-      <Tabs.Trigger value="status"><ActivityIcon class="mr-2 size-4" />Status</Tabs.Trigger>
-      <Tabs.Trigger value="schedule"><CalendarClockIcon class="mr-2 size-4" />Schedule</Tabs.Trigger>
-      <Tabs.Trigger value="avg"><ChartColumnIcon class="mr-2 size-4" />Avg delay</Tabs.Trigger>
-      <Tabs.Trigger value="map"><MapIcon class="mr-2 size-4" />Map</Tabs.Trigger>
+    <Tabs.List class="w-full justify-start overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden max-lg:h-8">
+      <Tabs.Trigger value="status" class="max-lg:h-7 max-lg:px-2 max-lg:text-xs"><ActivityIcon class="mr-1 size-3 max-lg:mr-0.5 max-lg:size-3.5" />Status</Tabs.Trigger>
+      <Tabs.Trigger value="schedule" class="max-lg:h-7 max-lg:px-2 max-lg:text-xs"><CalendarClockIcon class="mr-1 size-3 max-lg:mr-0.5 max-lg:size-3.5" />Schedule</Tabs.Trigger>
+      <Tabs.Trigger value="avg" class="max-lg:h-7 max-lg:px-2 max-lg:text-xs"><ChartColumnIcon class="mr-1 size-3 max-lg:mr-0.5 max-lg:size-3.5" />Avg delay</Tabs.Trigger>
+      <Tabs.Trigger value="map" class="max-lg:h-7 max-lg:px-2 max-lg:text-xs"><MapIcon class="mr-1 size-3 max-lg:mr-0.5 max-lg:size-3.5" />Map</Tabs.Trigger>
+      <Tabs.Trigger value="exceptions" class="max-lg:h-7 max-lg:px-2 max-lg:text-xs"><CalendarX2Icon class="mr-1 size-3 max-lg:mr-0.5 max-lg:size-3.5" />Exceptions</Tabs.Trigger>
     </Tabs.List>
 
     <Tabs.Content value="status" class="mt-3 grid gap-4">
@@ -654,13 +735,16 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
           <Card.Header class="flex flex-col items-start justify-between gap-3 space-y-0 sm:flex-row sm:items-center">
             <div class="grid gap-1">
               <Card.Title class="flex flex-wrap items-center gap-2">
-                <TrainNumberBadge number={data.train_number} name={data.train_name} />
+                <EntityChip type="train" code={data.train_number} name={data.train_name} />
                 <span>{data.train_name ?? ''}</span>
                 <TrainDelayBadge number={data.train_number} name={data.train_name} />
               </Card.Title>
               <Card.Description>
                 {#if runPosition}{runPosition}{:else}{statusRows.length} stations on this run{/if}
               </Card.Description>
+              <ResultMeta source={data?.data_source}>
+                <StatPill label="Stations" value={statusRows.length} />
+              </ResultMeta>
             </div>
             <div class="flex flex-wrap items-center gap-2">
               <Button
@@ -672,16 +756,6 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
                 onclick={() => navigate(`/assistant/${encodeURIComponent('live status of ' + number)}`)}
               >
                 <SparklesIcon class="size-4 max-lg:mr-0" /><span class="max-lg:hidden">Ask Train Bro</span>
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                aria-label="Exceptions"
-                title="Cancelled / rescheduled / diverted dates for this train"
-                onclick={() => navigate(`/exceptions/${encodeURIComponent(committed || data.train_number)}`)}
-              >
-                <CalendarX2Icon class="size-4 max-lg:mr-0" /><span class="max-lg:hidden">Exceptions</span>
               </Button>
               <StatusBadge tone={auto ? 'info' : 'outline'} dot={auto} class="max-lg:hidden">{auto ? 'auto 30s' : 'manual'}</StatusBadge>
             </div>
@@ -747,11 +821,14 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
         <Card.Root>
           <Card.Header>
             <Card.Title class="flex flex-wrap items-center gap-2">
-              <TrainNumberBadge number={schData.train_number} name={schData.train_name} />
+              <EntityChip type="train" code={schData.train_number} name={schData.train_name} />
               <span>{schData.train_name ?? ''}</span>
               <TrainDelayBadge number={schData.train_number} name={schData.train_name} />
             </Card.Title>
             <Card.Description>{schData.stops?.length ?? 0} scheduled stops</Card.Description>
+            <ResultMeta source={schData?.data_source}>
+              <StatPill label="Stops" value={schData.stops?.length ?? 0} />
+            </ResultMeta>
           </Card.Header>
           <Card.Content class="grid gap-4">
             <div class="flex flex-wrap items-center gap-2">
@@ -801,7 +878,7 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
         <Card.Root>
           <Card.Header>
             <Card.Title class="flex flex-wrap items-center gap-2">
-              <TrainNumberBadge number={avgData.train_no} name={avgData.train_name} />
+              <EntityChip type="train" code={avgData.train_no} name={avgData.train_name} />
               <span>{avgData.train_name ?? ''}</span>
               <TrainDelayBadge
                 number={avgData.train_no}
@@ -813,6 +890,9 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
             <Card.Description>
               Average arrival / departure delays{avgData.days_of_run ? ` · runs: ${avgData.days_of_run}` : ''}
             </Card.Description>
+            <ResultMeta source={avgData?.data_source}>
+              <StatPill label="Stations" value={avgData.stations?.length ?? 0} />
+            </ResultMeta>
           </Card.Header>
           <Card.Content>
             <DataTable
@@ -848,7 +928,7 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
       {:else}
         <Card.Root>
           <Card.Content class="flex flex-wrap items-end gap-3 max-lg:gap-2">
-            <div class="grid min-w-48 flex-1 gap-2"
+            <div class="grid min-w-0 sm:min-w-48 flex-1 gap-2"
               onkeydown={(e) => {
                 if (e.key === 'Enter' && !e.defaultPrevented) applyMapStation()
               }}
@@ -861,7 +941,7 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
                 placeholder="Station code, e.g. NDLS"
               />
             </div>
-            <Button type="button" variant="outline" onclick={applyMapStation} disabled={mapPhase === 'loading'}>
+            <Button type="button" variant="outline" onclick={applyMapStation} disabled={mapPhase === 'loading'} class="shrink-0 max-lg:min-h-11 max-lg:w-full sm:w-auto">
               Show live spot
             </Button>
             {#if mapStation.trim() || mapData?.current_station || mapData?.journey_station}
@@ -897,7 +977,7 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
               <Card.Content class="grid gap-3">
                 {#if mapData.current_station?.code}
                   <div class="flex flex-wrap items-center gap-2">
-                    <StatusBadge tone="info" dot>Current: {mapData.current_station.code}</StatusBadge>
+                    <StatusBadge tone="info" dot>Current: <EntityChip type="station" code={mapData.current_station.code} name={mapData.current_station.name} /></StatusBadge>
                     {#if mapData.train_name}
                       <span class="text-sm text-muted-foreground">{mapData.train_no ?? ''} {mapData.train_name}</span>
                       <TrainDelayBadge number={mapData.train_no} name={mapData.train_name} />
@@ -908,7 +988,7 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
                   {@const j = mapData.journey_station}
                   <div class="grid gap-1.5 text-sm">
                     <div class="flex flex-wrap gap-x-8 gap-y-1">
-                      <span><span class="text-muted-foreground">Stop: </span><span class="font-medium">{j.name} ({j.code})</span></span>
+                      <span><span class="text-muted-foreground">Stop: </span><span class="font-medium">{j.name} <EntityChip type="station" code={j.code} name={j.name} size="sm" /></span></span>
                       {#if j.label}<span><span class="text-muted-foreground">Status: </span><span class="font-medium">{j.label}</span></span>{/if}
                     </div>
                     <div class="flex flex-wrap gap-x-8 gap-y-1">
@@ -928,7 +1008,9 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
           <Card.Root>
             <Card.Header>
               <Card.Title>Stations</Card.Title>
-              <Card.Description>{mapData.route?.length ?? 0} halts on the route</Card.Description>
+              <ResultMeta source={mapData?.data_source}>
+                <StatPill label="Halts" value={mapData.route?.length ?? 0} />
+              </ResultMeta>
             </Card.Header>
             <Card.Content>
               <DataTable
@@ -954,5 +1036,76 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
         {/if}
       {/if}
     </Tabs.Content>
+
+    <Tabs.Content value="exceptions" class="mt-3 grid gap-4">
+      {#if !committed}
+        <EmptyState
+          icon={CalendarX2Icon}
+          title="No exceptions loaded"
+          hint="Enter a train number above to see its cancelled, rescheduled or diverted dates."
+        />
+      {:else if excPhase === 'loading'}
+        <div class="grid gap-2" aria-busy="true">
+          {#each [0, 1, 2, 3, 4] as i (i)}
+            <Skeleton class="h-10 w-full" />
+          {/each}
+        </div>
+      {:else if excPhase === 'error'}
+        <Alert.Root variant="destructive" role="alert">
+          <Alert.Title>Could not load exceptions</Alert.Title>
+          <Alert.Description>{excErr}</Alert.Description>
+        </Alert.Root>
+      {:else if excPhase === 'ok' && excData}
+        {@const train = excData.train ?? {}}
+        {@const entries = Array.isArray(excData.exceptions) ? excData.exceptions : []}
+        {@const msg = typeof excData.message === 'string' ? excData.message.trim() : ''}
+        {@const excRoute =
+          [train.source, train.destination].filter((s) => s && String(s).trim()).join(' → ')}
+        <Card.Root>
+          <Card.Header class="min-w-0">
+            <Card.Title class="flex flex-wrap items-center gap-x-2 break-words">
+              <EntityChip type="train" code={train.number || committed} name={train.name} />
+              {#if train.name}<span class="break-words">{train.name}</span>{/if}
+            </Card.Title>
+            <Card.Description class="break-words [overflow-wrap:anywhere]">
+              {entries.length} exception{entries.length === 1 ? '' : 's'}{excRoute ? ` · ${excRoute}` : ''}
+            </Card.Description>
+            <ResultMeta source={excData?.data_source}>
+              <StatPill label="Records" value={entries.length} />
+            </ResultMeta>
+          </Card.Header>
+          <Card.Content class="grid gap-4">
+            {#if entries.length > 0}
+              <DataTable
+                columns={excCols}
+                rows={entries}
+                primary="date"
+                rowKey={(e, i) => `${e.date ?? ''}|${e.kind ?? ''}|${i}`}
+                cells={{ date: excDateCell, kind: excKindCell }}
+                empty="No exception records found."
+              />
+            {:else if msg}
+              <Alert.Root role="status">
+                <Alert.Title>Nothing to report</Alert.Title>
+                <Alert.Description>{msg}</Alert.Description>
+              </Alert.Root>
+            {:else}
+              <div class="flex flex-col items-center gap-2 rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
+                <CalendarX2Icon class="size-5" />
+                No exception records found for this train.
+              </div>
+            {/if}
+          </Card.Content>
+        </Card.Root>
+      {:else}
+        <EmptyState
+          icon={CalendarX2Icon}
+          title="No exceptions loaded"
+          hint="Track a train first, then its cancelled / rescheduled / diverted dates appear here."
+        />
+      {/if}
+    </Tabs.Content>
   </Tabs.Root>
+
+  <div class="h-20 lg:hidden"></div>
 </section>

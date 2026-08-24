@@ -1,6 +1,6 @@
 # railway-rs
 
-Train Bro - an Indian Railways companion backend (Rust rewrite). Axum JSON API plus a vanilla-JS SPA that serves live railway data straight from public Indian Railways sources - never simulated, never fabricated.
+Train Bro - an Indian Railways companion backend (Rust rewrite). Axum JSON API plus a Svelte 5 single-page app that serves live railway data straight from public Indian Railways sources - never simulated, never fabricated.
 
 ## Features
 
@@ -8,6 +8,7 @@ Train Bro - an Indian Railways companion backend (Rust rewrite). Axum JSON API p
 - Live trains-at-station and trains-between-stations from NTES, plus per-train exceptional dates (cancelled / rescheduled / diverted calendar, cached 2 hours) from NTES
 - Train availability from Paytm Travel (`travel.paytm.com`, no login, no IP geofencing) with per-class status, fare and PNR prediction, falling back to IRCTC; prepared-chart (per-coach berth) data from IRCTC without login (`www.irctc.co.in`)
 - Offline autocomplete over a real 8,958-station and 10,609-train dataset (no network needed for search)
+- AI assistant (`POST /rail-api/ai/chat`, SSE): tool-calling chat that can execute the live rail endpoints and stream answers/cards; runs on the OpenCode Zen gateway by default or fully in-process with a ~105 MB GGUF micro-model (`RAILWAY_AI_BACKEND=local-first`, see models/README.md), keeping zen as once-per-request fallback
 - State-of-the-art observability: a Prometheus `/metrics` endpoint (counters, gauges, histograms) for Grafana/Loki ingestion, structured JSON logs (stdout + rolling daily files) mirrored into a live in-memory log ring, and a real-time dashboard with graphs, gauges, tables, stats and a log stream
 - Honest errors: upstream failures surface as HTTP 502/404 with a JSON `{"error": ...}` body - no made-up data
 - No API keys, no accounts, no configuration required to run
@@ -17,7 +18,7 @@ Train Bro - an Indian Railways companion backend (Rust rewrite). Axum JSON API p
 
 The app is a single axum process: a top-level router (`src/web.rs`) merges one router per vertical slice, applies shared middleware (metrics, trace, catch-panic, 30s timeout), and serves the SPA from `static/` with an `index.html` fallback for client-side routing. Each vertical slice under `src/slices/` is self-contained (`mod.rs` router + `service.rs` logic). All live data flows through the `DataSource` abstraction in `src/core/source.rs`; the aggregator in `src/core/aggregator.rs` races every registered source concurrently and returns the first success. Responses are cached in a TTL `Cache` and instrumented by a real `Metrics` collector.
 
-The SPA is vanilla JS with no build step. A pure route table (`static/routes.js`, no DOM, unit-tested) parses hash URLs like `#/train/12559/schedule`, `#/station/NDLS/tt`, `#/plan/NDLS/BSB/availability` (plan deep links can carry an optional journey date: `#/plan/NDLS/BSB/availability/2026-08-20`) or `#/pnr/2498761234`; `static/app.js` is a thin hash router that mounts one of six section views (`static/sections/home.js`, `track.js`, `station.js`, `plan.js`, `pnr.js`, `more.js`). Valid deep links auto-submit and are refresh-safe with working back/forward; invalid or missing params fall back to the section's input form. Two large self-contained tabs are kept as-is under `static/tabs/` (train-on-map, observability). Shared helpers live in `static/ui.js` (inputs, autocomplete, query cards, fetch pipeline, IRCTC-style calendar picker) and `static/api.js` (one helper per endpoint).
+The frontend is a **Svelte 5 + Vite + Tailwind** single-page app built from `frontend/` and served as a static bundle from `static/assets/` (the `index.html` entry). It uses pathname-based routing (not hash routing): `/train/12559`, `/station/NDLS`, `/plan/NDLS/BSB/2026-08-20` (plan deep links carry an optional journey date), `/pnr/...`, `/assistant`, `/system`. Live train status is tabbed (`/train/12559/{status,schedule,delay,map,exceptions}`); exceptions (cancelled / rescheduled / diverted dates) live only as the train page's Exceptions tab. The UI is built from shadcn-style primitives under `frontend/src/lib/components/ui/` plus a small set of reusable, enterprise-grade components (`PageHeader`, `StationPairInput`, `ResultMeta`, `StatPill`, `EntityChip`, `Breadcrumbs`, `SourceTrustChip`). The legacy vanilla-JS SPA source (`static/routes.js`, `static/palette.js`, `static/api.js`, `static/ui.js`) is retained only because its pure route-table, palette and fetch helpers are still covered by the `tests/js/` unit suite; it is not served to users.
 
 ```
 railway-rs/
@@ -47,7 +48,8 @@ railway-rs/
 │   │   └── error.rs           AppError -> 400/404/428/500/502
 │   └── config.rs              env-var configuration
 ├── data/                      stations.json, trains.json (real datasets)
-├── static/                    vanilla-JS SPA
+├── static/                    served SPA build (Svelte bundle in static/assets/) + legacy JS kept for tests/js
+├── frontend/                  Svelte 5 source (components, pages, lib)
 ├── tests/                     hermetic integration tests (mock upstreams)
 ├── scripts/                   data generation scripts
 └── deploy/                    systemd unit + deployment guide
@@ -83,6 +85,11 @@ Everything is optional; defaults are built in. Read from environment variables a
 | `RAILWAY_SOURCE_PAYTM_BASE`       | `https://travel.paytm.com`          | Base URL of the Paytm Travel upstream source |
 | `RAILWAY_LOG_DIR`                 | `./logs`            | Directory for rolling daily JSON log files   |
 | `RAILWAY_LOG_FORMAT`              | `json`              | Console log format: `json` or `pretty`       |
+| `RAILWAY_AI_BACKEND`              | `zen`               | AI backend: `zen` (upstream gateway), `local` (in-process GGUF engine), `local-first` (local, zen fallback) |
+| `RAILWAY_LOCAL_MODEL_PATH`        | `models/trainbro.gguf` | GGUF weights for the local engine          |
+| `RAILWAY_LOCAL_CTX`               | `1024`              | Local context window, tokens                 |
+| `RAILWAY_LOCAL_THREADS`           | `0`                 | Local CPU threads (`0` = auto: min(cores,4)) |
+| `RAILWAY_LOCAL_MAX_TOKENS`        | `192`               | Generation cap per local round               |
 
 The `*_BASE` variables let tests (or proxies) point sources at local mocks. `HTTP_TIMEOUT` and `CACHE_TTL` are parsed as seconds.
 
@@ -110,6 +117,8 @@ Unmatched `/rail-api/*` paths return JSON 404; everything else falls through to 
 | GET    | `/rail-api/irctc/availability`  | same params as `/rail-api/availability` | Legacy alias of `/rail-api/availability` (same handler) |
 | GET    | `/rail-api/irctc/chart`         | `train` (1-8 digits), `date` (optional), `station` (4-char code, optional) | Prepared-chart per-coach berth status for a journey date (IRCTC online-charts) |
 | GET    | `/rail-api/ntes/exceptional` | `train` (4-5 digit number), `type` = `cancelled` \| `rescheduled` \| `diverted` (optional) | Per-train exceptional dates (cancelled / rescheduled / diverted calendar, cached 2h); the train name is resolved from the local master list when NTES does not echo it, and the NTES verdict `No Exceptional Details found for train X !!!` is echoed verbatim as `message` when there are none |
+| GET    | `/rail-api/ai/status`    | -                                        | AI assistant config: enabled, model, keyed, active `backend` and `fallback` |
+| POST   | `/rail-api/ai/chat`      | JSON body: `{ "messages": [...] }`       | SSE chat with tool calling; the assistant can execute live rail tools and stream deltas/cards |
 
 Each live response carries a `data_source` field naming the actual upstream that produced it (`Railyatri`, `NTES`, `IRCTC` or `Paytm`). `live-status` ("Spot Train") and `schedule` prefer NTES and fall back to Railyatri when NTES is unreachable; `trains-between` prefers NTES and falls back to the IRCTC availability API; `availability` prefers Paytm (per-class booking status like `GNWL82/WL59` or `AVAILABLE 0022`, fare, quota and PNR prediction - no login, no IP geofencing) and falls back to IRCTC, with `source=paytm`/`irctc` pinning one source and an invalid value rejected as 400. `live-status` drives the NTES "Spot Your Train (Live Status)" web form (POST `/mntes/tr?opt=TrainRunning&subOpt=FindRunningInstancePop`), parses the returned popup's run panes and per-station timeline, and serves the active run's start date plus every reported run instance. Search endpoints are offline; PNR, schedule, live-status, live-station, trains-between, availability, chart and exceptional are live and go through the shared cache.
 

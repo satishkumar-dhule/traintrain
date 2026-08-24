@@ -10,6 +10,7 @@ RUN cargo build --release --locked
 FROM debian:bookworm-slim
 
 ARG WITH_VNC=0
+ENV WITH_VNC=${WITH_VNC}
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl ca-certificates \
@@ -44,12 +45,12 @@ Xvfb :1 -screen 0 ${RES}x24 -ac +extension GLX +render -noreset &
 sleep 1
 fluxbox >/tmp/fluxbox.log 2>&1 &
 sleep 1
-tint2 >/tmp/tint2.log 2>&1 & || true
-pcmanfm --desktop >/tmp/pcmanfm.log 2>&1 & || true
+{ tint2 >/tmp/tint2.log 2>&1 & } || true
+{ pcmanfm --desktop >/tmp/pcmanfm.log 2>&1 & } || true
 x11vnc -display :1 -nopw -forever -shared -rfbport 5901 -bg -o /tmp/x11vnc.log 2>&1 || true
-websockify --web /usr/share/novnc 6080 localhost:5901 >/tmp/novnc.log 2>&1 & || true
+{ websockify --web /usr/share/novnc 6080 localhost:5901 >/tmp/novnc.log 2>&1 & } || true
 hsetroot -solid "#0f172a" 2>/dev/null || xsetroot -solid "#0f172a" 2>/dev/null || true
-xfce4-terminal --geometry 90x24 2>/dev/null & || xterm 2>/dev/null & || true
+{ xfce4-terminal --geometry 90x24 >/tmp/term.log 2>&1 & } || { xterm >/tmp/term.log 2>&1 & } || true
 echo "[desktop] VNC ready: :1 -> 5901, noVNC http://localhost:6080/vnc.html"
 EOS
 COPY <<'EOS' /usr/local/bin/docker-entrypoint.sh

@@ -12,6 +12,7 @@
   import DateStrip from '$lib/components/DateStrip.svelte'
   import EmptyState from '$lib/components/EmptyState.svelte'
   import RecentSearches from '$lib/components/RecentSearches.svelte'
+  import TrainResultCard from '$lib/components/TrainResultCard.svelte'
   import { loadRecent, rememberRecent, clearStored } from '$lib/recent.js'
   import {
     TrainNumberBadge,
@@ -28,7 +29,7 @@ import CalendarClockIcon from 'lucide-svelte/icons/calendar-clock'
 import RouteIcon from 'lucide-svelte/icons/route'
 import { journeysHref, trainHref } from '$lib/utils.js'
 
-  let { src = '', dst = '', date = '' } = $props()
+  let { src = '', dst = '', date = '', embedded = false } = $props()
 
   const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
@@ -270,7 +271,7 @@ import { journeysHref, trainHref } from '$lib/utils.js'
     const want =
       '/availability/' +
       [s, d, dt].filter(Boolean).map((p) => encodeURIComponent(p)).join('/')
-    if (route.path !== want) navigate(want)
+    if (!embedded && route.path !== want) navigate(want)
     else runSearch(s, d, dt, `${s}/${d}/${dt}`)
   }
 
@@ -357,60 +358,63 @@ import { journeysHref, trainHref } from '$lib/utils.js'
     </p>
   </div>
 
-  <div
-    class="flex flex-wrap items-center gap-2 rounded-lg border bg-card p-2"
-    onkeydown={(e) => {
-      if (e.key === 'Enter' && !e.defaultPrevented) search()
-    }}
-  >
-    <AutoCompleteInput
-      id="av-from"
-      bind:value={from}
-      kind="station"
-      placeholder="From station…"
-      aria-label="From station"
-      class="min-w-44 flex-1"
-      inputClass="h-8"
-      onpick={(item) => {
-        if (asText(item?.code)) from = asText(item.code).toUpperCase()
+  {#if !embedded}
+    <form
+      class="flex flex-wrap items-center gap-2 rounded-lg border bg-card p-2"
+      onsubmit={(e) => {
+        e.preventDefault()
+        if (canSearch) search()
       }}
-    />
-    <Button
-      type="button"
-      variant="outline"
-      size="icon"
-      class="size-8 shrink-0"
-      onclick={swap}
-      aria-label="Swap From and To stations"
-      title="Swap stations"
     >
-      <ArrowDownUpIcon />
-    </Button>
-    <AutoCompleteInput
-      id="av-to"
-      bind:value={to}
-      kind="station"
-      placeholder="To station…"
-      aria-label="To station"
-      class="min-w-44 flex-1"
-      inputClass="h-8"
-      onpick={(item) => {
-        if (asText(item?.code)) to = asText(item.code).toUpperCase()
+      <AutoCompleteInput
+        id="av-from"
+        bind:value={from}
+        kind="station"
+        placeholder="From station…"
+        aria-label="From station"
+        class="min-w-32 sm:min-w-44 flex-1"
+        inputClass="h-8 max-lg:h-11"
+        onpick={(item) => {
+          if (asText(item?.code)) from = asText(item.code).toUpperCase()
+        }}
+      />
+      <Button
+        type="button"
+        variant="outline"
+        size="icon"
+        class="size-8 shrink-0 max-lg:size-10"
+        onclick={swap}
+        aria-label="Swap From and To stations"
+        title="Swap stations"
+      >
+        <ArrowDownUpIcon />
+      </Button>
+      <AutoCompleteInput
+        id="av-to"
+        bind:value={to}
+        kind="station"
+        placeholder="To station…"
+        aria-label="To station"
+        class="min-w-32 sm:min-w-44 flex-1"
+        inputClass="h-8 max-lg:h-11"
+        onpick={(item) => {
+          if (asText(item?.code)) to = asText(item.code).toUpperCase()
+        }}
+      />
+      <Button type="submit" class="ml-auto h-8 max-lg:h-11 max-lg:w-full sm:ml-auto sm:w-auto shrink-0" onclick={search} disabled={!canSearch}>
+        Search
+      </Button>
+    </form>
+
+    <DateStrip
+      id="av-date"
+      bind:value={journeyDate}
+      class="z-20 lg:sticky lg:top-0"
+      onchange={() => {
+        if (canSearch) search()
       }}
     />
-    <Button type="button" class="ml-auto h-8" onclick={search} disabled={!canSearch}>
-      Search
-    </Button>
-  </div>
-
-  <DateStrip
-    id="av-date"
-    bind:value={journeyDate}
-    class="z-20 lg:sticky lg:top-0"
-    onchange={() => {
-      if (canSearch) search()
-    }}
-  />
+  {/if}
 
   {#if phase === 'idle' && recent.length > 0}
     <RecentSearches
@@ -697,47 +701,68 @@ import { journeysHref, trainHref } from '$lib/utils.js'
         </div>
         {/if}
       {:else}
-        <div class="grid gap-2.5">
-          {#each filteredTrains as tr, i (asText(tr?.number) || `c-${i}`)}
-            {@const flags = dayFlags(tr?.runs_on)}
-            <article class="min-w-0 overflow-hidden rounded-lg border bg-card">
-              <div class="flex flex-wrap items-center gap-x-2.5 gap-y-1 px-3 py-2 min-w-0">
-                <div class="flex min-w-0 items-center gap-2">
-                  <TrainNumberBadge number={tr?.number} name={tr?.name} />
-                  <span class="truncate text-sm font-medium">{asText(tr?.name) || 'Unknown train'}</span>
-                  <TrainDelayBadge number={tr?.number} name={tr?.name} compact />
+        {#if viewport.narrow}
+          <div class="grid gap-2.5">
+            {#each filteredTrains as tr, i (asText(tr?.number) || `c-${i}`)}
+              {@const flags = dayFlags(tr?.runs_on)}
+              <TrainResultCard
+                number={asText(tr?.number)}
+                name={asText(tr?.name)}
+                departureTime={asText(tr?.departure_time)}
+                arrivalTime={asText(tr?.arrival_time)}
+                duration={durationLabel(tr)}
+                runsOn={flags || []}
+                source={from}
+                destination={to}
+                availability={visibleRows(tr).map((r) => ({ class: classCode(r), fare: numOrNull(r?.fare), status: asText(r?.status) }))}
+                journeyDate={journeyDate}
+                updatedAt={asText(data?.updated_at)}
+              />
+            {/each}
+          </div>
+        {:else}
+          <div class="grid gap-2.5">
+            {#each filteredTrains as tr, i (asText(tr?.number) || `c-${i}`)}
+              {@const flags = dayFlags(tr?.runs_on)}
+              <article class="min-w-0 overflow-hidden rounded-lg border bg-card">
+                <div class="flex flex-wrap items-center gap-x-2.5 gap-y-1 px-3 py-2 min-w-0">
+                  <div class="flex min-w-0 items-center gap-2">
+                    <TrainNumberBadge number={tr?.number} name={tr?.name} />
+                    <span class="truncate text-sm font-medium">{asText(tr?.name) || 'Unknown train'}</span>
+                    <TrainDelayBadge number={tr?.number} name={tr?.name} compact />
+                  </div>
+                  <div class="ml-auto flex flex-wrap items-center gap-2 min-w-0 max-lg:w-full">
+                    {#if flags}
+                      <RunsOnBadges {flags} format="letter" />
+                    {/if}
+                    <span class="font-mono text-xs tabular-nums text-muted-foreground">
+                      {fmt(tr?.departure_time)} → {fmt(tr?.arrival_time)} · {durationLabel(tr)}
+                    </span>
+                    {#if asText(tr?.number)}
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="xs"
+                        onclick={() => navigate(trainHref(tr.number, 'schedule'))}
+                        title={`Timetable & stops of ${asText(tr?.number)}`}
+                      >
+                        <CalendarClockIcon class="size-3" />
+                        Schedule
+                      </Button>
+                    {/if}
+                  </div>
                 </div>
-                <div class="ml-auto flex flex-wrap items-center gap-2 min-w-0 max-lg:w-full">
-                  {#if flags}
-                    <RunsOnBadges {flags} format="letter" />
-                  {/if}
-                  <span class="font-mono text-xs tabular-nums text-muted-foreground">
-                    {fmt(tr?.departure_time)} → {fmt(tr?.arrival_time)} · {durationLabel(tr)}
-                  </span>
-                  {#if asText(tr?.number)}
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="xs"
-                      onclick={() => navigate(trainHref(tr.number, 'schedule'))}
-                      title={`Timetable & stops of ${asText(tr?.number)}`}
-                    >
-                      <CalendarClockIcon class="size-3" />
-                      Schedule
-                    </Button>
-                  {/if}
+                <div class="grid grid-cols-[repeat(auto-fill,minmax(9.5rem,1fr))] max-lg:grid-cols-[repeat(auto-fill,minmax(8.25rem,1fr))] gap-1.5 border-t px-3 py-2 [&>*]:min-w-0">
+                  {#each visibleRows(tr) as r, j (j)}
+                    {@render avlChip(r)}
+                  {:else}
+                    <span class="text-xs text-muted-foreground">No class-level status returned.</span>
+                  {/each}
                 </div>
-              </div>
-              <div class="grid grid-cols-[repeat(auto-fill,minmax(9.5rem,1fr))] max-lg:grid-cols-[repeat(auto-fill,minmax(8.25rem,1fr))] gap-1.5 border-t px-3 py-2 [&>*]:min-w-0">
-                {#each visibleRows(tr) as r, j (j)}
-                  {@render avlChip(r)}
-                {:else}
-                  <span class="text-xs text-muted-foreground">No class-level status returned.</span>
-                {/each}
-              </div>
-            </article>
-          {/each}
-        </div>
+              </article>
+            {/each}
+          </div>
+        {/if}
       {/if}
     {/if}
   {:else}

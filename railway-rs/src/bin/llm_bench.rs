@@ -1,6 +1,9 @@
-//! Throwaway benchmark: raw candle quantized_llama speed on this host.
-//! Run: cargo run --release --bin llm_bench -- [gguf_path]
+//! Standalone speed probe for the local GGUF engine stack (candle +
+//! quantized_llama). Use it to verify SIMD codegen and decode/prefill rates
+//! after toolchain or model changes; see models/README.md for reference
+//! numbers. Run: cargo run --release --bin llm_bench -- [gguf_path]
 
+use std::error::Error;
 use std::time::Instant;
 
 use candle_core::quantized::gguf_file;
@@ -8,7 +11,7 @@ use candle_core::{Device, Tensor};
 use candle_transformers::models::quantized_llama::ModelWeights;
 use tokenizers::Tokenizer;
 
-fn main() -> anyhow::Result<()> {
+fn main() -> Result<(), Box<dyn Error>> {
     let path = std::env::args()
         .nth(1)
         .unwrap_or_else(|| "models/trainbro.gguf".into());
@@ -24,11 +27,11 @@ fn main() -> anyhow::Result<()> {
     let device = Device::Cpu;
     let mut model = ModelWeights::from_gguf(content, &mut file, &device)?;
     println!("load: {:?}", t0.elapsed());
-    let tok = Tokenizer::from_file("models/tokenizer.json").map_err(|e| anyhow::anyhow!("{e}"))?;
+    let tok = Tokenizer::from_file("models/tokenizer.json").map_err(|e| e.to_string())?;
     let prompt = "<|im_start|>system\nYou are Train Bro.<|im_end|>\n<|im_start|>user\nWhich trains run from New Delhi NDLS to Kanpur CNB tonight?<|im_end|>\n<|im_start|>assistant\n";
     let ids = tok
         .encode(prompt, true)
-        .map_err(|e| anyhow::anyhow!("{e}"))?
+        .map_err(|e| e.to_string())?
         .get_ids()
         .to_vec();
     println!("prompt tokens: {}", ids.len());
@@ -66,9 +69,7 @@ fn main() -> anyhow::Result<()> {
         "decode {steps} steps: {dt:?} => {:.2} tok/s",
         steps as f64 / dt.as_secs_f64()
     );
-    let piece = tok
-        .decode(&[next], false)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let piece = tok.decode(&[next], false).map_err(|e| e.to_string())?;
     println!("last token: {next} {piece:?}");
     Ok(())
 }

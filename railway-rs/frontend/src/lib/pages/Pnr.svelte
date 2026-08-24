@@ -1,6 +1,7 @@
 <script>
   import { api } from '$lib/api.js'
   import { navigate, route } from '$lib/router.svelte.js'
+  import { viewport } from '$lib/media.svelte.js'
   import * as Card from '$lib/components/ui/card/index.js'
   import { Button } from '$lib/components/ui/button/index.js'
   import { Input } from '$lib/components/ui/input/index.js'
@@ -12,9 +13,13 @@
 import DataTable from '$lib/components/DataTable.svelte'
 import EmptyState from '$lib/components/EmptyState.svelte'
 import RecentSearches from '$lib/components/RecentSearches.svelte'
+import PageHeader from '$lib/components/PageHeader.svelte'
+import Breadcrumbs from '$lib/components/Breadcrumbs.svelte'
+import RouteContextBar from '$lib/components/RouteContextBar.svelte'
+import EntityChip from '$lib/components/EntityChip.svelte'
+import ResultMeta from '$lib/components/ResultMeta.svelte'
+import StatPill from '$lib/components/StatPill.svelte'
 import {
-  TrainNumberBadge,
-  StationCodeBadge,
   PnrStatusBadge,
   DataSourceBadge,
   StatusBadge,
@@ -162,15 +167,26 @@ import {
   <PnrStatusBadge status={p.booking_status} />
 {/snippet}
 
-<section class="grid gap-6" class:idle-center={phase === 'idle'}>
-  <div class="grid gap-1">
-    <h1 class="text-2xl font-semibold tracking-tight">PNR status</h1>
-    <p class="max-lg:hidden text-sm text-muted-foreground">10-digit passenger name record. Upstream may require a captcha.</p>
-  </div>
+<section class="grid gap-4 md:gap-6" class:idle-center={phase === 'idle'}>
+  {#if !viewport.narrow}
+    <PageHeader title="PNR status" description="10-digit passenger name record. Upstream may require a captcha.">
+      {#snippet children()}
+        <Breadcrumbs items={[{ label: 'Home', href: '/' }, { label: 'PNR', href: '/pnr' }]} />
+      {/snippet}
+    </PageHeader>
+  {/if}
+
+  {#if viewport.narrow && data}
+    <RouteContextBar
+      from={committed}
+      to={data?.train_name || 'PNR Status'}
+      onEdit={() => { query = ''; committed = ''; data = null; }}
+    />
+  {/if}
 
   <Card.Root>
-    <Card.Content class="flex flex-wrap items-end gap-3">
-      <div class="grid min-w-48 flex-1 gap-2">
+    <Card.Content class="flex flex-wrap items-end gap-3 max-lg:p-3">
+      <div class="grid min-w-0 sm:min-w-48 flex-1 gap-2">
         <Label for="pnr-no" class="max-lg:hidden">PNR number</Label>
         <Input
           id="pnr-no"
@@ -184,7 +200,7 @@ import {
           <p class="text-xs text-muted-foreground">PNR must be exactly 10 digits.</p>
         {/if}
       </div>
-      <Button type="button" onclick={() => lookup()} disabled={!valid || busy}>
+      <Button type="button" onclick={() => lookup()} disabled={!valid || busy} class="max-lg:min-h-11 shrink-0 max-lg:w-full sm:w-auto">
         {phase === 'refreshing' ? 'Refreshing…' : 'Check status'}
       </Button>
     </Card.Content>
@@ -250,29 +266,32 @@ import {
       <Card.Header class="gap-3 space-y-0">
         <div class="flex flex-wrap items-center justify-between gap-2">
           <Card.Title class="flex flex-wrap items-center gap-2">
-            <TrainNumberBadge number={data.train_number} name={data.train_name} />
+            <EntityChip type="train" code={data.train_number} name={data.train_name} />
             <span>{data.train_name ?? ''}</span>
             <TrainDelayBadge number={data.train_number} name={data.train_name} />
           </Card.Title>
           <DataSourceBadge source={data.data_source} freshness={data.freshness} />
         </div>
-        <div class="flex flex-wrap items-center gap-x-6 gap-y-3 rounded-lg border bg-muted/40 px-5 py-3.5 max-lg:gap-x-4 max-lg:px-3 max-lg:py-2.5">
-          <div class="grid min-w-28 gap-0.5">
-            <StationCodeBadge code={data.from?.code} name={data.from?.name} class="text-sm" />
-            <span class="truncate text-xs text-muted-foreground">{fmt(data.from?.name)}</span>
+        <ResultMeta>
+          <StatPill label="Passengers" value={passengers.length} />
+        </ResultMeta>
+        <div class="flex flex-wrap items-center gap-x-6 gap-y-3 rounded-lg border bg-muted/40 px-5 py-3.5 max-lg:gap-x-4 max-lg:px-3 max-lg:py-2.5 min-w-0">
+          <div class="grid min-w-24 sm:min-w-28 gap-0.5 min-w-0">
+            <EntityChip type="station" code={data.from?.code} name={data.from?.name} size="sm" />
+            <span class="truncate text-xs text-muted-foreground [overflow-wrap:anywhere]">{fmt(data.from?.name)}</span>
             <span class="text-xs text-muted-foreground">
               {fmt(data.from?.time)}{#if data.from?.day}&nbsp;· day {data.from.day}{/if}
             </span>
           </div>
           <ArrowRight class="size-4 shrink-0 text-muted-foreground" />
-          <div class="grid min-w-28 gap-0.5">
-            <StationCodeBadge code={data.to?.code} name={data.to?.name} class="text-sm" />
-            <span class="truncate text-xs text-muted-foreground">{fmt(data.to?.name)}</span>
+          <div class="grid min-w-24 sm:min-w-28 gap-0.5 min-w-0">
+            <EntityChip type="station" code={data.to?.code} name={data.to?.name} size="sm" />
+            <span class="truncate text-xs text-muted-foreground [overflow-wrap:anywhere]">{fmt(data.to?.name)}</span>
             <span class="text-xs text-muted-foreground">
               {fmt(data.to?.time)}{#if data.to?.day}&nbsp;· day {data.to.day}{/if}
             </span>
           </div>
-          <StatusBadge tone="info" class="ml-auto shrink-0">journey {fmt(data.journey_date)}</StatusBadge>
+          <StatusBadge tone="info" class="ml-auto shrink-0 max-lg:w-full max-lg:justify-center">journey {fmt(data.journey_date)}</StatusBadge>
         </div>
       </Card.Header>
       <Card.Content>
@@ -304,4 +323,5 @@ import {
       hint="Enter a 10-digit PNR above or pick a recent lookup to see status."
     />
   {/if}
+  <div class="h-20 lg:hidden"></div>
 </section>

@@ -1,6 +1,7 @@
 <script>
   import { untrack } from 'svelte'
   import { api } from '$lib/api.js'
+  import { viewport } from '$lib/media.svelte.js'
   import SourceStatus from '$lib/SourceStatus.svelte'
   import * as Card from '$lib/components/ui/card/index.js'
   import { Skeleton } from '$lib/components/ui/skeleton/index.js'
@@ -434,33 +435,51 @@
 {/snippet}
 
 <section class="grid gap-6">
-  <div class="grid gap-1">
-    <div class="flex flex-wrap items-center justify-between gap-3">
-      <h1 class="flex items-center gap-2 text-2xl font-semibold tracking-tight">
-        <Activity class="size-5 text-muted-foreground" />
-        System
-      </h1>
-      <div class="flex items-center gap-4">
-        {#if updatedAt && !note}
-          <span class="hidden text-xs text-muted-foreground sm:inline">
-            Updated {updatedTime(updatedAt)}
-          </span>
-        {/if}
-        <Button type="button" variant="outline" size="sm" onclick={() => loadAll()} disabled={busy}>
-          <RefreshCw class={`mr-2 size-4${busy ? ' animate-spin' : ''}`} />
-          {busy ? 'Refreshing…' : 'Refresh'}
-        </Button>
-        <label class="mb-0.5 flex min-h-11 cursor-pointer items-center gap-2 py-2 text-sm text-muted-foreground">
-          <input type="checkbox" bind:checked={auto} class="size-5 accent-[var(--primary)]" />
-          Auto 10s
-        </label>
+  {#if !viewport.narrow}
+    <div class="grid gap-1">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <h1 class="flex items-center gap-2 text-2xl font-semibold tracking-tight">
+          <Activity class="size-5 text-muted-foreground" />
+          System
+        </h1>
+        <div class="flex items-center gap-4">
+          {#if updatedAt && !note}
+            <span class="hidden text-xs text-muted-foreground sm:inline">
+              Updated {updatedTime(updatedAt)}
+            </span>
+          {/if}
+          <Button type="button" variant="outline" size="sm" onclick={() => loadAll()} disabled={busy}>
+            <RefreshCw class={`mr-2 size-4${busy ? ' animate-spin' : ''}`} />
+            {busy ? 'Refreshing…' : 'Refresh'}
+          </Button>
+          <label class="mb-0.5 flex min-h-11 cursor-pointer items-center gap-2 py-2 text-sm text-muted-foreground">
+            <input type="checkbox" bind:checked={auto} class="size-5 accent-[var(--primary)]" />
+            Auto 10s
+          </label>
+        </div>
       </div>
+      <p class="text-sm text-muted-foreground">Runtime metrics and recent request logs — real numbers only.</p>
+      {#if note}
+        <p class="text-xs text-destructive">{note}</p>
+      {/if}
     </div>
-    <p class="max-lg:hidden text-sm text-muted-foreground">Runtime metrics and recent request logs — real numbers only.</p>
-    {#if note}
-      <p class="text-xs text-destructive max-lg:text-sm">{note}</p>
-    {/if}
-  </div>
+  {/if}
+
+  {#if viewport.narrow}
+    <div class="flex items-center gap-3">
+      <Button type="button" variant="outline" size="sm" class="max-lg:h-11 max-lg:px-4" onclick={() => loadAll()} disabled={busy}>
+        <RefreshCw class={`mr-2 size-4${busy ? ' animate-spin' : ''}`} />
+        {busy ? 'Refreshing…' : 'Refresh'}
+      </Button>
+      <label class="mb-0.5 flex min-h-11 cursor-pointer items-center gap-2 py-2 text-sm text-muted-foreground">
+        <input type="checkbox" bind:checked={auto} class="size-5 accent-[var(--primary)]" />
+        Auto
+      </label>
+      {#if note}
+        <p class="ml-auto text-xs text-destructive">{note}</p>
+      {/if}
+    </div>
+  {/if}
 
   <div class="grid gap-2">
     <h2 class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Overview</h2>
@@ -476,20 +495,20 @@
         <Alert.Description>Could not load /rail-api/observability.</Alert.Description>
       </Alert.Root>
     {:else}
-      <div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div class="grid grid-cols-2 gap-2 lg:grid-cols-4 lg:gap-3">
         {#each heroTiles as t (t.label)}
-          <Card.Root class="gap-2 py-4">
-            <Card.Content class="flex items-start justify-between gap-2 px-4">
-              <div class="grid gap-1">
-                <Card.Title class="text-xs font-medium uppercase tracking-wide text-muted-foreground">{t.label}</Card.Title>
-                <Card.Description class="font-mono text-2xl font-semibold tabular-nums">{t.value}</Card.Description>
+          <Card.Root class="gap-1 py-2 lg:gap-2 lg:py-4">
+            <Card.Content class="flex items-start justify-between gap-2 px-3 lg:px-4">
+              <div class="grid gap-0.5 lg:gap-1">
+                <Card.Title class="text-[10px] font-medium uppercase tracking-wide text-muted-foreground lg:text-xs">{t.label}</Card.Title>
+                <Card.Description class="font-mono text-lg font-semibold tabular-nums lg:text-2xl">{t.value}</Card.Description>
               </div>
-              <span class={`rounded-md p-2 ${toneChip[t.tone] ?? toneChip.slate}`} aria-hidden="true">
-                <t.icon class="size-4" />
+              <span class={`rounded-md p-1.5 lg:p-2 ${toneChip[t.tone] ?? toneChip.slate}`} aria-hidden="true">
+                <t.icon class="size-3.5 lg:size-4" />
               </span>
             </Card.Content>
-            <Card.Content class="px-4">
-              <p class="text-[11px] leading-tight text-muted-foreground">{t.sub}</p>
+            <Card.Content class="px-3 lg:px-4">
+              <p class="text-[10px] leading-tight text-muted-foreground lg:text-[11px]">{t.sub}</p>
             </Card.Content>
           </Card.Root>
         {/each}
@@ -501,9 +520,9 @@
           style="background:var(--border);border-color:var(--border);"
         >
           {#each runtimeStats as [label, value] (label)}
-            <div class="grid gap-0.5 bg-card px-3 py-2.5">
-              <span class="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{label}</span>
-              <span class="truncate font-mono text-sm font-semibold tabular-nums max-lg:whitespace-normal max-lg:break-words" title={value}>{value}</span>
+            <div class="grid gap-0.5 bg-card px-2 py-1.5 lg:px-3 lg:py-2.5">
+              <span class="text-[9px] font-medium uppercase tracking-wide text-muted-foreground lg:text-[10px]">{label}</span>
+              <span class="truncate font-mono text-xs font-semibold tabular-nums lg:text-sm" title={value}>{value}</span>
             </div>
           {/each}
         </div>
@@ -514,24 +533,24 @@
   <div class="grid gap-2">
     <h2 class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Traffic</h2>
     {#if obs.phase === 'loading'}
-      <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4" aria-busy="true">
+      <div class="grid grid-cols-2 gap-2 lg:grid-cols-4 lg:gap-3" aria-busy="true">
         {#each Array.from({ length: 4 }, (_, i) => i) as i (i)}
-          <Skeleton class="h-32" />
+          <Skeleton class="h-28 lg:h-32" />
         {/each}
       </div>
     {:else if obs.phase === 'ok'}
-      <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div class="grid grid-cols-2 gap-2 lg:grid-cols-4 lg:gap-3">
         {#each sparks as s (s.key)}
           {@const seriesArr = obs.data?.series?.[s.key]}
           {@const pts = sparkPoints(seriesArr)}
           {@const lastVal = latest(seriesArr)}
           {@const range = seriesRange(seriesArr)}
-          <Card.Root class="gap-2 py-4">
-            <Card.Title class="px-4 text-xs font-medium uppercase tracking-wide text-muted-foreground">{s.label}</Card.Title>
-            <Card.Description class="px-4 font-mono text-lg font-semibold tabular-nums">{s.fmt(lastVal)}</Card.Description>
-            <Card.Content class="px-4">
+          <Card.Root class="gap-1 py-2 lg:gap-2 lg:py-4">
+            <Card.Title class="px-3 text-[10px] font-medium uppercase tracking-wide text-muted-foreground lg:px-4 lg:text-xs">{s.label}</Card.Title>
+            <Card.Description class="px-3 font-mono text-base font-semibold tabular-nums lg:px-4 lg:text-lg">{s.fmt(lastVal)}</Card.Description>
+            <Card.Content class="px-3 lg:px-4">
               {#if pts.length}
-                <div class="flex h-14 items-end gap-[2px]" role="img" aria-label={`${s.label} sparkline, last ${pts.length} samples`}>
+                <div class="flex h-10 items-end gap-[2px] lg:h-14" role="img" aria-label={`${s.label} sparkline, last ${pts.length} samples`}>
                   {#each pts as p, i (i)}
                     <div
                       class={`min-w-[2px] flex-1 rounded-sm ${s.bar}`}
@@ -539,7 +558,7 @@
                     ></div>
                   {/each}
                 </div>
-                <p class="mt-2 text-[10px] text-muted-foreground">
+                <p class="mt-1 text-[9px] text-muted-foreground lg:mt-2 lg:text-[10px]">
                   {#if range}
                     min {s.rangeFmt(range.min)} · max {s.rangeFmt(range.max)} · last {pts.length} samples
                   {:else}
@@ -547,7 +566,7 @@
                   {/if}
                 </p>
               {:else}
-                <p class="py-4 text-center text-xs text-muted-foreground">no series data yet — sampler warms up within seconds</p>
+                <p class="py-2 text-center text-[10px] text-muted-foreground lg:py-4 lg:text-xs">no series data yet</p>
               {/if}
             </Card.Content>
           </Card.Root>
@@ -560,11 +579,11 @@
     <h2 class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Upstream</h2>
     {#if origins.length}
       <Card.Root>
-        <Card.Header>
-          <Card.Title class="text-base">Upstream origins</Card.Title>
-          <Card.Description>Served request counts, latency and reachability per data source.</Card.Description>
+        <Card.Header class="max-lg:p-3">
+          <Card.Title class="text-sm lg:text-base">Upstream origins</Card.Title>
+          <Card.Description class="max-lg:text-xs">Served request counts, latency and reachability per data source.</Card.Description>
         </Card.Header>
-        <Card.Content>
+        <Card.Content class="max-lg:p-3">
           <DataTable
             columns={originCols}
             rows={origins}
@@ -582,13 +601,13 @@
   {#if obs.phase === 'ok'}
     <div class="grid gap-2">
       <h2 class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Application</h2>
-      <div class="grid gap-3 lg:grid-cols-2">
+      <div class="grid gap-2 lg:grid-cols-2 lg:gap-3">
         <Card.Root>
-          <Card.Header>
-            <Card.Title class="text-base">Top paths</Card.Title>
-            <Card.Description>Most requested routes since process start.</Card.Description>
+          <Card.Header class="max-lg:p-3">
+            <Card.Title class="text-sm lg:text-base">Top paths</Card.Title>
+            <Card.Description class="max-lg:text-xs">Most requested routes since process start.</Card.Description>
           </Card.Header>
-          <Card.Content>
+          <Card.Content class="max-lg:p-3">
             {#if paths.length}
               <ol class="grid gap-2">
                 {#each paths as p, i (p[0])}
@@ -606,11 +625,11 @@
         </Card.Root>
 
         <Card.Root>
-          <Card.Header>
-            <Card.Title class="text-base">Status distribution</Card.Title>
-            <Card.Description>Response counts per HTTP status code.</Card.Description>
+          <Card.Header class="max-lg:p-3">
+            <Card.Title class="text-sm lg:text-base">Status distribution</Card.Title>
+            <Card.Description class="max-lg:text-xs">Response counts per HTTP status code.</Card.Description>
           </Card.Header>
-          <Card.Content class="grid gap-3">
+          <Card.Content class="grid gap-2 p-3 lg:gap-3 lg:p-6">
             {#if statusBars.length}
               <div class="flex h-3 w-full overflow-hidden rounded-full" role="img" aria-label="Status code distribution stacked bar">
                 {#each statusBars as s (s.code)}
@@ -638,22 +657,22 @@
       </div>
 
       <Card.Root>
-        <Card.Header>
-          <Card.Title class="text-base">Cache</Card.Title>
-          <Card.Description>Live cache counters reported by the server.</Card.Description>
+        <Card.Header class="max-lg:p-3">
+          <Card.Title class="text-sm lg:text-base">Cache</Card.Title>
+          <Card.Description class="max-lg:text-xs">Live cache counters reported by the server.</Card.Description>
         </Card.Header>
-        <Card.Content>
+        <Card.Content class="max-lg:p-3">
           {#if cacheEntries.length}
-            <dl class="grid gap-x-6 gap-y-2 sm:grid-cols-2 lg:grid-cols-3">
+            <dl class="grid gap-x-4 gap-y-1.5 sm:grid-cols-2 lg:gap-x-6 lg:gap-y-2 lg:grid-cols-3">
               {#each cacheEntries as e (e.key)}
-                <div class="flex items-baseline justify-between gap-3 border-b pb-1">
-                  <dt class="text-xs uppercase tracking-wide text-muted-foreground">{e.label}</dt>
-                  <dd class="truncate font-mono text-sm font-medium max-lg:whitespace-normal max-lg:break-words" title={e.value}>{e.value}</dd>
+                <div class="flex items-baseline justify-between gap-2 border-b pb-1 lg:gap-3">
+                  <dt class="text-[10px] uppercase tracking-wide text-muted-foreground lg:text-xs">{e.label}</dt>
+                  <dd class="truncate font-mono text-xs font-medium max-lg:whitespace-normal max-lg:break-words lg:text-sm" title={e.value}>{e.value}</dd>
                 </div>
               {/each}
             </dl>
           {:else}
-            <p class="text-sm text-muted-foreground">no cache stats reported</p>
+            <p class="text-xs text-muted-foreground lg:text-sm">no cache stats reported</p>
           {/if}
         </Card.Content>
       </Card.Root>
@@ -679,11 +698,11 @@
       </div>
     </div>
     <Card.Root>
-      <Card.Header>
-        <Card.Title class="text-base">Recent logs</Card.Title>
-        <Card.Description>Newest first, in-memory ring buffer.</Card.Description>
+      <Card.Header class="max-lg:p-3">
+        <Card.Title class="text-sm lg:text-base">Recent logs</Card.Title>
+        <Card.Description class="max-lg:text-xs">Newest first, in-memory ring buffer.</Card.Description>
       </Card.Header>
-      <Card.Content>
+      <Card.Content class="max-lg:p-3">
         {#if logsState.phase === 'loading'}
           <div class="grid gap-2" aria-busy="true">
             {#each Array.from({ length: 4 }, (_, i) => i) as i (i)}
@@ -710,3 +729,4 @@
     </Card.Root>
   </div>
 </section>
+<div class="h-20 lg:hidden"></div>

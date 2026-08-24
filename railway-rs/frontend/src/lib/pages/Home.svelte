@@ -19,6 +19,7 @@
   import MapPinIcon from 'lucide-svelte/icons/map-pin'
   import ArrowLeftRight from 'lucide-svelte/icons/arrow-left-right'
   import XIcon from 'lucide-svelte/icons/x'
+  import TriangleAlert from 'lucide-svelte/icons/triangle-alert'
 
   const popularTrains = [12951, 12309, 12002]
 
@@ -321,10 +322,10 @@
 </script>
 
 <section class="grid gap-8">
-  <div class="grid gap-3">
+  <div class="grid gap-2">
     <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight">Train Bro</h1>
-    <p class="max-lg:hidden max-w-xl text-muted-foreground">
-      Live train status, station boards, journey planning and PNR — free, no accounts.
+    <p class="text-sm text-muted-foreground">
+      Live status, PNR, journeys & station boards — free, no accounts.
     </p>
 
     <div
@@ -372,7 +373,7 @@
             <button
               type="button"
               aria-label="Clear chosen station"
-              class="inline-flex items-center justify-center max-lg:size-11 max-lg:-mr-2"
+              class="inline-flex items-center justify-center max-lg:size-11"
               onclick={clearOrigin}
             >
               <XIcon class="size-3 opacity-70 hover:opacity-100" />
@@ -388,7 +389,7 @@
       </div>
 
         <div class="flex flex-wrap items-end gap-2">
-          <div class="grid min-w-44 flex-1 gap-1.5">
+          <div class="grid min-w-32 sm:min-w-44 flex-1 gap-1.5">
             <Label for="home-plan-to">Destination</Label>
             <AutoCompleteInput
               id="home-plan-to"
@@ -398,7 +399,7 @@
               onpick={onDestPick}
             />
           </div>
-          <Button type="submit" disabled={!canPlan}>
+          <Button type="submit" disabled={!canPlan} class="max-lg:min-h-11 shrink-0 max-lg:w-full sm:w-auto">
             <SearchIcon data-icon="inline-start" />
             Find trains &amp; availability
           </Button>
@@ -410,163 +411,39 @@
     </form>
   </Card.Root>
 
-  <div class="grid gap-4 sm:grid-cols-2">
-    <Card.Root class="transition-colors hover:border-primary/50">
-      <form class="flex h-full flex-col gap-3 p-6" onsubmit={submitTrain}>
-        <div class="flex items-start gap-3">
-          <span class="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <TrainFront class="size-5" />
-          </span>
-          <div class="grid gap-0.5">
-            <a
-              href="/train"
-              class="hit-y text-base font-semibold hover:underline"
-              onclick={(e) => { e.preventDefault(); navigate('/train') }}
-            >Live train status</a>
-            <p class="max-lg:hidden text-sm text-muted-foreground">Where is my train right now, delay per station.</p>
-          </div>
-        </div>
-        <div class="mt-auto flex items-end gap-2">
-          <div class="grid flex-1 gap-1.5">
-            <Label for="home-train">Train number or name</Label>
-            <AutoCompleteInput
-              id="home-train"
-              kind="train"
-              placeholder="Train number or name…"
-              bind:value={trainQuery}
-              onpick={(item) => {
-                trainQuery = String(item.number)
-                goTrain(String(item.number))
-              }}
-              inputClass={trainErr ? 'border-destructive' : ''}
-            />
-          </div>
-          <Button type="submit" disabled={trainResolving}>
-            <SearchIcon data-icon="inline-start" />
-            {trainResolving ? '…' : 'Track'}
-          </Button>
-        </div>
-        {#if trainErr}
-          <p class="text-xs text-destructive max-lg:text-sm">{trainErr}</p>
-        {/if}
-      </form>
-    </Card.Root>
-
-    <Card.Root class="transition-colors hover:border-primary/50">
-      <form class="flex h-full flex-col gap-3 p-6" onsubmit={submitStation}>
-        <div class="flex items-start gap-3">
-          <span class="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <Building2 class="size-5" />
-          </span>
-          <div class="grid gap-0.5">
-            <a
-              href="/station"
-              class="hit-y text-base font-semibold hover:underline"
-              onclick={(e) => { e.preventDefault(); navigate('/station') }}
-            >Station boards</a>
-            <p class="max-lg:hidden text-sm text-muted-foreground">Arrivals and departures for the next hours.</p>
-          </div>
-        </div>
-        <div class="mt-auto flex items-end gap-2">
-          <div class="grid flex-1 gap-1.5">
-            <Label for="home-station">Station</Label>
-            <AutoCompleteInput
-              id="home-station"
-              kind="station"
-              placeholder="Station name or code, e.g. NDLS"
-              bind:value={stationQuery}
-              onpick={submitStation}
-            />
-          </div>
-          <Button type="submit">
-            <SearchIcon data-icon="inline-start" />
-            Board
-          </Button>
-        </div>
-        {#if stationErr}
-          <p class="text-xs text-destructive max-lg:text-sm">{stationErr}</p>
-        {/if}
-      </form>
-    </Card.Root>
-
-    <Card.Root class="transition-colors hover:border-primary/50 sm:col-span-2">
-      <form class="flex h-full flex-col gap-3 p-6" onsubmit={submitJourney}>
-        <div class="flex items-start gap-3">
-          <span class="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <RouteIcon class="size-5" />
-          </span>
-          <div class="grid gap-0.5">
-            <a
-              href="/journeys"
-              class="hit-y text-base font-semibold hover:underline"
-              onclick={(e) => { e.preventDefault(); navigate('/journeys') }}
-            >Find journeys</a>
-            <p class="max-lg:hidden text-sm text-muted-foreground">Trains between any two stations, with run days.</p>
-          </div>
-        </div>
-        <div class="flex flex-wrap items-end gap-2">
-          <div class="grid min-w-44 flex-1 gap-1.5">
-            <Label for="home-journey-from">From</Label>
-            <AutoCompleteInput id="home-journey-from" kind="station" placeholder="NDLS" bind:value={journeyFrom} />
-          </div>
-          <div class="grid min-w-44 flex-1 gap-1.5">
-            <Label for="home-journey-to">To</Label>
-            <AutoCompleteInput
-              id="home-journey-to"
-              kind="station"
-              placeholder="DLI"
-              bind:value={journeyTo}
-              onpick={() => { if (norm(journeyFrom)) submitJourney() }}
-            />
-          </div>
-          <Button type="submit" disabled={!journeyFrom.trim() || !journeyTo.trim()}>
-            <SearchIcon data-icon="inline-start" />
-            Search
-          </Button>
-        </div>
-        {#if journeyErr}
-          <p class="text-xs text-destructive max-lg:text-sm">{journeyErr}</p>
-        {/if}
-      </form>
-    </Card.Root>
-
-    <Card.Root class="transition-colors hover:border-primary/50 sm:col-span-2">
-      <form class="flex h-full flex-col gap-3 p-6 sm:flex-row sm:gap-6" onsubmit={submitPnr}>
-        <div class="flex shrink-0 items-start gap-3">
-          <span class="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <Ticket class="size-5" />
-          </span>
-          <div class="grid gap-0.5">
-            <a
-              href="/pnr"
-              class="hit-y text-base font-semibold hover:underline"
-              onclick={(e) => { e.preventDefault(); navigate('/pnr') }}
-            >PNR status</a>
-            <p class="max-lg:hidden text-sm text-muted-foreground">Passenger reservation status with captcha retry.</p>
-          </div>
-        </div>
-        <div class="grid flex-1 content-center gap-1.5">
-          <Label for="home-pnr">PNR number</Label>
-          <div class="flex items-end gap-2">
-            <Input
-              id="home-pnr"
-              bind:value={pnrQuery}
-              inputmode="numeric"
-              placeholder="10-digit PNR"
-              maxlength={10}
-              aria-invalid={pnrErr ? 'true' : undefined}
-            />
-            <Button type="submit">
-              <SearchIcon data-icon="inline-start" />
-              Check status
-            </Button>
-          </div>
-          {#if pnrErr}
-            <p class="text-xs text-destructive max-lg:text-sm">{pnrErr}</p>
-          {/if}
-        </div>
-      </form>
-    </Card.Root>
+  <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+    <button
+      type="button"
+      class="rounded-xl border bg-card p-4 text-center transition-colors hover:border-primary/50 hover:bg-muted/50"
+      onclick={() => navigate('/train')}
+    >
+      <TrainFront class="mx-auto mb-2 size-6 text-primary" />
+      <span class="text-sm font-medium">Live Train</span>
+    </button>
+    <button
+      type="button"
+      class="rounded-xl border bg-card p-4 text-center transition-colors hover:border-primary/50 hover:bg-muted/50"
+      onclick={() => navigate('/pnr')}
+    >
+      <Ticket class="mx-auto mb-2 size-6 text-primary" />
+      <span class="text-sm font-medium">PNR Status</span>
+    </button>
+    <button
+      type="button"
+      class="rounded-xl border bg-card p-4 text-center transition-colors hover:border-primary/50 hover:bg-muted/50"
+      onclick={() => navigate('/station')}
+    >
+      <Building2 class="mx-auto mb-2 size-6 text-primary" />
+      <span class="text-sm font-medium">Station Board</span>
+    </button>
+    <button
+      type="button"
+      class="rounded-xl border bg-card p-4 text-center transition-colors hover:border-primary/50 hover:bg-muted/50"
+      onclick={() => navigate('/exceptions')}
+    >
+      <TriangleAlert class="mx-auto mb-2 size-6 text-primary" />
+      <span class="text-sm font-medium">Service Alerts</span>
+    </button>
   </div>
 
   <Separator />

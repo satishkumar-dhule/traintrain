@@ -182,7 +182,8 @@ fn index_route_stations(state: &AppState, train: &str) -> Vec<String> {
 }
 
 /// Tokens of an indexed train name that could plausibly denote a station:
-/// alphanumeric words of 2-6 characters minus service-type words.
+/// alphanumeric words minus service-type words (which sometimes collide with
+/// real station names, e.g. DEMU, SF).
 fn plausible_station_tokens(name: &str) -> Vec<&str> {
     const NON_STATION_WORDS: &[&str] = &[
         "EXPRESS",
@@ -201,6 +202,7 @@ fn plausible_station_tokens(name: &str) -> Vec<&str> {
         "TEJAS",
         "GARIB",
         "RATH",
+        "RAJ",
         "KRANTI",
         "SAMPARK",
         "VANDE",
@@ -214,7 +216,7 @@ fn plausible_station_tokens(name: &str) -> Vec<&str> {
         "LINK",
     ];
     name.split(|c: char| !c.is_ascii_alphanumeric())
-        .filter(|t| (2..=6).contains(&t.len()))
+        .filter(|t| (2..=24).contains(&t.len()))
         .filter(|t| {
             let upper = t.to_ascii_uppercase();
             !NON_STATION_WORDS.contains(&upper.as_str())

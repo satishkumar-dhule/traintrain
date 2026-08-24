@@ -31,6 +31,7 @@ or produce a Docker image following your existing image build process.
    sudo cp target/release/railway-rs /opt/railway-rs/
    sudo cp -r static /opt/railway-rs/
    sudo cp -r data /opt/railway-rs/
+   sudo cp -r models /opt/railway-rs/   # optional: local GGUF engine weights
    sudo chown -R railway:railway /opt/railway-rs
    ```
 
@@ -122,4 +123,4 @@ sudo systemctl status railway-rs
 
 Note: the service runs with `ProtectSystem=strict` and `ReadWritePaths=/opt/railway-rs`,
 so any cache/data writes are confined to `/opt/railway-rs`. The application
-needs no AI API keys and uses only public, free data sources. The optional AI assistant (/rail-api/ai/*) calls the OpenCode Zen gateway keyless on free models by default; set RAILWAY_AI_MODEL / RAILWAY_AI_API_KEY to change it and RAILWAY_AI_ENABLED=false to disable.
+needs no AI API keys and uses only public, free data sources. The optional AI assistant (/rail-api/ai/*) calls the OpenCode Zen gateway keyless on free models by default; set RAILWAY_AI_MODEL / RAILWAY_AI_API_KEY to change it and RAILWAY_AI_ENABLED=false to disable. To run the assistant fully in-process instead (no gateway), set RAILWAY_AI_BACKEND=local-first and download models/ per models/README.md; the zen gateway stays as once-per-request fallback.

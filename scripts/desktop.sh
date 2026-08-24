@@ -10,37 +10,42 @@ set -euo pipefail
 MODE="fluxbox"
 RES="1920x1080"
 WITH_BROWSER=0
-for arg in "$@"; do
+# Robust arg parsing: handles --resolution VALUE and bare 1920x1080
+ARGS=("$@")
+i=0
+while (( i < $# )); do
+  arg="${ARGS[i]}"
   case "$arg" in
     --xfce) MODE="xfce" ;;
     --fluxbox) MODE="fluxbox" ;;
     --with-browser) WITH_BROWSER=1 ;;
-    --resolution) ;; # consumed next
-    1920*|1680*|1600*|1280*|1024*) RES="$arg" ;;
+    --resolution)
+      if (( i+1 < $# )); then
+        RES="${ARGS[i+1]}"
+        i=$((i+1))
+      fi
+      ;;
+    1920*|1680*|1600*|1280*|1024*|800*) RES="$arg" ;;
   esac
-done
-# handle --resolution VALUE
-for i in $(seq 0 $#); do
-  eval "v=\${$i:-}"; if [[ "$v" == "--resolution" ]]; then
-    j=$((i+1)); eval "RES=\${$j:-1920x1080}"
-  fi
+  i=$((i+1))
 done
 
-# Ensure nix X tools are on PATH (Replit's PATH may not include xdpyinfo/xrandr)
-for p in /nix/store/*xdpyinfo*/bin /nix/store/*xrandr*/bin /nix/store/*tigervnc*/bin /nix/store/vgnn3flhbf3pgaj8bz8kr914fblqqjv6-replit-runtime-path/bin; do
-  [[ -d "$p" ]] && export PATH="$p:$PATH"
-done
-# Also add any nix profile bins
+# Ensure nix X tools are on PATH
+export PATH="/nix/store/vgnn3flhbf3pgaj8bz8kr914fblqqjv6-replit-runtime-path/bin:$PATH"
 export PATH="$HOME/.nix-profile/bin:/nix/var/nix/profiles/default/bin:$PATH"
 
 # Prefer VNC display :1 if available, otherwise :0
-if DISPLAY=:1 xdpyinfo >/dev/null 2>&1; then
+# Use xrandr (fast, always in runtime) instead of xdpyinfo (slow nix glob)
+check_display() {
+  DISPLAY="$1" xrandr >/dev/null 2>&1 || DISPLAY="$1" xdpyinfo >/dev/null 2>&1
+}
+if check_display :1; then
   export DISPLAY=:1
-elif DISPLAY=:0 xdpyinfo >/dev/null 2>&1; then
+elif check_display :0; then
   export DISPLAY=:0
 else
   export DISPLAY=${DISPLAY:-:1}
-  if ! xdpyinfo >/dev/null 2>&1; then
+  if ! check_display "$DISPLAY"; then
     echo "[desktop] No X display found. Is Xvnc running? (ps aux | grep Xvnc)"
     echo "          Replit auto-starts Xvnc :1. Wait a few seconds and retry."
     exit 1
@@ -93,15 +98,7 @@ xrdb -merge "$XRDB" 2>/dev/null || true
 xset r rate 250 35 2>/dev/null || true
 xset b off 2>/dev/null || true
 
-# Wallpaper - try feh / hsetroot / xsetroot fallback
-WALL=""
-for p in "$HOME/workspace/railway-rs/static/favicon.svg" /nix/store/*arc-theme*/share/themes/Arc* /usr/share/backgrounds/*; do
-  # we just need a solid color if image not found
-  break
-done
-if command -v feh >/dev/null 2>&1; then
-  feh --bg-scale --no-fehbg /nix/store/*papirus-icon-theme*/share/icons/Papirus/48x48/apps/* 2>/dev/null || true
-fi
+# Wallpaper - solid color (avoid expensive /nix/store globs)
 if command -v hsetroot >/dev/null 2>&1; then
   hsetroot -solid "#0f172a" 2>/dev/null || true
 else
@@ -135,11 +132,8 @@ fi
 if [[ "$MODE" == "fluxbox" ]]; then
   echo "[desktop] Starting Fluxbox enhanced desktop..."
 
-  # Fluxbox config - use a nicer style if available, else Meta
+  # Fluxbox config - use Meta (avoid expensive /nix/store globs)
   FLUX_STYLE="Meta"
-  for s in /nix/store/*arc-theme*/share/themes/Arc-Dark/openbox-3/themerc /usr/share/fluxbox/styles/Arch /nix/store/*fluxbox*/share/fluxbox/styles/*; do
-    if [[ -f "$s" ]]; then FLUX_STYLE="$s"; break; fi
-  done
   # Write minimal fluxbox init with toolbar visible + slit
   cat > "$HOME/.fluxbox/init" <<EOF
 session.screen0.toolbar.widthPercent: 100

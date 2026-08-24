@@ -22,7 +22,6 @@
     { label: 'Journeys', to: '/journeys' },
     { label: 'Availability', to: '/availability' },
     { label: 'PNR', to: '/pnr' },
-    { label: 'Exceptions', to: '/exceptions' },
     { label: 'System', to: '/system' }
   ]
 

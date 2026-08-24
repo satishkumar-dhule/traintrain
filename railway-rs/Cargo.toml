@@ -41,7 +41,6 @@ hyper-util = { version = "0.1", features = ["tokio"] }
 candle-core = "0.9"
 candle-transformers = "0.9"
 tokenizers = "0.21"
-anyhow = "1.0.104"
 
 [dev-dependencies]
 http-body-util = "0.1"

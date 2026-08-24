@@ -9,6 +9,7 @@
   import BotMessageSquareIcon from 'lucide-svelte/icons/bot-message-square'
   import SendHorizontalIcon from 'lucide-svelte/icons/send-horizontal'
   import { renderMarkdown } from '$lib/markdown.js'
+  import { viewport } from '$lib/media.svelte.js'
   import ToolCard from '$lib/components/chat/ToolCards.svelte'
   import { classify, executePlan, PROJECTORS, nextActionsFor } from '$lib/chat/gate.js'
   import { createMemory, remember, compact } from '$lib/chat/memory.js'
@@ -291,14 +292,16 @@
   }
 </script>
 
-<section class="grid gap-6">
-  <div class="grid gap-1">
-    <h1 class="text-2xl font-semibold tracking-tight">Ask Train Bro</h1>
-    <p class="flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
-      Live AI answers about Indian Railways, powered by
-      <Badge variant="secondary" class="font-mono">{model}</Badge>
-    </p>
-  </div>
+<section class="grid gap-6 max-lg:gap-3 max-lg:h-[calc(100dvh-4rem)] max-lg:grid-rows-[auto_1fr]">
+  {#if !viewport.narrow}
+    <div class="grid gap-1">
+      <h1 class="text-2xl font-semibold tracking-tight">Ask Train Bro</h1>
+      <p class="flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
+        Live AI answers about Indian Railways, powered by
+        <Badge variant="secondary" class="font-mono">{model}</Badge>
+      </p>
+    </div>
+  {/if}
 
   {#if phase === 'statusError'}
     <Alert.Root variant="destructive" role="alert">
@@ -316,8 +319,8 @@
         </Alert.Description>
       </Alert.Root>
     {/if}
-    <Card.Root>
-      <Card.Content class="grid gap-3">
+    <Card.Root class="min-w-0 overflow-hidden max-lg:h-full max-lg:flex max-lg:flex-col">
+      <Card.Content class="grid min-h-0 gap-3 max-lg:h-full max-lg:min-h-0 max-lg:gap-2">
         {#if phase === 'boot'}
           <div class="grid gap-2" aria-busy="true">
             {#each [0, 1, 2] as i (i)}
@@ -325,11 +328,11 @@
             {/each}
           </div>
         {:else}
-          <div bind:this={scroller} class="grid max-h-[55vh] min-h-40 gap-3 overflow-y-auto pr-1">
+          <div bind:this={scroller} class="grid max-h-[55vh] max-h-[50dvh] min-h-40 gap-3 overflow-y-auto overscroll-contain pr-1 max-lg:max-h-none max-lg:min-h-0 max-lg:flex-1">
             {#each turns as t, i (i)}
-              <div class={t.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
+              <div class={t.role === 'user' ? 'flex justify-end' : 'flex justify-start min-w-0'}>
                 <div
-                  class="max-w-[85%] rounded-lg border px-3 py-2 text-sm leading-relaxed {t.role ===
+                  class="max-w-[85%] min-w-0 overflow-hidden rounded-lg border px-3 py-2 text-sm leading-relaxed max-lg:max-w-[92%] max-lg:px-2 max-lg:py-1.5 max-lg:text-[13px] {t.role ===
                   'user'
                     ? 'bg-muted'
                     : ''}"
@@ -350,9 +353,9 @@
                     </details>
                   {/if}
                   {#if t.role === 'user'}
-                    <p class="whitespace-pre-wrap break-words">{t.content}</p>
+                    <p class="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{t.content}</p>
                   {:else}
-                    <div class="md text-sm leading-relaxed break-words">
+                    <div class="md text-sm leading-relaxed break-words min-w-0 overflow-hidden [overflow-wrap:anywhere] [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto [&_code]:break-all [&_a]:break-all">
                       {@html renderMarkdown(t.content)}{#if streaming && i === turns.length - 1}<span
                           class="animate-pulse">▍</span
                         >{/if}
@@ -406,7 +409,7 @@
             </Alert.Root>
           {/if}
 
-          <div class="grid gap-2">
+          <div class="sticky bottom-0 grid gap-2 bg-card max-lg:p-2 max-lg:border-t max-lg:-mx-3 max-lg:-mb-3 max-lg:px-4">
             <Textarea
               bind:value={draft}
               placeholder={
@@ -415,22 +418,23 @@
                   : 'Waiting for AI…'
               }
               rows={2}
+              class="min-h-11 max-lg:min-h-[40px] max-lg:text-sm"
               disabled={streaming || (phase !== 'ready' && phase !== 'degraded')}
               onkeydown={onKeydown}
             ></Textarea>
-            <div class="flex items-center justify-between gap-2">
+            <div class="flex flex-wrap items-center justify-between gap-2">
               <Button
                 type="button"
                 variant="ghost"
                 size="xs"
-                class="max-lg:h-11 max-lg:px-3.5"
+                class="max-lg:h-9 max-lg:px-3 max-lg:text-xs"
                 onclick={clearChat}
                 disabled={streaming || turns.length === 0}
               >
                 Clear chat
               </Button>
-              <Button type="button" size="sm" onclick={() => sendText(draft)} disabled={!canSend}>
-                <SendHorizontalIcon class="size-4" />
+              <Button type="button" size="sm" class="max-lg:h-9 max-lg:px-3 max-lg:text-xs shrink-0" onclick={() => sendText(draft)} disabled={!canSend}>
+                <SendHorizontalIcon class="size-4 max-lg:size-3.5" />
                 {streaming ? 'Answering…' : 'Send'}
               </Button>
             </div>
@@ -440,3 +444,4 @@
     </Card.Root>
   {/if}
 </section>
+<div class="h-20 lg:hidden"></div>

@@ -598,6 +598,9 @@ fn render_chatml(
     reserve: usize,
 ) -> Result<String, AppError> {
     let system_extra = tool_manifest.map(|m| format!("\n\n{DECISION_PROTOCOL}\n{m}"));
+    // Any tool result in history: decide mode then hides prior call lines and
+    // switches the recency reminder to "answer now".
+    let any_tool_result = messages.iter().any(|m| m.role == "tool");
     let build = |keep_from: usize, extra: &Option<String>| -> String {
         let mut out = String::with_capacity(4_096);
         let mut name_by_id = std::collections::HashMap::new();
@@ -612,22 +615,28 @@ fn render_chatml(
                         }
                     }
                 }
-                let lines: Vec<String> = calls
-                    .iter()
-                    .filter_map(|c| {
-                        let n = c.get("function")?.get("name")?.as_str()?;
-                        let a = c
-                            .get("function")
-                            .and_then(|f| f.get("arguments"))
-                            .cloned()
-                            .unwrap_or(serde_json::json!({}));
-                        Some(format!("{{\"tool\":\"{n}\",\"args\":{a}}}"))
-                    })
-                    .collect();
-                out.push_str(&format!(
-                    "<|im_start|>assistant\n{}<|im_end|>\n",
-                    lines.join("\n")
-                ));
+                // Decide mode renders prior tool-call lines only while no
+                // result exists yet: once a [TOOL RESULT] is in the history,
+                // showing the model its own call lines teaches it to repeat
+                // them instead of answering.
+                if !(tool_manifest.is_some() && any_tool_result) {
+                    let lines: Vec<String> = calls
+                        .iter()
+                        .filter_map(|c| {
+                            let n = c.get("function")?.get("name")?.as_str()?;
+                            let a = c
+                                .get("function")
+                                .and_then(|f| f.get("arguments"))
+                                .cloned()
+                                .unwrap_or(serde_json::json!({}));
+                            Some(format!("{{\"tool\":\"{n}\",\"args\":{a}}}"))
+                        })
+                        .collect();
+                    out.push_str(&format!(
+                        "<|im_start|>assistant\n{}<|im_end|>\n",
+                        lines.join("\n")
+                    ));
+                }
                 continue;
             }
             match msg.role.as_str() {
@@ -651,9 +660,17 @@ fn render_chatml(
                         .and_then(|id| name_by_id.get(id))
                         .cloned()
                         .unwrap_or_else(|| "data".to_string());
+                    // Raw upstream payloads (NTES JSON) dwarf what a micro
+                    // model can use and dominate prefill cost; keep the head.
+                    let content = msg.content.trim();
+                    let body: String = if content.chars().count() > TOOL_RESULT_MAX_CHARS {
+                        let cut: String = content.chars().take(TOOL_RESULT_MAX_CHARS).collect();
+                        format!("{cut}…")
+                    } else {
+                        content.to_string()
+                    };
                     out.push_str(&format!(
-                        "<|im_start|>user\n[{label} RESULT]\n{}<|im_end|>\n",
-                        msg.content
+                        "<|im_start|>user\n[{label} RESULT]\n{body}<|im_end|>\n"
                     ));
                 }
                 "assistant" => {
@@ -676,9 +693,15 @@ fn render_chatml(
             // immediately before generation far better than one buried
             // in the system turn.
             if tool_manifest.is_some() {
-                out.push_str(
-                    "<|im_start|>user\n[SYSTEM] One JSON line now.<|im_end|>\n<|im_start|>assistant\n",
-                );
+                let nudge = if any_tool_result {
+                    "[SYSTEM] Tool results are above. If they are enough, reply \
+                     {\"answer\":true}; otherwise call ONE different tool."
+                } else {
+                    "[SYSTEM] One JSON line now."
+                };
+                out.push_str(&format!(
+                    "<|im_start|>user\n{nudge}<|im_end|>\n<|im_start|>assistant\n"
+                ));
             }
             out.push_str("{\"");
         }
@@ -715,6 +738,8 @@ Never invent train data yourself. Use the station codes from the request.";
 /// Decide-phase system prompt: classification only, no persona. Every token
 /// here costs a prefill forward pass, so this stays minimal.
 const DECIDE_SYSTEM: &str = "You convert railway requests into tool calls.";
+/// Per-tool-result character cap in rendered prompts.
+const TOOL_RESULT_MAX_CHARS: usize = 480;
 
 /// Compact one-line-per-tool manifest from OpenAI envelopes.
 fn compact_manifest(tools: &[serde_json::Value]) -> String {
@@ -860,7 +885,14 @@ fn normalize_args(args: &serde_json::Value, parameters: &serde_json::Value) -> O
         .and_then(|r| r.as_array())
         .map(|a| a.iter().filter_map(|x| x.as_str()).collect())
         .unwrap_or_default();
-    let obj = args.as_object()?;
+    // Micro models often emit the args object JSON-encoded as a string.
+    let obj: serde_json::Map<String, serde_json::Value> = match args {
+        serde_json::Value::Object(m) => m.clone(),
+        serde_json::Value::String(s) => serde_json::from_str::<serde_json::Value>(s.trim())
+            .ok()
+            .and_then(|v| v.as_object().cloned())?,
+        _ => return None,
+    };
     let mut out = serde_json::Map::new();
     for (k, spec) in props {
         let Some(val) = obj.get(k) else {
@@ -998,6 +1030,29 @@ mod tests {
             parse_decision("no json at all", &[]),
             Decision::Invalid(_)
         ));
+    }
+
+    #[test]
+    fn string_encoded_args_are_unwrapped() {
+        let tools = vec![envelope(
+            "trains_between",
+            &[("src", "string"), ("dst", "string")],
+            &["src", "dst"],
+        )];
+        // Micro models frequently JSON-encode the args object as a string.
+        let d = parse_decision(
+            r#"{"tool":"trains_between","args":"{\"src\":\"NDLS\",\"dst\":\"CNB\"}"}"#,
+            &tools,
+        );
+        match d {
+            Decision::Call(name, args) => {
+                assert_eq!(name, "trains_between");
+                let v: serde_json::Value = serde_json::from_str(&args).unwrap();
+                assert_eq!(v["src"], "NDLS");
+                assert_eq!(v["dst"], "CNB");
+            }
+            other => panic!("expected Call, got {other:?}"),
+        }
     }
 
     #[test]

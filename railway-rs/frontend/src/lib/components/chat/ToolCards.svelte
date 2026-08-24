@@ -215,7 +215,7 @@
               {txt(t?.dep)} → {txt(t?.arr)} · {t?.duration ?? DASH}
             </span>
           </div>
-          <div class="mt-1.5 grid grid-cols-2 gap-1 sm:grid-cols-3">
+          <div class="mt-1.5 grid grid-cols-1 gap-1 sm:grid-cols-2 min-w-0">
             {#each list(t?.classes) as c, j (c?.class + j)}
               {@render ToneChip(c)}
             {/each}

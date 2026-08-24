@@ -2,6 +2,7 @@
   import { untrack } from 'svelte'
   import { api } from '$lib/api.js'
   import { navigate, route } from '$lib/router.svelte.js'
+  import { viewport } from '$lib/media.svelte.js'
   import * as Card from '$lib/components/ui/card/index.js'
   import { Button } from '$lib/components/ui/button/index.js'
   import { Label } from '$lib/components/ui/label/index.js'
@@ -15,9 +16,14 @@ import DataTable from '$lib/components/DataTable.svelte'
 import EmptyState from '$lib/components/EmptyState.svelte'
 import RecentSearches from '$lib/components/RecentSearches.svelte'
 import { loadRecent, rememberRecent, clearStored } from '$lib/recent.js'
+import PageHeader from '$lib/components/PageHeader.svelte'
+import Breadcrumbs from '$lib/components/Breadcrumbs.svelte'
+import RouteContextBar from '$lib/components/RouteContextBar.svelte'
+import EntityChip from '$lib/components/EntityChip.svelte'
+import ResultMeta from '$lib/components/ResultMeta.svelte'
+import StatPill from '$lib/components/StatPill.svelte'
 import { pickNearbyStation } from '$lib/nearby.svelte.js'
 import {
-  TrainNumberBadge,
   StationCodeBadge,
   DelayBadge,
   TrainDelayBadge,
@@ -112,6 +118,10 @@ import {
           .filter(Boolean)
       : []
   )
+  const stationName = $derived(
+    live?.station ?? timetable?.station_name ?? timetable?.station ?? ''
+  )
+
   const infoMeta = $derived(
     stationInfo
       ? [stationInfo.district, stationInfo.state]
@@ -274,7 +284,7 @@ import {
 
 {#snippet liveTrainCell(t)}
   <span class="flex items-center gap-2">
-    <TrainNumberBadge number={t.number} name={t.name} />
+    <EntityChip type="train" code={t.number} name={t.name} />
     <span class="font-medium">{t.name}</span>
   </span>
 {/snippet}
@@ -285,7 +295,7 @@ import {
 
 {#snippet ttTrainCell(t)}
   <span class="flex items-center gap-2">
-    <TrainNumberBadge number={t.number} name={t.name} />
+    <EntityChip type="train" code={t.number} name={t.name} />
     <span class="font-medium">{t.name}</span>
     <TrainDelayBadge number={t.number} name={t.name} type={t.train_type} compact />
   </span>
@@ -305,20 +315,31 @@ import {
 {/snippet}
 
 <section class="grid grid-cols-[minmax(0,1fr)] gap-4 md:gap-6" class:idle-center={!committedCode}>
-  <div class="grid gap-1">
-    <h1 class="text-xl md:text-2xl font-semibold tracking-tight">Station board</h1>
-    <p class="max-lg:hidden text-sm text-muted-foreground">Live board and full-day timetable for any station.</p>
-    {#if infoNames.length}
-      <p class="text-sm text-muted-foreground">{infoNames.join(' · ')}</p>
-    {/if}
-    {#if infoMeta}
-      <p class="text-xs text-muted-foreground">{infoMeta}</p>
-    {/if}
-  </div>
+  {#if !viewport.narrow}
+    <PageHeader title="Station board" description="Live board and full-day timetable for any station.">
+      {#snippet children()}
+        <Breadcrumbs items={[{ label: 'Home', href: '/' }, { label: 'Station', href: '/station' }, { label: committedCode ? 'Station ' + committedCode : 'Station' }]} />
+        {#if infoNames.length}
+          <p class="text-sm text-muted-foreground">{infoNames.join(' · ')}</p>
+        {/if}
+        {#if infoMeta}
+          <p class="text-xs text-muted-foreground">{infoMeta}</p>
+        {/if}
+      {/snippet}
+    </PageHeader>
+  {/if}
+
+  {#if viewport.narrow && committedCode}
+    <RouteContextBar
+      from={committedCode}
+      to={stationName}
+      onEdit={() => { committedCode = ''; query = '' }}
+    />
+  {/if}
 
   <Card.Root>
     <Card.Content class="flex flex-wrap items-end gap-3 max-lg:gap-2">
-      <div class="grid min-w-56 flex-1 gap-2">
+      <div class="grid min-w-0 sm:min-w-56 flex-1 gap-2 max-lg:w-full">
         <Label for="stn-code" class="max-lg:hidden">Station</Label>
         <AutoCompleteInput
           id="stn-code"
@@ -329,7 +350,7 @@ import {
         />
       </div>
       {#if tab === 'live'}
-        <div class="grid min-w-44 flex-1 gap-2">
+        <div class="grid min-w-0 sm:min-w-44 flex-1 gap-2 max-lg:w-full">
           <Label for="stn-dest" class="max-lg:hidden">Going to (optional)</Label>
           <AutoCompleteInput
             id="stn-dest"
@@ -341,33 +362,36 @@ import {
           />
         </div>
       {/if}
-      <div class="grid gap-2">
-        <Label class="max-lg:hidden">Window</Label>
-        <Select.Root type="single" bind:value={hours}>
-          <Select.Trigger class="w-32" aria-label="Time window">
-            {hours} hour{hours === '1' ? '' : 's'}
-          </Select.Trigger>
-          <Select.Content>
-            {#each ['1', '2', '3', '4'] as h (h)}
-              <Select.Item value={h} label="{h} hour{h === '1' ? '' : 's'}" />
-            {/each}
-          </Select.Content>
-        </Select.Root>
+      <div class="flex items-end gap-2 max-lg:w-full">
+        <div class="grid gap-2">
+          <Label class="max-lg:hidden">Window</Label>
+          <Select.Root type="single" bind:value={hours}>
+            <Select.Trigger class="w-28 sm:w-32 max-lg:h-10" aria-label="Time window">
+              {hours} hour{hours === '1' ? '' : 's'}
+            </Select.Trigger>
+            <Select.Content>
+              {#each ['1', '2', '3', '4'] as h (h)}
+                <Select.Item value={h} label="{h} hour{h === '1' ? '' : 's'}" />
+              {/each}
+            </Select.Content>
+          </Select.Root>
+        </div>
+        <Button
+          class="shrink-0 max-lg:h-10 max-lg:px-4 sm:w-auto"
+          onclick={showBoard}
+          disabled={(tab === 'live' && (livePhase === 'loading' || livePhase === 'refreshing')) ||
+            (tab === 'timetable' && (ttPhase === 'loading' || ttPhase === 'refreshing'))}
+        >
+          {(tab === 'live' && livePhase === 'refreshing') || (tab === 'timetable' && ttPhase === 'refreshing')
+            ? 'Refreshing…'
+            : 'Show board'}
+        </Button>
       </div>
-      <Button
-        onclick={showBoard}
-        disabled={(tab === 'live' && (livePhase === 'loading' || livePhase === 'refreshing')) ||
-          (tab === 'timetable' && (ttPhase === 'loading' || ttPhase === 'refreshing'))}
-      >
-        {(tab === 'live' && livePhase === 'refreshing') || (tab === 'timetable' && ttPhase === 'refreshing')
-          ? 'Refreshing…'
-          : 'Show board'}
-      </Button>
-      <div class="grid gap-2">
+      <div class="grid gap-2 max-lg:w-full">
         <Label class="max-lg:hidden">Nearby</Label>
-        <Button variant="outline" onclick={pickNearbyBoard}>
+        <Button variant="outline" onclick={pickNearbyBoard} class="max-lg:h-10 max-lg:w-full">
           <MapPinIcon />
-          Nearby stations
+          Nearby
         </Button>
       </div>
     </Card.Content>
@@ -395,9 +419,9 @@ import {
   {/if}
 
   <Tabs.Root class="min-w-0" bind:value={tab} onValueChange={onTabChange}>
-    <Tabs.List class="w-full justify-start overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-      <Tabs.Trigger value="live"><ActivityIcon class="mr-2 size-4" />Live</Tabs.Trigger>
-      <Tabs.Trigger value="timetable"><CalendarClockIcon class="mr-2 size-4" />Timetable</Tabs.Trigger>
+    <Tabs.List class="w-full justify-start overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden max-lg:h-9">
+      <Tabs.Trigger value="live" class="max-lg:px-3 max-lg:text-xs"><ActivityIcon class="mr-1.5 size-3.5 max-lg:mr-1 max-lg:size-3" />Live</Tabs.Trigger>
+      <Tabs.Trigger value="timetable" class="max-lg:px-3 max-lg:text-xs"><CalendarClockIcon class="mr-1.5 size-3.5 max-lg:mr-1 max-lg:size-3" />Timetable</Tabs.Trigger>
     </Tabs.List>
 
     <Tabs.Content value="live" class="mt-3 grid gap-4">
@@ -415,15 +439,12 @@ import {
       {:else if live}
         <Card.Root>
           <Card.Header class="flex flex-col items-start justify-between gap-3 space-y-0 sm:flex-row sm:items-center">
-            <div class="grid gap-1">
-              <Card.Title>{live.station ?? '—'} departures &amp; arrivals</Card.Title>
-              <Card.Description>
-                {live.trains?.length ?? 0} trains within {live.hours}h{live.destination
-                  ? ` · towards ${live.destination}`
-                  : ''}
-              </Card.Description>
-            </div>
-            <span class="inline-flex items-center rounded-md bg-sky-500/10 px-2 py-0.5 text-xs font-medium text-sky-700 dark:text-sky-400">{live.hours}h window</span>
+            <Card.Title>{live.station ?? '—'} departures &amp; arrivals</Card.Title>
+            <ResultMeta source={live.data_source}>
+              <StatPill label="Trains" value={live.trains?.length ?? 0} />
+              <StatPill label="Window" value={`${live.hours}h`} />
+              {#if live.destination}<StatPill label="Towards" value={live.destination} />{/if}
+            </ResultMeta>
           </Card.Header>
           <Card.Content>
             <DataTable
@@ -462,11 +483,14 @@ import {
       {:else if timetable}
         <Card.Root>
           <Card.Header class="flex flex-col items-start justify-between gap-3 space-y-0 sm:flex-row sm:items-center">
-            <div class="grid gap-1">
-              <Card.Title>{timetable.station_name ?? timetable.station ?? '—'} timetable</Card.Title>
-              <Card.Description>{timetable.total ?? timetable.trains?.length ?? 0} trains{timetable.date ? ` · ${timetable.date}` : ''}</Card.Description>
-            </div>
-            <CountBadge value={timetable.total ?? timetable.trains?.length ?? 0} label="total" />
+            <Card.Title>{timetable.station_name ?? timetable.station ?? '—'} timetable</Card.Title>
+            <ResultMeta source={timetable.data_source}>
+              <StatPill label="Trains" value={timetable.total ?? timetable.trains?.length ?? 0} />
+              {#if timetable.date}<StatPill label="Date" value={timetable.date} />{/if}
+              {#snippet actions()}
+                <CountBadge value={timetable.total ?? timetable.trains?.length ?? 0} label="total" />
+              {/snippet}
+            </ResultMeta>
           </Card.Header>
           <Card.Content>
             <DataTable
@@ -493,4 +517,5 @@ import {
       {/if}
     </Tabs.Content>
   </Tabs.Root>
+  <div class="h-20 lg:hidden"></div>
 </section>

@@ -270,7 +270,7 @@ import {
     <Tabs.Content value="heritage" class="mt-4 grid gap-4">
       <Card.Root>
         <Card.Content class="flex flex-wrap items-end gap-3">
-          <div class="grid min-w-56 flex-1 gap-2">
+          <div class="grid min-w-0 sm:min-w-56 flex-1 gap-2">
             <Label for="heritage-kw">Keyword</Label>
             <Input
               id="heritage-kw"
@@ -281,7 +281,7 @@ import {
               }}
             />
           </div>
-          <Button onclick={applyFilter}><FilterIcon class="mr-2 size-4" />Filter</Button>
+          <Button onclick={applyFilter} class="max-lg:min-h-11 shrink-0 max-lg:w-full sm:w-auto"><FilterIcon class="mr-2 size-4" />Filter</Button>
         </Card.Content>
       </Card.Root>
 
@@ -298,16 +298,16 @@ import {
         </Alert.Root>
       {:else if hData}
         <Card.Root>
-          <Card.Header class="flex flex-col items-start justify-between gap-3 space-y-0 sm:flex-row sm:items-center">
-            <div class="grid gap-1">
-              <Card.Title>Heritage trains</Card.Title>
-              <Card.Description class="flex flex-wrap items-center gap-x-1">
+          <Card.Header class="flex flex-col items-start justify-between gap-3 space-y-0 sm:flex-row sm:items-center min-w-0">
+            <div class="grid gap-1 min-w-0">
+              <Card.Title class="break-words">Heritage trains</Card.Title>
+              <Card.Description class="flex flex-wrap items-center gap-x-1 break-words [overflow-wrap:anywhere]">
                 <span>{hTotal} train{hTotal === 1 ? '' : 's'}</span>
-                {#if hCaption}<span>· {hCaption}</span>{/if}
+                {#if hCaption}<span class="truncate max-w-[60vw]">· {hCaption}</span>{/if}
               </Card.Description>
             </div>
-            <div class="flex flex-wrap items-center justify-end gap-2">
-              {#if str(selection).trim()}<Badge variant="outline">keyword: {selection}</Badge>{/if}
+            <div class="flex flex-wrap items-center justify-end gap-2 min-w-0">
+              {#if str(selection).trim()}<Badge variant="outline" class="max-w-[60vw] truncate">keyword: {selection}</Badge>{/if}
               <DataSourceBadge source={hSource} />
             </div>
           </Card.Header>

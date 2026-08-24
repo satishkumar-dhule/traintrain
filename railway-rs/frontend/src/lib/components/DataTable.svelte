@@ -163,10 +163,10 @@
       </div>
     {/if}
 
-    <div class="flex items-center gap-1">
+    <div class="flex min-w-0 items-center gap-1">
       {#if sortableCols.length > 0}
         <div
-          class="-ml-4 flex min-w-0 flex-1 snap-x gap-1 overflow-x-auto pr-1 pl-4 pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          class="flex min-w-0 flex-1 snap-x gap-1 overflow-x-auto pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           role="group"
           aria-label="Sort by"
         >

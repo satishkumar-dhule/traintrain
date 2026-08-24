@@ -19,7 +19,7 @@ import { availabilityHref, trainHref } from '$lib/utils.js'
 import CalendarDaysIcon from 'lucide-svelte/icons/calendar-days'
 import CalendarClockIcon from 'lucide-svelte/icons/calendar-clock'
 
-  let { src = '', dst = '' } = $props()
+  let { src = '', dst = '', embedded = false } = $props()
 
   const DAY_LETTERS = ['M', 'T', 'W', 'T', 'F', 'S', 'S']
 
@@ -75,6 +75,7 @@ import CalendarClockIcon from 'lucide-svelte/icons/calendar-clock'
   }
 
   function commit() {
+    if (embedded) return
     const s = norm(from)
     const d = norm(to)
     if (!s || !d) return
@@ -169,44 +170,46 @@ import CalendarClockIcon from 'lucide-svelte/icons/calendar-clock'
 {/snippet}
 
 <div class="flex flex-col gap-4">
-  <Card.Root>
-    <Card.Header>
-      <Card.Title>Trains between stations</Card.Title>
-      <Card.Description>Enter station codes, e.g. NDLS to DLI</Card.Description>
-    </Card.Header>
-    <Card.Content>
-      <form class="flex flex-wrap items-end gap-2" onsubmit={onSubmit}>
-        <div class="grid min-w-44 flex-1 gap-1.5">
-          <Label for="journeys-from">From</Label>
-          <AutoCompleteInput id="journeys-from" kind="station" placeholder="NDLS" bind:value={from} onpick={commit} />
-        </div>
-        <Button type="button" variant="outline" size="icon" aria-label="Swap stations" onclick={swap} disabled={loading}>
-          <ArrowDownUpIcon />
-        </Button>
-        <div class="grid min-w-44 flex-1 gap-1.5">
-          <Label for="journeys-to">To</Label>
-          <AutoCompleteInput id="journeys-to" kind="station" placeholder="DLI" bind:value={to} onpick={commit} />
-        </div>
-        <Button type="submit" disabled={loading || !canSearch}>Search</Button>
-      </form>
-      {#if sameCode}
-        <p class="mt-2 text-xs text-muted-foreground">
-          From and To are the same station — pick two different codes for a meaningful search.
-        </p>
-      {/if}
-    </Card.Content>
-  </Card.Root>
+  {#if !embedded}
+    <Card.Root>
+      <Card.Header>
+        <Card.Title>Trains between stations</Card.Title>
+        <Card.Description>Enter station codes, e.g. NDLS to DLI</Card.Description>
+      </Card.Header>
+      <Card.Content>
+        <form class="flex flex-wrap items-end gap-2" onsubmit={onSubmit}>
+          <div class="grid min-w-32 sm:min-w-44 flex-1 gap-1.5">
+            <Label for="journeys-from">From</Label>
+            <AutoCompleteInput id="journeys-from" kind="station" placeholder="NDLS" bind:value={from} onpick={commit} />
+          </div>
+          <Button type="button" variant="outline" size="icon" aria-label="Swap stations" onclick={swap} disabled={loading} class="shrink-0">
+            <ArrowDownUpIcon />
+          </Button>
+          <div class="grid min-w-32 sm:min-w-44 flex-1 gap-1.5">
+            <Label for="journeys-to">To</Label>
+            <AutoCompleteInput id="journeys-to" kind="station" placeholder="DLI" bind:value={to} onpick={commit} />
+          </div>
+          <Button type="submit" disabled={loading || !canSearch} class="shrink-0 max-lg:min-h-11 max-lg:w-full sm:w-auto">Search</Button>
+        </form>
+        {#if sameCode}
+          <p class="mt-2 text-xs text-muted-foreground">
+            From and To are the same station — pick two different codes for a meaningful search.
+          </p>
+        {/if}
+      </Card.Content>
+    </Card.Root>
+  {/if}
 
   {#if loading}
     <Card.Root>
       <Card.Content class="space-y-3 pt-6">
         {#each [0, 1, 2] as row (row)}
-          <div class="flex items-center gap-4">
-            <Skeleton class="h-5 w-16" />
-            <Skeleton class="h-4 w-48" />
-            <Skeleton class="h-4 w-14" />
-            <Skeleton class="h-4 w-14" />
-            <div class="ml-auto flex gap-1">
+          <div class="flex flex-wrap items-center gap-2 sm:gap-4 min-w-0 overflow-hidden">
+            <Skeleton class="h-5 w-16 shrink-0" />
+            <Skeleton class="h-4 w-48 max-w-[60vw] min-w-0 flex-1" />
+            <Skeleton class="h-4 w-14 shrink-0" />
+            <Skeleton class="h-4 w-14 shrink-0" />
+            <div class="ml-auto flex flex-wrap gap-1 shrink-0">
               {#each [0, 1, 2, 3, 4, 5, 6] as d (d)}
                 <Skeleton class="h-5 w-5 rounded-full" />
               {/each}
