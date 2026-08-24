@@ -69,6 +69,12 @@
     { href: '/assistant', label: 'Ask Train Bro', short: 'Ask', icon: Sparkles }
   ]
 
+  /* Bottom-sheet menu: everything the tab bar doesn't already cover. */
+  const primaryHrefs = new Set(primaryItems.map((item) => item.href))
+  const sheetGroups = groups
+    .map((group) => ({ ...group, items: group.items.filter((item) => !primaryHrefs.has(item.href)) }))
+    .filter((group) => group.items.length > 0)
+
   function isActive(item) {
     if (item.exact) return route.path === '/'
     return route.path === item.href || route.path.startsWith(item.href + '/')
@@ -95,7 +101,7 @@
     return () => window.removeEventListener('keydown', onKeydown)
   })
 
-  /* Lock body scroll while the mobile drawer is open. */
+  /* Lock body scroll while the mobile sheet is open. */
   $effect(() => {
     if (!mobileOpen) return
     const prev = document.body.style.overflow
@@ -231,10 +237,13 @@
     <div class="fixed inset-0 z-50 lg:hidden" role="dialog" aria-modal="true" aria-label="Menu">
       <div class="scrim-enter absolute inset-0 bg-black/50" onclick={() => (mobileOpen = false)}></div>
       <nav
-        class="drawer-enter absolute inset-y-0 left-0 w-[min(19rem,85vw)] overflow-y-auto border-r bg-card pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-[max(0.75rem,env(safe-area-inset-top))] shadow-xl"
+        class="sheet-enter absolute inset-x-0 bottom-0 mx-auto flex max-h-[80dvh] w-full max-w-xl flex-col overflow-hidden rounded-t-2xl border-t bg-card shadow-2xl"
       >
-        <div class="flex items-center justify-between px-3 pb-1">
-          <span class="text-sm font-semibold tracking-tight">Menu</span>
+        <div class="flex justify-center pt-2.5" aria-hidden="true">
+          <span class="h-1.5 w-10 rounded-full bg-muted-foreground/25"></span>
+        </div>
+        <div class="flex items-center justify-between pl-5 pr-2 pt-1">
+          <span class="text-sm font-semibold tracking-tight">More</span>
           <button
             type="button"
             class="flex size-11 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
@@ -244,47 +253,49 @@
             <XIcon class="size-5" />
           </button>
         </div>
-        <a
-          href={homeItem.href}
-          onclick={(e) => go(e, homeItem.href)}
-          aria-current={isActive(homeItem) ? 'page' : undefined}
-          class={`mt-1 flex min-h-12 items-center gap-3.5 rounded-lg px-3.5 text-base transition-colors ${
-            isActive(homeItem)
-              ? 'bg-primary text-primary-foreground'
-              : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
-          }`}
-        >
-          <homeItem.icon class="size-[22px] shrink-0" />
-          {homeItem.label}
-        </a>
-        {#each groups as group (group.label)}
-          <div class="px-3.5 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{group.label}</div>
-          {#each group.items as item (item.href)}
-            <a
-              href={item.href}
-              onclick={(e) => go(e, item.href)}
-              aria-current={isActive(item) ? 'page' : undefined}
-              class={`mt-1 flex min-h-12 items-center gap-3.5 rounded-lg px-3.5 text-base transition-colors ${
-                isActive(item)
-                  ? 'bg-primary text-primary-foreground'
-                  : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
-              }`}
-            >
-              <item.icon class="size-[22px] shrink-0" />
-              {item.label}
-            </a>
-          {/each}
-        {/each}
-        <div class="mt-3 space-y-1 border-t pt-3">
-          <button
-            type="button"
-            class="flex min-h-12 w-full items-center gap-3.5 rounded-lg px-3.5 text-base text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-            onclick={() => togglePalette()}
+        <div class="overflow-y-auto px-2 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
+          <a
+            href={homeItem.href}
+            onclick={(e) => go(e, homeItem.href)}
+            aria-current={isActive(homeItem) ? 'page' : undefined}
+            class={`mt-1 flex min-h-12 items-center gap-3.5 rounded-lg px-3.5 text-base transition-colors ${
+              isActive(homeItem)
+                ? 'bg-primary/10 font-medium text-primary'
+                : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+            }`}
           >
-            <Search class="size-5 shrink-0" />
-            <span>Search everything</span>
-          </button>
-          <DisplaySettings />
+            <homeItem.icon class="size-[22px] shrink-0" />
+            {homeItem.label}
+          </a>
+          {#each sheetGroups as group (group.label)}
+            <div class="px-3.5 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{group.label}</div>
+            {#each group.items as item (item.href)}
+              <a
+                href={item.href}
+                onclick={(e) => go(e, item.href)}
+                aria-current={isActive(item) ? 'page' : undefined}
+                class={`mt-1 flex min-h-12 items-center gap-3.5 rounded-lg px-3.5 text-base transition-colors ${
+                  isActive(item)
+                    ? 'bg-primary/10 font-medium text-primary'
+                    : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+                }`}
+              >
+                <item.icon class="size-[22px] shrink-0" />
+                {item.label}
+              </a>
+            {/each}
+          {/each}
+          <div class="mt-3 space-y-1 border-t pt-3">
+            <button
+              type="button"
+              class="flex min-h-12 w-full items-center gap-3.5 rounded-lg px-3.5 text-base text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+              onclick={() => togglePalette()}
+            >
+              <Search class="size-5 shrink-0" />
+              <span>Search everything</span>
+            </button>
+            <DisplaySettings />
+          </div>
         </div>
       </nav>
     </div>

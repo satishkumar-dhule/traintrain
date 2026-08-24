@@ -181,10 +181,10 @@
   }
 }
 
-/* Mobile drawer motion (respects reduced-motion). */
-@keyframes drawer-in {
+/* Mobile bottom-sheet motion (respects reduced-motion). */
+@keyframes sheet-in {
   from {
-    transform: translateX(-100%);
+    transform: translateY(100%);
   }
   to {
     transform: none;
@@ -195,14 +195,14 @@
     opacity: 0;
   }
 }
-.drawer-enter {
-  animation: drawer-in 0.22s cubic-bezier(0.32, 0.72, 0, 1);
+.sheet-enter {
+  animation: sheet-in 0.26s cubic-bezier(0.32, 0.72, 0, 1);
 }
 .scrim-enter {
   animation: scrim-in 0.18s ease-out;
 }
 @media (prefers-reduced-motion: reduce) {
-  .drawer-enter,
+  .sheet-enter,
   .scrim-enter {
     animation: none;
   }
