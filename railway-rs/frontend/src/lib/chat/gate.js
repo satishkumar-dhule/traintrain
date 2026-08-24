@@ -1,21 +1,671 @@
 /* gate.js - local-first intent router for the assistant.
-   Classifies a user message BEFORE any network call:
-     trivial  -> canned reply, zero requests
-     replay   -> session memory hit (exact or similar), zero requests
-     tool     -> deterministic single-tool plan against plain REST endpoints
-                 (no LLM round-trip)
-     llm      -> everything ambiguous; the only path that reaches /ai/chat
+   Classifies a user message BEFORE any network call. There is no LLM path
+   anymore: every message resolves locally to one of
+      trivial  -> canned reply, zero requests
+      replay   -> session memory hit (exact or similar), zero requests
+      tool     -> confident corpus hit + entities complete: deterministic
+                  single-tool plan against plain REST endpoints
+      confirm  -> heavy intent (seat availability) or ambiguous-band hit:
+                  ask the user to confirm before executing
+      help     -> no match / missing slot: capability summary or a targeted
+                  "give me the missing piece" hint
+   Matching pipeline: normalize (lowercase, punctuation strip, suffix strip,
+   Hinglish glossary) -> entity/slot stripping -> MiniSearch BM25 top-5 ->
+   tokenSetDice rerank -> ACCEPT/REJECT/MARGIN gates.
    Pure and Node-testable: no DOM, no fetch. The caller executes plans and
    feeds DTOs to the exported `project*` mappers, which mirror the server-side
    ai_chat projections 1:1 so ToolCards renders identical shapes. */
 
-const TRAIN_RE = /\b([1-9]\d{4})\b/
+import MiniSearch from 'minisearch'
+import { distance as levenshtein } from 'fastest-levenshtein'
 import { findReplay } from './memory.js'
+
+const TRAIN_RE = /\b([1-9]\d{4})\b/
 const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 const MAX_BETWEEN_TRAINS = 12
 const MAX_UPCOMING_STOPS = 4
 const MAX_SCHEDULE_STOPS = 12
 const BOARD_MAX_TRAINS = 8
+const MAX_AVAILABILITY_TRAINS = 8
+const MAX_AVAILABILITY_CLASSES = 6
+
+// ---------- normalization + Hinglish glossary ----------
+
+/** Light suffix stripper: drop -es/-s only when the remaining stem keeps
+ * >=4 chars. Guards keep 'status'/'always'-style words intact. */
+function stripSuffix(w) {
+  if (w.endsWith('es') && w.length - 2 >= 4) return w.slice(0, -2)
+  if (
+    w.endsWith('s') &&
+    !w.endsWith('ss') &&
+    !w.endsWith('us') &&
+    w.length - 1 >= 4
+  )
+    return w.slice(0, -1)
+  return w
+}
+
+/** Hinglish -> English glossary, applied word-wise AFTER suffix stripping.
+ * Multi-word keys are replaced as phrases first, then single words. */
+export const HINGLISH = {
+  // multi-word phrases (checked longest-first before single words)
+  'chal rahi': 'running',
+  'chal rha': 'running',
+  'mil jayegi': 'available',
+  'mil jayega': 'available',
+  'ban gaya': 'prepared',
+  'ban gayi': 'prepared',
+  // single words
+  kahan: 'where',
+  kaha: 'where',
+  kab: 'when',
+  hai: 'is',
+  hain: 'is',
+  kitna: 'how much',
+  kitni: 'how much',
+  kitne: 'how much',
+  der: 'delay',
+  late: 'late',
+  chal: 'running',
+  chalti: 'running',
+  chalte: 'running',
+  chali: 'running',
+  rahi: '',
+  raha: '',
+  rahe: '',
+  mil: 'available',
+  milegi: 'available',
+  milega: 'available',
+  pe: 'at',
+  gaadi: 'train',
+  seat: 'seat',
+  berth: 'berth',
+  tiket: 'ticket',
+  ticket: 'ticket',
+  mera: 'my',
+  meri: 'my',
+  chart: 'chart',
+  bana: 'prepared',
+  bani: 'prepared',
+  ban: 'prepared',
+  platform: 'platform',
+  nikal: 'depart',
+  nikalnegi: 'depart',
+  niklegi: 'depart',
+  pahunch: 'reach',
+  pahunchegi: 'reach',
+  pahunchega: 'reach',
+  kal: 'tomorrow',
+  aaj: 'today',
+  beech: 'between'
+}
+
+const HINGLISH_PHRASES = Object.entries(HINGLISH)
+  .filter(([k, v]) => k.includes(' '))
+  .sort((a, b) => b[0].length - a[0].length)
+
+/** lowercase -> strip punctuation (keep hyphens for dates) -> collapse
+ * spaces -> light suffix strip -> Hinglish glossary. */
+export function normalize(q) {
+  let s = String(q ?? '').toLowerCase()
+  s = s.replace(/[^a-z0-9\s-]/g, ' ').replace(/\s+/g, ' ').trim()
+  if (!s) return ''
+  s = s.split(' ').map(stripSuffix).join(' ')
+  for (const [k, v] of HINGLISH_PHRASES) {
+    s = s.replace(new RegExp(`\\b${k}\\b`, 'g'), v)
+  }
+  s = s
+    .split(' ')
+    .map((w) => (Object.prototype.hasOwnProperty.call(HINGLISH, w) ? HINGLISH[w] : w))
+    .join(' ')
+  return s.replace(/\s+/g, ' ').trim()
+}
+
+// ---------- entity + slot extraction ----------
+
+function isoTomorrow() {
+  return new Date(Date.now() + 86400000).toISOString().slice(0, 10)
+}
+
+/** {train: '12951'|null, date: string|null}. Date is a server-compatible
+ * string: 'today', ISO YYYY-MM-DD or DD-MM-YYYY. Relative words map:
+ * aaj/today -> 'today', kal/tomorrow -> ISO of tomorrow (the server only
+ * understands 'today' + absolute formats, so tomorrow is materialized). */
+export function extractEntities(raw) {
+  const s = String(raw ?? '')
+  const train = (s.match(TRAIN_RE) || [])[1] ?? null
+  let date = null
+  const iso = s.match(/\b(\d{4})-(\d{2})-(\d{2})\b/)
+  const dmy = s.match(/\b(\d{2})-(\d{2})-(\d{4})\b/)
+  const rel = s.match(/\b(today|tomorrow|kal|aaj)\b/i)
+  if (iso) date = iso[0]
+  else if (dmy) date = dmy[0]
+  else if (rel) date = /^(today|aaj)$/i.test(rel[1]) ? 'today' : isoTomorrow()
+  return { train, date }
+}
+
+const BETWEEN_RES = [
+  /\bfrom\s+([a-z][a-z .'-]{1,29}?)\s+(?:to|till|upto|until|and)\s+([a-z][a-z .'-]{1,29}?)\s*(?:tak)?\s*$/i,
+  /\bbetween\s+([a-z][a-z .'-]{1,29}?)\s+(?:to|and)\s+([a-z][a-z .'-]{1,29}?)\s*(?:tak)?\s*$/i,
+  /\b([a-z][a-z .'-]{1,29}?)\s+se\s+([a-z][a-z .'-]{1,29}?)\s*(?:tak)?\s*$/i
+]
+
+const BOARD_RES = [
+  /\b(?:board|arrivals?|departures?)\b(?:\s*(?:at|for|of))?\s+([a-z][a-z .'-]{1,30})\s*$/i,
+  /^trains?\s+(?:at|from)\s+([a-z][a-z .'-]{1,30})\s*$/i
+]
+
+/** Free-text station references: {srcQuery, dstQuery, stationQuery}. Run on
+ * text that has already had entity literals stripped (see entityLiterals),
+ * otherwise relative dates glom onto the destination span. */
+export function extractSlots(mappedText) {
+  const s = String(mappedText ?? '').toLowerCase()
+  const out = { srcQuery: null, dstQuery: null, stationQuery: null }
+  if (!s) return out
+  for (const re of BETWEEN_RES) {
+    const m = s.match(re)
+    if (m) {
+      out.srcQuery = m[1].trim()
+      out.dstQuery = m[2].trim().replace(/\s+tak$/i, '').trim()
+      break
+    }
+  }
+  for (const re of BOARD_RES) {
+    const m = s.match(re)
+    if (m) {
+      out.stationQuery = m[1].trim()
+      break
+    }
+  }
+  return out
+}
+
+// ---------- intent corpus ----------
+
+/** Canonical phrases must be digit-free: entities are extracted separately
+ * and excluded from similarity text. Hinglish inputs normalize onto these
+ * English forms (token-set scoring is order-free). */
+export const INTENTS = [
+  {
+    id: 'live_status',
+    needsTrain: true,
+    phrases: [
+      'live status of train',
+      'live running status',
+      'train running status',
+      'current status of my train',
+      'where is my train',
+      'where is the train',
+      'running position of train',
+      'is my train delayed',
+      'is the train running late',
+      'how late is the train',
+      'track my train',
+      'train location now',
+      'has the train reached yet',
+      'when will train reach',
+      'train live position'
+    ]
+  },
+  {
+    id: 'average_delay',
+    needsTrain: true,
+    phrases: [
+      'average delay of train',
+      'avg delay history',
+      'usual delay of train',
+      'how much delay usually',
+      'typical delay pattern of train',
+      'average lateness of train',
+      'delay statistics of train',
+      'punctuality record of train',
+      'how much late does train usually run',
+      'historical delays by station',
+      'mean delay minutes of train',
+      'average running late pattern'
+    ]
+  },
+  {
+    id: 'train_schedule',
+    needsTrain: true,
+    phrases: [
+      'route of train',
+      'schedule of train',
+      'timetable of train',
+      'time table of train',
+      'full route with all stops',
+      'complete schedule of train',
+      'list of stations on route',
+      'which stations does train stop at',
+      'halts of train',
+      'journey timings station wise',
+      'route map of train',
+      'total stops and distance of train',
+      'train route details'
+    ]
+  },
+  {
+    id: 'trains_between',
+    needsSrcDst: true,
+    phrases: [
+      'trains between two stations',
+      'trains from one station to another',
+      'list of trains between stations',
+      'direct trains between stations',
+      'which trains run between these stations',
+      'train options between two stations',
+      'find trains connecting two stations',
+      'all trains from source to destination',
+      'services between stations',
+      'weekly trains between stations',
+      'show trains for this route',
+      'trains available on this route'
+    ]
+  },
+  {
+    id: 'station_board',
+    needsStation: true,
+    phrases: [
+      'station board',
+      'live arrivals at station',
+      'departures at station',
+      'arrivals board for station',
+      'which trains arrive at station now',
+      'next trains at station',
+      'live station display',
+      'upcoming trains at station',
+      'station announcement board',
+      'trains halting at station now',
+      'platform wise arrivals at station'
+    ]
+  },
+  {
+    id: 'seat_availability',
+    needsSrcDst: true,
+    heavy: true,
+    phrases: [
+      'seat availability',
+      'check seat availability',
+      'are seats available',
+      'seat available in train',
+      'berth availability',
+      'ticket availability',
+      'reservation availability',
+      'waiting list chances',
+      'can i get a confirmed seat',
+      'seats left in train',
+      'booking status of class',
+      'general quota seat status',
+      'sleeper class seats available',
+      'tatkal availability',
+      'will i get confirmation',
+      'current reservation status'
+    ]
+  },
+  {
+    id: 'chart_status',
+    needsTrain: true,
+    phrases: [
+      'chart status',
+      'has the chart been prepared',
+      'is chart prepared or not',
+      'reservation chart status',
+      'is the chart ready',
+      'check chart preparation',
+      'final chart released',
+      'chart preparation time',
+      'coach count in chart',
+      'boarding station on chart',
+      'chart made or not',
+      'when will chart prepare'
+    ]
+  }
+]
+
+const PHRASES = INTENTS.flatMap((intent) =>
+  intent.phrases.map((raw) => ({ intent, raw, text: normalize(raw) }))
+)
+
+// ---------- plan builder (stable export; embed.js reuses it) ----------
+
+/** Same plan shape as the classic regex path: {cardKind, url, params, resolve?}. */
+export function buildPlanFor(id, entities = {}, slots = {}) {
+  switch (id) {
+    case 'live_status':
+      return {
+        cardKind: id,
+        url: '/rail-api/live-status',
+        params: entities.train ? { train: entities.train } : {}
+      }
+    case 'average_delay':
+      return {
+        cardKind: id,
+        url: '/rail-api/ntes/average-delay',
+        params: entities.train ? { train: entities.train } : {}
+      }
+    case 'train_schedule':
+      return {
+        cardKind: id,
+        url: '/rail-api/schedule',
+        params: entities.train ? { train: entities.train } : {}
+      }
+    case 'trains_between':
+      return {
+        cardKind: id,
+        url: '/rail-api/ntes/trains-between',
+        params: { src: '$src', dst: '$dst' },
+        resolve: [
+          { slot: 'src', query: slots.srcQuery ?? '' },
+          { slot: 'dst', query: slots.dstQuery ?? '' }
+        ]
+      }
+    case 'station_board':
+      return {
+        cardKind: id,
+        url: '/rail-api/ntes/live-station',
+        params: { station: '$station' },
+        resolve: [{ slot: 'station', query: slots.stationQuery ?? '', preferCode: true }]
+      }
+    case 'seat_availability': {
+      const params = { src: '$src', dst: '$dst' }
+      if (entities.date) params.date = entities.date
+      return {
+        cardKind: id,
+        url: '/rail-api/availability',
+        params,
+        resolve: [
+          { slot: 'src', query: slots.srcQuery ?? '' },
+          { slot: 'dst', query: slots.dstQuery ?? '' }
+        ]
+      }
+    }
+    case 'chart_status': {
+      const params = entities.train ? { train: entities.train } : {}
+      if (entities.date) params.date = entities.date
+      return { cardKind: id, url: '/rail-api/irctc/chart', params }
+    }
+    default:
+      throw new Error(`unknown intent: ${id}`)
+  }
+}
+
+// ---------- fuzzy matching pipeline ----------
+
+const ACCEPT = 0.62
+const REJECT = 0.45
+const MARGIN = 0.08
+const MIN_QUERY_TOKENS = 2
+
+// Content-only tokens: filler words carry no intent signal and would dilute
+// the geometric normalization on both sides of the comparison.
+const STOPWORDS = new Set(
+  ('a an the is are am was were be been being do does did done i me my we our you your it its ' +
+    'this that these those of in on at for to from and or nor please kindly can could would shall ' +
+    'should will tell know want need any some there here what which when who whom how much many ' +
+    'get got give show has have had now yet still already just actually ' +
+    'kya batao nahin nahi haan jaldi')
+    .split(' ')
+)
+
+const contentTokens = (text) =>
+  String(text ?? '')
+    .split(' ')
+    .filter((t) => t && !STOPWORDS.has(t))
+
+let _index = null
+function getIndex() {
+  if (!_index) {
+    _index = new MiniSearch({
+      fields: ['text'],
+      storeFields: ['id'],
+      searchOptions: { fuzzy: 0.2, prefix: false, combineWith: 'OR' }
+    })
+    PHRASES.forEach((p, i) => _index.add({ id: String(i), text: p.text }))
+  }
+  return _index
+}
+
+function stripStrings(text, strings) {
+  let body = String(text ?? '')
+  for (const s of strings) {
+    if (s) body = body.split(String(s).toLowerCase()).join(' ')
+  }
+  return body.replace(/\s+/g, ' ').trim()
+}
+
+/** Tolerant token equality: equal, or within edit distance
+ * max(1, floor(minLen/5)). */
+function tokenMatch(a, b) {
+  if (a === b) return true
+  const minLen = Math.min(a.length, b.length)
+  return levenshtein(a, b) <= Math.max(1, Math.floor(minLen / 5))
+}
+
+/**
+ * Normalized overlap between two content-token sequences.
+ *
+ *   matched(Q, P) = |greedy 1:1 pairing of query tokens to phrase tokens
+ *                    where tokenMatch(q, p)|   (order-free, each p used once)
+ *   score         = matched / sqrt(|Q| * |P|)
+ *
+ * A cosine-style geometric-mean normalization in (0, 1]: 1 when every query
+ * token pairs up and the token counts match exactly, decaying as either side
+ * carries unmatched tokens. Unlike plain Dice it penalizes length imbalance,
+ * which keeps short garbage queries away from long corpus phrases.
+ */
+export function tokenSetDice(queryTokens, phraseTokens) {
+  const Q = queryTokens.filter(Boolean)
+  const P = phraseTokens.filter(Boolean)
+  if (!Q.length || !P.length) return 0
+  const used = new Array(P.length).fill(false)
+  let matched = 0
+  for (const q of Q) {
+    const hit = P.findIndex((p, i) => !used[i] && tokenMatch(q, p))
+    if (hit === -1) continue
+    used[hit] = true
+    matched++
+  }
+  return matched / Math.sqrt(Q.length * P.length)
+}
+
+const round3 = (x) => Math.round(x * 1000) / 1000
+
+/** Literal substrings to remove before scoring/station-slot extraction:
+ * the train number, the relative/absolute date words as written (NOT the
+ * normalized ISO value extractEntities returns), and slot spans later. */
+function entityLiterals(text) {
+  const s = String(text ?? '')
+  return [
+    (s.match(TRAIN_RE) || [])[1] ?? null,
+    s.match(/\b(today|tomorrow|kal|aaj)\b/i)?.[0] ?? null,
+    s.match(/\b(\d{2})-(\d{2})-(\d{4})\b/)?.[0] ?? null,
+    s.match(/\b(\d{4})-(\d{2})-(\d{2})\b/)?.[0] ?? null
+  ]
+}
+
+/** Text with entity literals stripped — the right input for station-slot
+ * extraction and for the similarity body. */
+export function stripEntities(text) {
+  return stripStrings(String(text ?? ''), entityLiterals(text))
+}
+
+/** Corpus-driven match over an ALREADY-NORMALIZED string. Entity strings
+ * (train number, date words) and captured slot spans (station names) are
+ * stripped before scoring. Returns null below REJECT, when fewer than
+ * MIN_QUERY_TOKENS content tokens were present to begin with, or when
+ * stripping leaves nothing meaningful. */
+export function matchIntent(text) {
+  const base = String(text ?? '')
+  if (!base) return null
+  // Too-short guard runs on the PRE-strip tokens: 'status' alone stays help,
+  // while entity-heavy queries ('availability from sc to pune tomorrow')
+  // keep enough signal after stripping to be scored.
+  const preTokens = contentTokens(base)
+  if (preTokens.length < MIN_QUERY_TOKENS) return null
+
+  const body0 = stripEntities(base)
+  const slots = extractSlots(body0)
+  const body = stripStrings(body0, [
+    slots.srcQuery,
+    slots.dstQuery,
+    slots.stationQuery
+  ])
+  const qTokens = contentTokens(body)
+  if (!qTokens.length) return null
+
+  const q = qTokens.join(' ')
+  const hits = getIndex()
+    .search(q, { fuzzy: 0.2, prefix: false, combineWith: 'OR' })
+    .slice(0, 5)
+  if (!hits.length) return null
+
+  const scored = hits
+    .map((h) => {
+      const p = PHRASES[Number(h.id)]
+      return { p, score: tokenSetDice(qTokens, contentTokens(p.text)) }
+    })
+    .sort((a, b) => b.score - a.score)
+
+  const best = scored[0]
+  // MARGIN separates INTENTS: near-duplicate phrases of the best intent
+  // don't compete; the runner-up is the strongest other-intent candidate.
+  const runnerUp = scored.find((c) => c.p.intent.id !== best.p.intent.id) ?? null
+  const margin = runnerUp ? best.score - runnerUp.score : best.score
+  const confident = best.score >= ACCEPT && margin >= MARGIN
+  const ambiguous = !confident && best.score >= REJECT
+  if (!confident && !ambiguous) return null
+
+  return {
+    intent: best.p.intent,
+    phrase: best.p.raw,
+    score: round3(best.score),
+    confidence: confident ? 'confident' : 'ambiguous',
+    runnerUp: runnerUp
+      ? {
+          id: runnerUp.p.intent.id,
+          phrase: runnerUp.p.raw,
+          score: round3(runnerUp.score)
+        }
+      : null
+  }
+}
+
+// ---------- help surfaces ----------
+
+export const HELP_REPLY =
+  "I'm Train Bro — I check **live data**: train running status, routes & timetables, average delays, trains between stations, seat availability, station boards and chart status. Try: \"live status of 12951\"."
+
+export const HELP_CHIPS = [
+  { label: 'Live status', prompt: 'live status of 12951' },
+  { label: 'Trains SC→PUNE', prompt: 'trains from SC to PUNE' },
+  { label: 'Seats SC→PUNE', prompt: 'seat availability from SC to PUNE' },
+  { label: 'Avg delay', prompt: 'average delay of 12626' }
+]
+
+const helpVerdict = () => ({ kind: 'help', reply: HELP_REPLY, actions: HELP_CHIPS })
+
+const TRAIN_EXAMPLE_PROMPTS = {
+  live_status: 'live status of 12951',
+  average_delay: 'average delay of 12626',
+  train_schedule: 'route of 12951',
+  chart_status: 'chart status of 12951'
+}
+
+function missingSlotHelp(intentId, missing) {
+  if (missing === 'train') {
+    const prompt = TRAIN_EXAMPLE_PROMPTS[intentId] ?? 'live status of 12951'
+    return {
+      kind: 'help',
+      reply: `Which train? Give me the 5-digit number — e.g. "${prompt}".`,
+      actions: [{ label: 'Try 12951', prompt }]
+    }
+  }
+  if (missing === 'stations' && intentId === 'seat_availability') {
+    return {
+      kind: 'help',
+      reply: 'From where to where? e.g. "seat availability from SC to PUNE".',
+      actions: [{ label: 'SC → PUNE', prompt: 'seat availability from SC to PUNE' }]
+    }
+  }
+  if (missing === 'stations') {
+    return {
+      kind: 'help',
+      reply: 'Between which stations? e.g. "trains from SC to PUNE".',
+      actions: [{ label: 'SC → PUNE', prompt: 'trains from SC to PUNE' }]
+    }
+  }
+  return {
+    kind: 'help',
+    reply: 'Which station? e.g. "station board Pune".',
+    actions: [{ label: 'Pune board', prompt: 'station board pune' }]
+  }
+}
+
+function requiredSlotMissing(intent, ent, slots) {
+  if (intent.needsTrain && !ent.train) return 'train'
+  if (intent.needsSrcDst && (!slots.srcQuery || !slots.dstQuery)) return 'stations'
+  if (intent.needsStation && !slots.stationQuery) return 'station'
+  return null
+}
+
+// ---------- tier 0: deterministic regex fast-paths ----------
+// Exact structural patterns beat the corpus; everything else falls through
+// to fuzzy matching. Runs on the normalized + Hinglish-mapped text.
+
+const SEAT_DEFER_RE =
+  /\b(seat|berth|availabilit|tiket|ticket|reservation|waitlist|booking)\b/
+const AVG_DELAY_RE = /\b(average|avg)\s+(delay|late)\b|\bhow much delay\b/
+const CHART_RE = /\b(chart|prepared|ready)\b/
+const SCHEDULE_RE = /\b(route|schedule|timetable|time table|stops? at|halts?)\b/
+const LIVE_VERBS_RE =
+  /\b(live|status|running|position|where|reached|late|delayed|track)\b/
+
+function tierZero(mapped) {
+  const num = (mapped.match(TRAIN_RE) || [])[1] ?? null
+
+  // Seat family keeps date/class nuance -> always routed through the
+  // heavy-intent confirm flow, never a silent tool call.
+  if (SEAT_DEFER_RE.test(mapped)) return null
+
+  if (num && AVG_DELAY_RE.test(mapped)) {
+    return { kind: 'tool', plan: buildPlanFor('average_delay', { train: num }), confidence: 1 }
+  }
+  if (num && CHART_RE.test(mapped)) {
+    return { kind: 'tool', plan: buildPlanFor('chart_status', { train: num }), confidence: 1 }
+  }
+  if (num && SCHEDULE_RE.test(mapped)) {
+    return { kind: 'tool', plan: buildPlanFor('train_schedule', { train: num }), confidence: 1 }
+  }
+  if (num && LIVE_VERBS_RE.test(mapped)) {
+    return { kind: 'tool', plan: buildPlanFor('live_status', { train: num }), confidence: 1 }
+  }
+
+  const bare = stripEntities(mapped)
+  if (/\btrain/.test(bare)) {
+    for (const re of BETWEEN_RES) {
+      const m = bare.match(re)
+      if (m) {
+        const slots = {
+          srcQuery: m[1].trim(),
+          dstQuery: m[2].trim().replace(/\s+tak$/i, '').trim()
+        }
+        return { kind: 'tool', plan: buildPlanFor('trains_between', {}, slots), confidence: 1 }
+      }
+    }
+  }
+
+  for (const re of BOARD_RES) {
+    const m = mapped.match(re)
+    if (m) {
+      const slots = { stationQuery: m[1].trim() }
+      return { kind: 'tool', plan: buildPlanFor('station_board', {}, slots), confidence: 1 }
+    }
+  }
+
+  return null
+}
+
+// ---------- classifier ----------
 
 const TRIVIALS = [
   [
@@ -30,9 +680,11 @@ const TRIVIALS = [
   ]
 ]
 
+/** NEVER returns kind:'llm' — every message resolves locally. See the file
+ * header for the full kind contract. */
 export function classify(text, memory) {
   const q = String(text ?? '').trim()
-  if (!q) return { kind: 'llm' }
+  if (!q) return helpVerdict()
 
   for (const [re, reply] of TRIVIALS) {
     if (re.test(q)) return { kind: 'trivial', reply }
@@ -43,78 +695,52 @@ export function classify(text, memory) {
     if (hit) return { kind: 'replay', ...hit }
   }
 
-  const tool = matchTool(q)
-  if (tool) return tool
+  const mapped = normalize(q)
+  const t0 = tierZero(mapped)
+  if (t0) return t0
 
-  return { kind: 'llm' }
-}
+  const m = matchIntent(mapped)
+  if (!m) return helpVerdict()
 
-function matchTool(q) {
-  const lower = q.toLowerCase()
+  const ent = extractEntities(q)
+  const slots = extractSlots(stripEntities(mapped))
 
-  // Seat availability needs date/class nuance -> LLM handles it better.
-  if (/(seat|availability|berth|ticket|fare|chart)/i.test(lower)) return null
-
-  const num = (q.match(TRAIN_RE) || [])[1] ?? null
-
-  // "average delay of 12951"
-  if (/(average|avg)\s+(delay|late)/i.test(lower) && num) {
+  // Heavy intent: always confirm before spending the expensive call.
+  if (m.intent.id === 'seat_availability') {
+    if (!slots.srcQuery || !slots.dstQuery) return missingSlotHelp('seat_availability', 'stations')
     return {
-      kind: 'tool',
-      plan: { cardKind: 'average_delay', url: '/rail-api/ntes/average-delay', params: { train: num } }
+      kind: 'confirm',
+      plan: buildPlanFor('seat_availability', ent, slots),
+      text: `Check seat availability ${slots.srcQuery.toUpperCase()} → ${slots.dstQuery.toUpperCase()}?`,
+      choices: [
+        { label: 'Confirm', value: '__exec' },
+        { label: 'Cancel', value: '__cancel' }
+      ],
+      confidence: m.score
     }
   }
 
-  // "route of 12951", "schedule of 12626", "12951 timetable"
-  if (/\b(route|schedule|timetable|time table|stops at)\b/i.test(lower) && num) {
-    return {
-      kind: 'tool',
-      plan: { cardKind: 'train_schedule', url: '/rail-api/schedule', params: { train: num } }
-    }
+  // Missing a hard requirement -> targeted help beats confirming a plan
+  // that cannot execute yet (applies in both bands).
+  const missing = requiredSlotMissing(m.intent, ent, slots)
+  if (missing) return missingSlotHelp(m.intent.id, missing)
+
+  if (m.confidence === 'confident') {
+    return { kind: 'tool', plan: buildPlanFor(m.intent.id, ent, slots), confidence: m.score }
   }
 
-  // "live status of 12951", "where is 12951", "12951 running status"
-  if (num && /\b(live|status|running|position|where|reached|late|delayed)\b/i.test(lower)) {
-    return {
-      kind: 'tool',
-      plan: { cardKind: 'live_status', url: '/rail-api/live-status', params: { train: num } }
-    }
+  // Ambiguous band: offer the best-guess phrase for one-tap confirmation.
+  return {
+    kind: 'confirm',
+    plan: buildPlanFor(m.intent.id, ent, slots),
+    text: `Did you mean: ${m.phrase}? `,
+    choices: [
+      { label: 'Yes, fetch it', value: '__exec' },
+      { label: 'Cancel', value: '__cancel' }
+    ],
+    runnerUp: m.runnerUp,
+    confidence: m.score
   }
-
-  // "trains from SC to PUNE", "trains between secunderabad and pune"
-  // (before station-board: "trains from X" alone is ambiguous, "from X to Y" is not)
-  const between = lower.match(/\b(?:from|between)\s+(.+?)\s+(?:to|and)\s+(.+?)\s*\??$/) && /train/i.test(lower)
-  if (between) {
-    return {
-      kind: 'tool',
-      plan: {
-        cardKind: 'trains_between',
-        url: '/rail-api/ntes/trains-between',
-        params: { src: '$src', dst: '$dst' },
-        resolve: [
-          { slot: 'src', query: between[1] },
-          { slot: 'dst', query: between[2] }
-        ]
-      }
-    }
-  }
-
-  // "station board SC", "arrivals at pune", "trains at secunderabad"
-  const board = lower.match(/\b(?:board|arrivals?|departures?)\b(?:\s*(?:at|for|of))?\s+([a-z][a-z .'-]{1,30})\s*\??$/) ||
-    lower.match(/^trains\s+(?:at|from)\s+([a-z][a-z .'-]{1,30})\s*\??$/)
-  if (board) {
-    return {
-      kind: 'tool',
-      plan: {
-        cardKind: 'station_board',
-        url: '/rail-api/ntes/live-station',
-        params: { station: '$station' },
-        resolve: [{ slot: 'station', query: board[1].trim(), preferCode: true }]
-      }
-    }
-  }
-
-  return null
 }
 
 // ---------- plan execution helpers ----------
@@ -274,12 +900,78 @@ export function projectStationBoard(dto = {}) {
   }
 }
 
+/// Mirrors tools.rs availability_tone: green when bookable now, red when
+/// hopeless, amber for waitlist-ish limbo.
+function availabilityTone(available, status) {
+  if (available === true) return 'ok'
+  if (available === false) return 'bad'
+  const s = String(status ?? '').trim().toUpperCase()
+  if (s.startsWith('RAC') || s.includes('WL')) return 'warn'
+  if (s.startsWith('REGRET') || s.startsWith('NOT')) return 'bad'
+  if (s.includes('AVAILABLE')) return 'ok'
+  return 'warn'
+}
+
+/** Mirrors tools.rs project_seat_availability: trains with class-wise
+ * status rank first, rows capped at 8, classes capped at 6, fare/prediction
+ * keys only materialize when the source provided them. `resolved` injects
+ * src_code/dst_code the way the server does after projecting. */
+export function projectSeatAvailability(dto = {}, resolved = {}) {
+  const trains = dto.trains ?? []
+  const ranked = [
+    ...trains.filter((t) => (t.availability ?? []).length > 0),
+    ...trains.filter((t) => !(t.availability ?? []).length)
+  ]
+  const rows = ranked.slice(0, MAX_AVAILABILITY_TRAINS).map((t) => ({
+    number: t.number,
+    name: t.name,
+    dep: t.departure_time,
+    arr: t.arrival_time,
+    duration: t.duration,
+    classes: (t.availability ?? []).slice(0, MAX_AVAILABILITY_CLASSES).map((c) => {
+      const row = {
+        class: c.class,
+        status: c.status,
+        tone: availabilityTone(c.available, c.status)
+      }
+      if (c.fare != null) row.fare = c.fare
+      if (c.prediction != null) row.prediction = c.prediction
+      return row
+    })
+  }))
+  return {
+    from: dto.src ?? null,
+    to: dto.dst ?? null,
+    date: dto.date ?? null,
+    data_source: dto.data_source ?? null,
+    notice: dto.notice ?? null,
+    trains: rows,
+    ...(resolved.src ? { src_code: resolved.src } : {}),
+    ...(resolved.dst ? { dst_code: resolved.dst } : {})
+  }
+}
+
+/** Mirrors tools.rs project_chart: identity + coach count only; the DTO's
+ * coach bodies and train_name are deliberately dropped. */
+export function projectChartStatus(dto = {}) {
+  return {
+    train_number: dto.train_number ?? null,
+    journey_date: dto.journey_date ?? null,
+    boarding_station: dto.boarding_station ?? null,
+    coach_count: Array.isArray(dto.coaches) ? dto.coaches.length : null,
+    data_source: dto.data_source ?? null,
+    notice: dto.notice ?? null
+  }
+}
+
 export const PROJECTORS = {
   live_status: projectLiveStatus,
   trains_between: projectTrainsBetween,
   average_delay: projectAverageDelay,
   train_schedule: projectSchedule,
-  station_board: projectStationBoard
+  station_board: projectStationBoard,
+  seat_availability: projectSeatAvailability,
+  chart_status: projectChartStatus
 }
 
 // ---------- next-action chips (mirror tools::next_actions, subset) ----------
@@ -307,6 +999,12 @@ export function nextActionsFor(kind, d = {}) {
     if (n) push(`Chart status ${n}`, `chart status of train ${n}`)
   } else if (kind === 'average_delay') {
     const n = d.train_no
+    if (n) push(`Track ${n}`, `live status of ${n}`)
+  } else if (kind === 'seat_availability') {
+    const n = d.trains?.find((t) => t.number)?.number
+    if (n) push(`Chart ${n}`, `chart status of train ${n}`)
+  } else if (kind === 'chart_status') {
+    const n = d.train_number
     if (n) push(`Track ${n}`, `live status of ${n}`)
   }
   return out.slice(0, 4)

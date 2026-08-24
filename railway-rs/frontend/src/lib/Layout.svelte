@@ -293,7 +293,7 @@
   <div class="lg:pl-60">
     <VisitTrail />
     <main
-      class="mx-auto w-full max-w-5xl px-4 pt-4 md:px-8 md:pt-10 max-lg:pb-[calc(5.5rem+env(safe-area-inset-bottom))] lg:pb-[calc(2.5rem+env(safe-area-inset-bottom))]"
+      class="mx-auto w-full max-w-5xl px-4 pt-4 md:px-8 md:pt-10 max-lg:pb-[calc(7rem+env(safe-area-inset-bottom))] lg:pb-[calc(2rem+env(safe-area-inset-bottom))]"
     >
       {@render children()}
     </main>
@@ -307,17 +307,17 @@
     }`}
     aria-label="Primary"
   >
-    <div class="mx-auto grid max-w-xl grid-cols-4">
+    <div class="mx-auto grid max-w-xl grid-cols-5">
       {#each primaryItems as item (item.href)}
         <a
           href={item.href}
           onclick={(e) => go(e, item.href)}
           aria-current={isActive(item) ? 'page' : undefined}
-          class={`flex min-h-14 flex-col items-center justify-center gap-1 px-1 pt-0.5 text-xs font-medium transition-colors ${
+          class={`flex min-h-12 flex-col items-center justify-center gap-0.5 px-1 pt-0.5 text-[10px] font-medium transition-colors ${
             isActive(item) ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
           }`}
         >
-          <item.icon class="size-6" />
+          <item.icon class="size-5" />
           {item.short ?? item.label}
         </a>
       {/each}
@@ -326,9 +326,9 @@
         onclick={() => (mobileOpen = true)}
         aria-expanded={mobileOpen}
         aria-haspopup="dialog"
-        class="flex min-h-14 flex-col items-center justify-center gap-1 px-1 pt-0.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+        class="flex min-h-12 flex-col items-center justify-center gap-0.5 px-1 pt-0.5 text-[10px] font-medium text-muted-foreground transition-colors hover:text-foreground"
       >
-        <EllipsisIcon class="size-6" />
+        <EllipsisIcon class="size-5" />
         More
       </button>
     </div>

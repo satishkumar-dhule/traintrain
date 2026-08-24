@@ -32,10 +32,31 @@
     Math.max(0, num(d.total_found ?? d.trains?.length) - trainsBetweenRows.length)
   )
 
-  const CHIP_TONES = {
-    ok: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
-    warn: 'border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400',
-    bad: 'border-red-500/30 bg-red-500/10 text-red-600 dark:text-red-400',
+  /* Seat status -> colour: bookable green, waitlist amber, RAC blue, regret red. */
+  const SEAT_TONE_CLS = {
+    green: 'text-emerald-600 dark:text-emerald-400',
+    amber: 'text-amber-600 dark:text-amber-400',
+    blue: 'text-blue-600 dark:text-blue-400',
+    red: 'text-red-600 dark:text-red-400',
+  }
+  const seatTone = (status) => {
+    const s = String(status ?? '').toUpperCase()
+    if (s.includes('AVAILABLE')) return 'green'
+    if (s.startsWith('RAC')) return 'blue'
+    if (s.includes('WL') || s.includes('WAITLIST')) return 'amber'
+    if (s.startsWith('REGRET') || s.startsWith('NOT')) return 'red'
+    return 'amber'
+  }
+
+  /* Prepared / not-prepared for the reservation chart. The projector may send
+   * an explicit flag; otherwise infer from notice wording or coach presence. */
+  const chartPrepared = (dd) => {
+    if (typeof dd?.prepared === 'boolean') return dd.prepared
+    const n = String(dd?.notice ?? '')
+    if (/not\s+prepared/i.test(n)) return false
+    if (/prepared/i.test(n)) return true
+    if (Number(dd?.coach_count) > 0) return true
+    return null
   }
 
   const DOT_CLS = {
@@ -75,20 +96,6 @@
     {label}
     <ArrowRight class="size-3" />
   </button>
-{/snippet}
-
-{#snippet ToneChip(c)}
-  {@const tone = CHIP_TONES[c?.tone] ?? CHIP_TONES.warn}
-  <span class={`inline-flex items-baseline gap-1 rounded-lg border px-2 py-0.5 text-[11px] leading-tight max-lg:text-xs ${tone}`}>
-    <span class="font-semibold">{txt(c?.class)}</span>
-    <span>{txt(c?.status)}</span>
-    {#if c?.fare !== undefined && c?.fare !== null && c?.fare !== ''}
-      <span class="opacity-75">₹{c.fare}</span>
-    {/if}
-    {#if c?.prediction !== undefined && c?.prediction !== null && c?.prediction !== ''}
-      <span class="opacity-75">· {c.prediction}%</span>
-    {/if}
-  </span>
 {/snippet}
 
 {#if kind === 'trains_between'}
@@ -198,7 +205,7 @@
     {@render header(
       CalendarDays,
       `Availability · ${txt(d.from)} → ${txt(d.to)}`,
-      [d.date, d.data_source].filter(Boolean).join(' · ') || undefined
+      d.date || undefined
     )}
     {#if d.notice}
       <p class="mb-2 text-xs italic text-muted-foreground">{d.notice}</p>
@@ -215,9 +222,20 @@
               {txt(t?.dep)} → {txt(t?.arr)} · {t?.duration ?? DASH}
             </span>
           </div>
-          <div class="mt-1.5 grid grid-cols-1 gap-1 sm:grid-cols-2 min-w-0">
+          <div class="mt-1.5 space-y-1">
             {#each list(t?.classes) as c, j (c?.class + j)}
-              {@render ToneChip(c)}
+              {@const tone = seatTone(c?.status)}
+              <div class="flex items-center justify-between gap-2 text-xs max-lg:text-sm">
+                <span class="flex min-w-0 items-center gap-1.5">
+                  <span class="inline-block shrink-0 rounded bg-muted px-1 font-mono text-[11px]">{txt(c?.class)}</span>
+                  <span class={`min-w-0 truncate font-medium ${SEAT_TONE_CLS[tone]}`}>{txt(c?.status)}</span>
+                </span>
+                <span class="shrink-0 text-right tabular-nums text-muted-foreground">
+                  {#if c?.fare !== undefined && c?.fare !== null && c?.fare !== ''}₹{c.fare}{/if}
+                </span>
+              </div>
+            {:else}
+              <p class="text-[11px] text-muted-foreground">No class data</p>
             {/each}
           </div>
         </div>
@@ -229,6 +247,9 @@
       <div class="mt-2">
         {@render footer('Open availability', availabilityHref(d.src_code, d.dst_code, d.date))}
       </div>
+    {/if}
+    {#if d.data_source}
+      <p class="mt-2 text-[11px] text-muted-foreground">data source: {d.data_source}</p>
     {/if}
   </div>
 {:else if kind === 'station_board'}
@@ -317,9 +338,23 @@
     {/if}
   </div>
 {:else if kind === 'chart_status'}
+  {@const prepared = chartPrepared(d)}
   <div class="rounded-xl border bg-card p-3 text-sm">
-    {@render header(ClipboardCheck, `Chart · ${txt(d.train_number)}`, d.data_source)}
-    <dl class="grid grid-cols-[auto_1fr] items-baseline gap-x-4 gap-y-1 text-xs max-lg:text-sm">
+    {@render header(ClipboardCheck, `Chart · ${txt(d.train_number)}`, undefined)}
+    {#if prepared === true}
+      <p class="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-xs font-medium text-emerald-600 dark:text-emerald-400 max-lg:text-sm">
+        Chart prepared — reservation charts are out.
+      </p>
+    {:else if prepared === false}
+      <p class="rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-xs font-medium text-amber-600 dark:text-amber-400 max-lg:text-sm">
+        Chart not prepared yet.
+      </p>
+    {:else}
+      <p class="rounded-md bg-muted px-2 py-1 text-xs font-medium max-lg:text-sm">
+        Chart preparation status unknown.
+      </p>
+    {/if}
+    <dl class="mt-2 grid grid-cols-[auto_1fr] items-baseline gap-x-4 gap-y-1 text-xs max-lg:text-sm">
       <dt class="text-muted-foreground">Journey date</dt>
       <dd>{txt(d.journey_date)}</dd>
       <dt class="text-muted-foreground">Boarding at</dt>
@@ -327,8 +362,11 @@
       <dt class="text-muted-foreground">Coaches</dt>
       <dd>{d.coach_count != null ? `${d.coach_count} coaches` : DASH}</dd>
     </dl>
-    {#if d.notice}
+    {#if d.notice && prepared === null}
       <p class="mt-2 text-xs italic text-muted-foreground">{d.notice}</p>
+    {/if}
+    {#if d.data_source}
+      <p class="mt-2 text-[11px] text-muted-foreground">data source: {d.data_source}</p>
     {/if}
   </div>
 {:else}

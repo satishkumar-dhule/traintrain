@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use crate::config::{AiBackendPolicy, Config};
+use crate::config::Config;
 use crate::core::ai::{AiBackend, AiClient};
 use crate::core::cache::Cache;
 use crate::core::corover::CoroverClient;
@@ -26,12 +26,8 @@ pub struct AppState {
     pub ntes_web: NtesWebClient,
     pub irctc: IrctcClient,
     pub paytm: PaytmClient,
-    /// Primary AI backend (resolved per `RAILWAY_AI_BACKEND`: zen gateway or
-    /// in-process GGUF engine).
+    /// Primary AI backend (OpenAI-compatible zen gateway).
     pub ai: Arc<dyn AiBackend>,
-    /// Once-per-request fallback used by the `local-first` policy (`None`
-    /// for `zen` and `local-only`).
-    pub ai_fallback: Option<Arc<dyn AiBackend>>,
     pub datasets: Arc<Datasets>,
     /// BM25 retrieval index over stations + trains (AI RAG layer).
     pub retrieval: Arc<RetrievalIndex>,
@@ -51,41 +47,12 @@ impl AppState {
         let ntes_web = NtesWebClient::new(&http, &config.ntes_base);
         let irctc = IrctcClient::new(&http, &config.irctc_base);
         let paytm = PaytmClient::new(&http, &config.paytm_base);
-        let zen = Arc::new(AiClient::new(
+        let ai = Arc::new(AiClient::new(
             &config.ai_base,
             &config.ai_model,
             config.ai_api_key.clone(),
             config.ai_timeout,
-        )?);
-        // Backend selection per RAILWAY_AI_BACKEND. The local engine is
-        // wired once its GGUF model is present; until then every policy
-        // degrades honestly to Zen.
-        let (ai, ai_fallback): (Arc<dyn AiBackend>, Option<Arc<dyn AiBackend>>) =
-            match config.ai_backend {
-                AiBackendPolicy::Zen => (zen.clone(), None),
-                AiBackendPolicy::LocalOnly | AiBackendPolicy::LocalFirst => {
-                    match crate::core::ai::local::LocalBackend::from_config(&config) {
-                        Ok(local) => {
-                            let local = Arc::new(local);
-                            if config.ai_backend == AiBackendPolicy::LocalFirst {
-                                (local, Some(zen.clone()))
-                            } else {
-                                (local, None)
-                            }
-                        }
-                        Err(e) => {
-                            if config.ai_backend == AiBackendPolicy::LocalOnly {
-                                return Err(e);
-                            }
-                            tracing::warn!(
-                                error = %e.message(),
-                                "local ai backend unavailable; falling back to zen gateway"
-                            );
-                            (zen.clone(), None)
-                        }
-                    }
-                }
-            };
+        )?) as Arc<dyn AiBackend>;
         let datasets = Arc::new(Datasets::load(&config.data_dir)?);
         let retrieval = Arc::new(RetrievalIndex::build(datasets.retrieval_entries()));
         let metrics = Arc::new(Metrics::new());
@@ -107,7 +74,6 @@ impl AppState {
             irctc,
             paytm,
             ai,
-            ai_fallback,
             datasets,
             retrieval,
             askdisha,

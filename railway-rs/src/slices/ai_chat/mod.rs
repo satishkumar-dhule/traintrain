@@ -32,10 +32,6 @@ pub struct AiStatus {
     /// Whether an API key is configured (`false` = keyless free tier).
     pub keyed: bool,
     pub base: String,
-    /// Active backend tag (`zen` gateway or `local` in-process engine).
-    pub backend: String,
-    /// Once-per-request fallback backend tag under `local-first`.
-    pub fallback: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -86,36 +82,15 @@ async fn chat_handler(
     );
 
     // Fail fast: round 1 is established here, before any headers are
-    // committed, so pre-stream failures surface as honest JSON errors. The
-    // persona matches the resolved backend, and `local-first` setups get one
-    // fallback attempt on the other backend before giving up.
+    // committed, so pre-stream failures surface as honest JSON errors.
     let schemas = tools::schemas();
-    let primary = state.ai.clone();
-    let mut chosen = primary.clone();
-    messages.insert(0, ChatMessage::system(service::persona_for(primary.tag())));
-    let first = match primary.chat_stream_with_tools(&messages, &schemas).await {
-        Ok(s) => s,
-        Err(e) => {
-            let Some(fb) = state.ai_fallback.clone() else {
-                return Err(e);
-            };
-            tracing::warn!(
-                error = %e.message(),
-                from = %primary.tag(),
-                to = %fb.tag(),
-                "primary ai backend failed pre-stream; failing over"
-            );
-            messages[0] = ChatMessage::system(service::persona_for(fb.tag()));
-            let stream = fb.chat_stream_with_tools(&messages, &schemas).await?;
-            chosen = fb;
-            stream
-        }
-    };
+    let backend = state.ai.clone();
+    messages.insert(0, ChatMessage::system(service::PERSONA));
+    let first = backend.chat_stream_with_tools(&messages, &schemas).await?;
     let budget = tools::Budget::new(tools::DEFAULT_BUDGET_CHARS);
 
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(64);
     tokio::spawn(async move {
-        let backend = chosen;
         let mut rounds = 0usize;
         // Last successful projection per executed tool, feeding next-actions.
         let mut last_results: Vec<(String, Value)> = Vec::new();

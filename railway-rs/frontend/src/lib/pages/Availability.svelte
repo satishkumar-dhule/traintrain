@@ -29,7 +29,7 @@ import CalendarClockIcon from 'lucide-svelte/icons/calendar-clock'
 import RouteIcon from 'lucide-svelte/icons/route'
 import { journeysHref, trainHref } from '$lib/utils.js'
 
-  let { src = '', dst = '', date = '', embedded = false } = $props()
+  let { src = '', dst = '', date = '', embedded = false, filterQuery = '' } = $props()
 
   const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
@@ -179,6 +179,14 @@ import { journeysHref, trainHref } from '$lib/utils.js'
   const filteredTrains = $derived.by(() => {
     let list = trains.filter((t) => visibleRows(t).length > 0)
     if (availableOnly) list = list.filter(hasAvailable)
+    const fq = String(filterQuery ?? '').trim().toLowerCase()
+    if (fq) {
+      list = list.filter((t) => {
+        const num = String(t?.number ?? '').toLowerCase()
+        const nam = String(t?.name ?? '').toLowerCase()
+        return num.includes(fq) || nam.includes(fq)
+      })
+    }
     const dir = sortKey === 'chance' ? -1 : 1
     return list.slice().sort((a, b) => {
       let va, vb

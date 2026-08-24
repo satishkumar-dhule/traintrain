@@ -1,10 +1,6 @@
 /* memory.js - session Q&A memory for the assistant.
-   Two jobs, both zero-network:
-     1. Replay: an asked-and-answered question (exact or similar enough)
-        is served from the local cache instead of hitting /ai/chat again.
-     2. Auto-compaction: when the transcript grows, old turns are folded
-        into a compact digest message so LLM posts stay small and under
-        the server's 40-message cap. Recent turns stay verbatim.
+   One job, zero-network: replay. An asked-and-answered question (exact or
+   similar enough) is served from the local cache instead of refetching.
    Pure and Node-testable. */
 
 export function createMemory(max = 30) {
@@ -85,52 +81,4 @@ export function findReplay(memory, question) {
     }
   }
   return bestScore >= 0.6 ? { entry: best, exact: false } : null
-}
-
-// ---------- auto-compaction ----------
-
-const MAX_SERVER_MESSAGES = 40
-const DIGEST_LINE_CAP = 200
-
-function clip(s, n) {
-  s = String(s ?? '').replace(/\s+/g, ' ').trim()
-  return s.length > n ? `${s.slice(0, n - 1)}…` : s
-}
-
-/** Fold all but the last `keep` turns into a single digest user-message so
- * the POSTed history stays small (and always <= 40 messages). Returns
- * {messages, compacted} where messages[] is ready for /ai/chat. */
-export function compact(turns, opts = {}) {
-  const keep = Math.max(2, opts.keep ?? 8)
-  const list = (turns ?? []).filter((t) => t && t.role !== 'system' && String(t.content ?? '').trim())
-  if (list.length === 0) return { messages: [], compacted: false }
-
-  const cut = Math.max(0, list.length - keep)
-  if (cut === 0) {
-    return {
-      messages: list.map((t) => ({ role: t.role, content: t.content })),
-      compacted: false
-    }
-  }
-
-  // Never leave a dangling assistant turn at the head of the kept window.
-  let start = cut
-  while (start < list.length && list[start].role === 'assistant') start++
-
-  const old = list.slice(0, cut)
-  const lines = old.map((t) => `- ${t.role === 'user' ? 'asked' : 'answered'}: ${clip(t.content, DIGEST_LINE_CAP)}`)
-  const digest =
-    `[Earlier conversation summary — details may be trimmed. Continue naturally from it.]\n` +
-    lines.join('\n')
-
-  const kept = list.slice(start).map((t) => ({ role: t.role, content: t.content }))
-  const messages = [{ role: 'user', content: digest }, ...kept]
-
-  // Server caps: 40 messages / 32k chars each. Drop oldest digest+kept pairs
-  // until it fits (kept turns win; digest survives unless alone too big).
-  while (messages.length > MAX_SERVER_MESSAGES) {
-    if (messages.length > 2) messages.splice(1, 1)
-    else break
-  }
-  return { messages, compacted: true }
 }

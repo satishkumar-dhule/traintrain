@@ -11,8 +11,8 @@
   } = $props();
 </script>
 
-<div class={cn('flex flex-wrap items-start justify-between gap-3', className)}>
-  <div class="grid gap-0.5 min-w-0">
+<div class={cn('flex flex-wrap items-start justify-between gap-3 overflow-hidden', className)}>
+  <div class="grid min-w-0 gap-0.5 overflow-hidden">
     <h1 class={cn('font-semibold tracking-tight', size === 'sm' ? 'text-xl' : 'text-2xl sm:text-3xl')}>{title}</h1>
     {#if description}<p class="max-lg:hidden text-sm text-muted-foreground">{description}</p>{/if}
     {@render children?.()}

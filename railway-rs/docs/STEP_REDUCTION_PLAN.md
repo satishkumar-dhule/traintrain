@@ -47,7 +47,7 @@ Svelte UI is active (`frontend/src`); vanilla `static/*.js` is orphaned legacy k
 | Availability | ~7 fresh | Date defaults today even coming from Journeys; source select resets per mount |
 | PNR | 3 clean / 6+ captcha loop | **Recent PNRs NOT persisted** (orphaned chip code proves intent); result drops chartStatus/freshness; jump buttons discard context |
 | Insights | nav→prefill→click Explain again→wait ≤120s | Deep link doesn't auto-run; needs exact 5-digit number, no name lookup |
-| Assistant | 1 turn (good local-first gate) | AI-off = hard dead end even for zero-LLM paths; seed param exists but nothing links to it; no starter chips |
+| Assistant | 1 turn (good client-side router gate) | AI-off = hard dead end even for zero-LLM paths; seed param exists but nothing links to it; no starter chips |
 | API cost | Train sweep = 6 calls/5 endpoints, avg-delay fetched twice; busy corridor = **30+ round trips** (one avg-delay call per row badge); schedule cache is **write-only** (never read); Home fires 27 letter-sweep requests per mount |
 
 Systemic dead-end pattern: informational views (Exceptions, Parcel, Insights, System) have zero onward

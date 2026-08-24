@@ -11,6 +11,7 @@
   import Breadcrumbs from '$lib/components/Breadcrumbs.svelte'
   import RouteContextBar from '$lib/components/RouteContextBar.svelte'
   import MobileFilterBar from '$lib/components/MobileFilterBar.svelte'
+  import TrainSearchFilter from '$lib/components/TrainSearchFilter.svelte'
   import JourneysTable from '$lib/pages/JourneysTable.svelte'
   import Availability from '$lib/pages/Availability.svelte'
 
@@ -29,7 +30,7 @@
   let cDate = $state(DATE_RE.test(String(date)) ? String(date) : todayISO())
 
   let activeTab = $state('trains')
-  let mobileSearchOpen = $state(false)
+  let filterQuery = $state('')
 
   const hasRoute = $derived(Boolean(cSrc) && Boolean(cDst))
   const canSearch = $derived(
@@ -44,13 +45,8 @@
     cSrc = s
     cDst = d
     cDate = dt
-    mobileSearchOpen = false
     const want = '/plan/' + s + '/' + d + '/' + dt
     if (location.pathname !== want) navigate(want)
-  }
-
-  function openMobileSearch() {
-    mobileSearchOpen = true
   }
 
   $effect(() => {
@@ -74,73 +70,62 @@
   })
 </script>
 
-<!-- Mobile: sticky route context bar when route is active -->
-{#if viewport.narrow && hasRoute && !mobileSearchOpen}
-  <RouteContextBar from={cSrc} to={cDst} onEdit={openMobileSearch} />
+<!-- Mobile: route context bar replaces header when route is active -->
+{#if viewport.narrow && hasRoute}
+  <RouteContextBar from={cSrc} to={cDst} onEdit={() => {}} />
 {/if}
 
-<!-- Mobile: search form overlay when editing -->
-{#if viewport.narrow && mobileSearchOpen}
-  <div class="flex flex-col gap-4 p-4">
-    <PageHeader title="Plan a trip" size="sm" />
-    <Card.Root>
-      <Card.Content class="grid gap-3 p-4">
-        <StationPairInput bind:from bind:to onSwap={() => { if (canSearch) search() }} />
-        <DateStrip bind:value={journeyDate} />
-        <div class="flex gap-2">
-          <Button variant="outline" onclick={() => { mobileSearchOpen = false }} class="flex-1">Cancel</Button>
-          <Button onclick={search} disabled={!canSearch} class="flex-1">Search</Button>
-        </div>
-      </Card.Content>
-    </Card.Root>
-  </div>
-{:else}
-  <!-- Desktop: PageHeader + Breadcrumbs -->
+<!-- PageHeader + Breadcrumbs (desktop always, mobile when no route) -->
+{#if !viewport.narrow || !hasRoute}
   <div class="hidden lg:block">
     <PageHeader title="Plan a trip" description="Trains and seat availability between any two stations." />
     <Breadcrumbs items={[{ label: 'Home', href: '/' }, { label: 'Plan a trip' }]} class="mb-3" />
   </div>
-
-  <!-- Desktop: search form card -->
-  <div class="hidden lg:block">
-    <Card.Root>
-      <Card.Content class="grid gap-3 p-4">
-        <StationPairInput bind:from bind:to onSwap={() => { if (canSearch) search() }} />
-        <div class="flex flex-wrap items-end gap-2">
-          <div class="min-w-64 flex-1">
-            <DateStrip bind:value={journeyDate} />
-          </div>
-          <Button onclick={search} disabled={!canSearch}>Search</Button>
-        </div>
-      </Card.Content>
-    </Card.Root>
+  <div class="lg:hidden">
+    <PageHeader title="Plan a trip" size="sm" />
   </div>
+{/if}
 
-  <!-- Mobile: sticky date strip when route is active -->
-  {#if viewport.narrow && hasRoute}
-    <div class="sticky top-12 z-30 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/85 lg:hidden">
-      <DateStrip bind:value={journeyDate} onchange={() => { if (canSearch) search() }} />
-    </div>
-  {/if}
+<!-- Search form card — visible on both mobile and desktop -->
+<Card.Root>
+  <Card.Content class="grid gap-3 p-4">
+    <StationPairInput bind:from bind:to onSwap={() => { if (canSearch) search() }} />
+    <DateStrip bind:value={journeyDate} />
+    <Button onclick={search} disabled={!canSearch} class="w-full mt-1">Search</Button>
+  </Card.Content>
+</Card.Root>
 
-  <!-- Tabs -->
-  <Tabs.Root bind:value={activeTab} class="mt-4">
-    <Tabs.List>
-      <Tabs.Trigger value="trains">Trains</Tabs.Trigger>
-      <Tabs.Trigger value="availability">Availability</Tabs.Trigger>
-    </Tabs.List>
+<!-- Mobile: sticky date strip when route is active (above tabs) -->
+{#if viewport.narrow && hasRoute}
+  <div class="sticky top-12 z-30 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/85 lg:hidden">
+    <DateStrip bind:value={journeyDate} onchange={() => { if (canSearch) search() }} />
+  </div>
+{/if}
 
-    <Tabs.Content value="trains">
-      <JourneysTable src={cSrc} dst={cDst} embedded />
-    </Tabs.Content>
-    <Tabs.Content value="availability">
-      <Availability src={cSrc} dst={cDst} date={cDate} embedded />
-    </Tabs.Content>
-  </Tabs.Root>
+<!-- Mobile: inline search filter in availability tab -->
+{#if viewport.narrow && activeTab === 'availability' && hasRoute}
+  <div class="px-4 pt-3 lg:hidden">
+    <TrainSearchFilter count={0} bind:query={filterQuery} />
+  </div>
+{/if}
 
-  <!-- Mobile: sticky bottom filter bar in availability tab -->
-  {#if viewport.narrow && activeTab === 'availability' && hasRoute}
-    <MobileFilterBar />
-    <div class="h-14 lg:hidden"></div>
-  {/if}
+<!-- Tabs -->
+<Tabs.Root bind:value={activeTab} class="mt-4">
+  <Tabs.List>
+    <Tabs.Trigger value="trains">Trains</Tabs.Trigger>
+    <Tabs.Trigger value="availability">Availability</Tabs.Trigger>
+  </Tabs.List>
+
+  <Tabs.Content value="trains">
+    <JourneysTable src={cSrc} dst={cDst} embedded />
+  </Tabs.Content>
+  <Tabs.Content value="availability">
+    <Availability src={cSrc} dst={cDst} date={cDate} embedded filterQuery={activeTab === 'availability' ? filterQuery : ''} />
+  </Tabs.Content>
+</Tabs.Root>
+
+<!-- Mobile: sticky bottom filter bar in availability tab -->
+{#if viewport.narrow && activeTab === 'availability' && hasRoute}
+  <MobileFilterBar />
+  <div class="h-14 lg:hidden"></div>
 {/if}

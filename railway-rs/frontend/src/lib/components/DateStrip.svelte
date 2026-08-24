@@ -125,7 +125,7 @@
           aria-current={active ? 'date' : undefined}
           aria-label={`${label}: ${iso}`}
           onclick={() => pickDate(iso)}
-          class={`flex min-h-11 w-16 max-sm:w-[4rem] shrink-0 cursor-pointer snap-center flex-col items-center justify-center rounded-md border px-1 py-1 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+          class={`flex min-h-11 w-[4.25rem] shrink-0 cursor-pointer snap-center flex-col items-center justify-center rounded-md border px-1 py-1 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
             active
               ? 'border-transparent bg-primary text-primary-foreground shadow-sm'
               : 'border-transparent hover:bg-muted'

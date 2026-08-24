@@ -38,15 +38,15 @@
   }
 </script>
 
-<div class={cn('flex flex-wrap items-end gap-2', className)}>
-  <div class="grid min-w-44 flex-1 gap-1.5">
+<div class={cn('grid gap-2 lg:flex lg:flex-wrap lg:items-end', className)}>
+  <div class="grid gap-1.5 lg:min-w-44 lg:flex-1">
     <Label for={fromId}>{fromLabel}</Label>
     <AutoCompleteInput id={fromId} kind="station" placeholder="Station code…" bind:value={from} onpick={pickFrom} {disabled} inputClass={inputClass} class="min-w-0" />
   </div>
-  <Button type="button" variant="outline" size="icon" onclick={swap} disabled={disabled} aria-label="Swap stations" title="Swap stations">
+  <Button type="button" variant="outline" size="icon" onclick={swap} disabled={disabled} aria-label="Swap stations" title="Swap stations" class="max-lg:justify-self-center">
     <ArrowDownUpIcon />
   </Button>
-  <div class="grid min-w-44 flex-1 gap-1.5">
+  <div class="grid gap-1.5 lg:min-w-44 lg:flex-1">
     <Label for={toId}>{toLabel}</Label>
     <AutoCompleteInput id={toId} kind="station" placeholder="Station code…" bind:value={to} onpick={pickTo} {disabled} inputClass={inputClass} class="min-w-0" />
   </div>

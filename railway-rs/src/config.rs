@@ -1,17 +1,6 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-/// Which AI backend serves chat completions, per `RAILWAY_AI_BACKEND`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AiBackendPolicy {
-    /// Upstream OpenAI-compatible gateway only (default).
-    Zen,
-    /// In-process GGUF engine only; honest errors when the model is absent.
-    LocalOnly,
-    /// In-process engine first, Zen as once-per-request fallback.
-    LocalFirst,
-}
-
 /// Runtime configuration, read from environment variables with sane defaults.
 ///
 /// Environment variables:
@@ -34,14 +23,6 @@ pub enum AiBackendPolicy {
 /// - `RAILWAY_AI_API_KEY`    (optional) — sent as `Authorization: Bearer` when set;
 ///   the free tier works without any key (no login required)
 /// - `RAILWAY_AI_TIMEOUT_SECS` (default `120`) — total timeout for LLM completions
-/// - `RAILWAY_AI_BACKEND`    (default `zen`) — backend selection:
-///   `zen` (upstream gateway only), `local` (in-process GGUF engine only),
-///   `local-first` (local engine, fall back to Zen once per request if it is
-///   unavailable or fails before streaming)
-/// - `RAILWAY_LOCAL_MODEL_PATH` (default `models/trainbro.gguf`)
-/// - `RAILWAY_LOCAL_CTX`     (default `1024`) — local context window (tokens)
-/// - `RAILWAY_LOCAL_THREADS` (default `0` = auto: min(cores, 4))
-/// - `RAILWAY_LOCAL_MAX_TOKENS` (default `192`) — generation cap per round
 /// - `ASKDISHA_ENABLED`    (default `true`) — feature gate for the AskDISHA
 ///   module; set `0`/`false`/`no`/`off` (case-insensitive) to hard-disable every
 ///   outbound CoRover call
@@ -71,16 +52,6 @@ pub struct Config {
     pub ai_model: String,
     pub ai_api_key: Option<String>,
     pub ai_timeout: Duration,
-    /// Backend selection policy (`RAILWAY_AI_BACKEND`, default `zen`).
-    pub ai_backend: AiBackendPolicy,
-    /// GGUF file for the in-process engine (`RAILWAY_LOCAL_MODEL_PATH`).
-    pub ai_local_model_path: PathBuf,
-    /// Local context window in tokens (`RAILWAY_LOCAL_CTX`, default 1024).
-    pub ai_local_ctx: usize,
-    /// Local CPU threads (`RAILWAY_LOCAL_THREADS`, default 0 = auto).
-    pub ai_local_threads: usize,
-    /// Generation cap per local round (`RAILWAY_LOCAL_MAX_TOKENS`, default 192).
-    pub ai_local_max_tokens: usize,
     /// AskDISHA module feature gate (`ASKDISHA_ENABLED`, default `true`).
     pub askdisha_enabled: bool,
     /// AskDISHA guest API origin (`COROVER_BASE`).
@@ -109,11 +80,6 @@ impl Default for Config {
             ai_model: "x-preview-f-free".to_string(),
             ai_api_key: None,
             ai_timeout: Duration::from_secs(120),
-            ai_backend: AiBackendPolicy::Zen,
-            ai_local_model_path: PathBuf::from("models/trainbro.gguf"),
-            ai_local_ctx: 1024,
-            ai_local_threads: 0,
-            ai_local_max_tokens: 192,
             askdisha_enabled: true,
             corover_base: "https://api.disha.corover.ai".to_string(),
             corover_cdn_base: "https://cdn.corover.ai".to_string(),
@@ -162,16 +128,6 @@ impl Config {
                 "RAILWAY_AI_TIMEOUT_SECS",
                 d.ai_timeout.as_secs(),
             )),
-            ai_backend: parse_backend_policy(
-                std::env::var("RAILWAY_AI_BACKEND").ok().as_deref(),
-                d.ai_backend.clone(),
-            ),
-            ai_local_model_path: std::env::var("RAILWAY_LOCAL_MODEL_PATH")
-                .map(PathBuf::from)
-                .unwrap_or(d.ai_local_model_path),
-            ai_local_ctx: env_usize("RAILWAY_LOCAL_CTX", d.ai_local_ctx),
-            ai_local_threads: env_usize("RAILWAY_LOCAL_THREADS", d.ai_local_threads),
-            ai_local_max_tokens: env_usize("RAILWAY_LOCAL_MAX_TOKENS", d.ai_local_max_tokens),
             askdisha_enabled: flag_enabled(
                 std::env::var("ASKDISHA_ENABLED").ok(),
                 d.askdisha_enabled,
@@ -202,27 +158,6 @@ fn env_u64(key: &str, default: u64) -> u64 {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(default)
-}
-
-fn env_usize(key: &str, default: usize) -> usize {
-    std::env::var(key)
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(default)
-}
-
-/// Parse `RAILWAY_AI_BACKEND`. Unknown or missing values keep `default`.
-/// Pure so the semantics are unit-testable without process-global state.
-fn parse_backend_policy(raw: Option<&str>, default: AiBackendPolicy) -> AiBackendPolicy {
-    match raw.map(str::trim).filter(|v| !v.is_empty()) {
-        Some(v) => match v.to_ascii_lowercase().as_str() {
-            "zen" | "gateway" | "remote" => AiBackendPolicy::Zen,
-            "local" | "local-only" | "local_only" => AiBackendPolicy::LocalOnly,
-            "local-first" | "local_first" | "hybrid" => AiBackendPolicy::LocalFirst,
-            _ => default,
-        },
-        None => default,
-    }
 }
 
 /// Parse an opt-in boolean env var: `1` / `true` / `yes` (case-insensitive)
@@ -269,37 +204,5 @@ mod tests {
         assert!(d.askdisha_enabled);
         assert_eq!(d.corover_base, "https://api.disha.corover.ai");
         assert_eq!(d.corover_cdn_base, "https://cdn.corover.ai");
-    }
-
-    #[test]
-    fn backend_policy_parses_known_and_unknown_values() {
-        let zen = || parse_backend_policy(None, AiBackendPolicy::Zen);
-        assert_eq!(
-            parse_backend_policy(Some("local"), zen()),
-            AiBackendPolicy::LocalOnly
-        );
-        assert_eq!(
-            parse_backend_policy(Some(" LOCAL-ONLY "), zen()),
-            AiBackendPolicy::LocalOnly
-        );
-        assert_eq!(
-            parse_backend_policy(Some("local-first"), zen()),
-            AiBackendPolicy::LocalFirst
-        );
-        assert_eq!(
-            parse_backend_policy(Some("Hybrid"), zen()),
-            AiBackendPolicy::LocalFirst
-        );
-        assert_eq!(
-            parse_backend_policy(Some("zen"), AiBackendPolicy::LocalOnly),
-            AiBackendPolicy::Zen
-        );
-        // Unknown and blank values keep the configured default.
-        assert_eq!(
-            parse_backend_policy(Some("bogus"), zen()),
-            AiBackendPolicy::Zen
-        );
-        assert_eq!(parse_backend_policy(Some(""), zen()), AiBackendPolicy::Zen);
-        assert_eq!(zen(), AiBackendPolicy::Zen);
     }
 }

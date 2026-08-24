@@ -144,7 +144,7 @@ import {
   const liveCols = [
     { key: 'train', label: 'Train', value: (t) => `${t.number ?? ''} ${t.name ?? ''}` },
     { key: 'sta', label: 'Sched', cellClass: 'font-mono text-xs max-lg:text-sm', value: (t) => fmt(t.sta) },
-    { key: 'eta', label: 'Expected', cellClass: 'font-mono text-xs max-lg:text-sm', value: (t) => fmt(t.eta) },
+    { key: 'eta', label: 'ETA', cellClass: 'font-mono text-xs max-lg:text-sm', value: (t) => fmt(t.eta) },
     {
       key: 'delay',
       label: 'Delay',
@@ -164,8 +164,8 @@ import {
 
   const ttCols = [
     { key: 'train', label: 'Train', value: (t) => `${t.number ?? ''} ${t.name ?? ''}` },
-    { key: 'type', label: 'Type', class: 'w-28', value: (t) => t.train_type || '' },
-    { key: 'classes', label: 'Classes', class: 'w-28', value: (t) => t.classes || '' },
+    { key: 'type', label: 'Type', class: 'w-20 lg:w-28', value: (t) => t.train_type || '' },
+    { key: 'classes', label: 'Cls', class: 'w-16 lg:w-28', value: (t) => t.classes || '' },
     { key: 'arrival', label: 'Arr', cellClass: 'font-mono text-xs max-lg:text-sm', value: (t) => fmt(t.arrival) },
     { key: 'departure', label: 'Dep', cellClass: 'font-mono text-xs max-lg:text-sm', value: (t) => fmt(t.departure) },
     {
@@ -517,5 +517,5 @@ import {
       {/if}
     </Tabs.Content>
   </Tabs.Root>
-  <div class="h-20 lg:hidden"></div>
+  <div class="h-40 lg:hidden"></div>
 </section>

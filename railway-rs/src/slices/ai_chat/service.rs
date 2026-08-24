@@ -18,14 +18,6 @@ availability or delays. If data is missing say so plainly. Answer briefly. \
 Format with clean Markdown: short paragraphs, bullet lists for options, tables \
 for schedules, **bold** for key facts; no headings larger than ###.";
 
-/// Compact persona for the in-process micro model: shorter context, plain
-/// formatting (micro models mangle tables), explicit no-code-fence rule.
-pub const PERSONA_LOCAL: &str = "You are Train Bro, a factual Indian Railways \
-assistant. Use only the data provided in this conversation; never invent trains, \
-times, fares or delays. If data is missing, say so plainly in one short line. \
-Reply in 1-4 short sentences or a few simple bullet lines. Plain text only: no \
-code blocks, no backticks, no headings, no markdown tables.";
-
 const MAX_MESSAGES: usize = 40;
 const MAX_CONTENT_CHARS: usize = 32_000;
 
@@ -52,17 +44,6 @@ pub fn status(state: &AppState) -> AiStatus {
         model: state.ai.model().to_string(),
         keyed: state.config.ai_api_key.is_some(),
         base: state.config.ai_base.clone(),
-        backend: state.ai.tag().to_string(),
-        fallback: state.ai_fallback.as_ref().map(|b| b.tag().to_string()),
-    }
-}
-
-/// Persona matching a backend's strengths.
-pub fn persona_for(backend_tag: &str) -> &'static str {
-    if backend_tag == "local" {
-        PERSONA_LOCAL
-    } else {
-        PERSONA
     }
 }
 

@@ -1,5 +1,0 @@
-# candle's quantized kernels need SIMD codegen; without this they fall back
-# to scalar paths (~40x slower prefill). target-cpu=native is host-specific:
-# fine for local dev and for Docker builds where build host == run host.
-[build]
-rustflags = ["-C", "target-cpu=native"]

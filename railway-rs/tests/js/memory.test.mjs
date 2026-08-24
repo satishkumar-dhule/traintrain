@@ -1,4 +1,4 @@
-/* memory.test.mjs - session replay cache + auto-compaction contracts. */
+/* memory.test.mjs - session replay cache contracts. */
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -51,56 +51,4 @@ test('memory is capped at max entries, newest first', () => {
   for (let i = 0; i < 5; i++) memory.remember(m, `question number ${i}`, answer(`a${i}`));
   assert.equal(m.entries.length, 3);
   assert.equal(m.entries[0].answer.content, 'a4');
-});
-
-// ---------- auto-compaction ----------
-
-function turns(n) {
-  const out = [];
-  for (let i = 0; i < n; i++) {
-    out.push({ role: 'user', content: `user question ${i} about train 1234${i}` });
-    out.push({ role: 'assistant', content: `assistant answer ${i} with details` });
-  }
-  return out;
-}
-
-test('short transcripts pass through untouched', () => {
-  const { messages, compacted } = memory.compact(turns(2), { keep: 8 });
-  assert.equal(compacted, false);
-  assert.equal(messages.length, 4);
-  assert.deepEqual(messages.map((m) => m.role), ['user', 'assistant', 'user', 'assistant']);
-});
-
-test('long transcripts fold old turns into one digest and keep recent verbatim', () => {
-  const { messages, compacted } = memory.compact(turns(10), { keep: 4 });
-  assert.equal(compacted, true);
-  // 20 turns -> digest + last 4 kept
-  assert.equal(messages.length, 5);
-  const digest = messages[0].content;
-  assert.match(digest, /^\[Earlier conversation summary/);
-  assert.match(digest, /user question 2 about train 12342/); // old content preserved in summary
-  assert.equal(messages[messages.length - 1].content, 'assistant answer 9 with details');
-  assert.equal(messages[1].role, 'user'); // kept window starts at a user turn
-});
-
-test('kept window never starts with an assistant turn', () => {
-  const t = [
-    { role: 'user', content: 'q1' },
-    { role: 'assistant', content: 'a1' },
-    { role: 'assistant', content: 'a2' },
-    { role: 'user', content: 'q2' },
-    { role: 'assistant', content: 'a3' }
-  ];
-  const { messages } = memory.compact(t, { keep: 2 });
-  assert.equal(messages[1].role, 'user');
-});
-
-test('output respects the server 40-message cap', () => {
-  const big = [];
-  for (let i = 0; i < 60; i++) {
-    big.push({ role: 'user', content: `q${i}` });
-    big.push({ role: 'assistant', content: `a${i}` });
-  }
-  const { messages } = memory.compact(big, { keep: 50 }); // keep > cap forces trimming
-  assert.ok(messages.length <= 40, `messages=${messages.length}`);
 });

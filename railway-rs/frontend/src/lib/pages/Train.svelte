@@ -623,22 +623,14 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
   <ExceptionKindBadge kind={e.kind} />
 {/snippet}
 
-<section class="grid gap-4 md:gap-6" class:idle-center={!committed}>
-  <PageHeader title="Live train status" description="Spot any train by number or name. Data refreshes honestly from the live API.">
-    {#snippet children()}
-      <Breadcrumbs items={[{ label: 'Home', href: '/' }, { label: 'Live Train', href: '/train' }, { label: 'Train ' + (committed || number) }]} />
-    {/snippet}
-  </PageHeader>
-
+<section class="grid gap-4 overflow-hidden md:gap-6" class:idle-center={!committed}>
   {#if committed && viewport.narrow}
     <RouteContextBar
       from={committed}
       to={data?.train_name ?? ''}
       onEdit={() => { query = ''; searchOpen = true }}
     />
-  {/if}
-
-  {#if !viewport.narrow}
+  {:else}
     <PageHeader title="Live train status" description="Spot any train by number or name. Data refreshes honestly from the live API.">
       {#snippet children()}
         <Breadcrumbs items={[{ label: 'Home', href: '/' }, { label: 'Live Train', href: '/train' }, { label: 'Train ' + (committed || number) }]} />

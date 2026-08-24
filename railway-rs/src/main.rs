@@ -91,12 +91,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _guards = init_tracing();
 
     let config = Config::from_env();
-    // Candle's CPU kernels parallelize via rayon; honor the configured local
-    // thread budget before any inference can start.
-    if config.ai_backend != railway_rs::config::AiBackendPolicy::Zen && config.ai_local_threads > 0
-    {
-        std::env::set_var("RAYON_NUM_THREADS", config.ai_local_threads.to_string());
-    }
     let state = AppState::from_config(config.clone())?;
 
     spawn_sampler(state.clone());

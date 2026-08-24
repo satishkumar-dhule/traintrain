@@ -30,9 +30,6 @@ WORKDIR /app
 COPY --from=builder /app/target/release/railway-rs /app/railway-rs
 COPY static/ /app/static/
 COPY data/ /app/data/
-# Optional local AI model (GGUF + tokenizer.json). Absent = local backend
-# reports unavailable and deployments stay on the Zen gateway.
-COPY models/ /app/models/
 
 # VNC desktop entrypoint (only used when WITH_VNC=1 or DESKTOP=1 at runtime)
 COPY <<'EOS' /usr/local/bin/start-vnc-desktop
