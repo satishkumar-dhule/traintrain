@@ -499,3 +499,147 @@ test('nextActionsFor chains seat->chart and chart->track like the server', () =>
 
   assert.ok(gate.PROJECTORS.seat_availability && gate.PROJECTORS.chart_status);
 });
+
+// ---- form-spec additions (added without touching existing 29 tests) ----
+
+test('form-spec: where is my train -> help with form intent live_status missing train', () => {
+  const v = gate.classify('where is my train');
+  assert.equal(v.kind, 'help', 'should be help when train missing');
+  assert.ok(v.form, 'help verdict must carry form');
+  assert.equal(v.form.intentId, 'live_status');
+  assert.ok(Array.isArray(v.form.missing) && v.form.missing.includes('train'), `missing=${JSON.stringify(v.form.missing)}`);
+  // collected should NOT have train
+  assert.equal(v.form.collected.train, undefined);
+  // fields must include train required true and date optional
+  const trainField = v.form.fields.find((f) => (f.name ?? f.key) === 'train');
+  assert.ok(trainField, 'fields must include train');
+  assert.equal(trainField.required, true);
+  assert.equal(trainField.value, '');
+  const dateField = v.form.fields.find((f) => (f.name ?? f.key) === 'date');
+  assert.ok(dateField, 'fields must include date');
+  assert.equal(dateField.required, false);
+  assert.ok(Array.isArray(v.form.candidates) && v.form.candidates.length >= 2);
+});
+
+test('form-spec: seat availability from secunderabad -> form seat_availability src prefilled missing dst', () => {
+  const v = gate.classify('seat availability from secunderabad');
+  assert.equal(v.kind, 'help');
+  assert.ok(v.form);
+  assert.equal(v.form.intentId, 'seat_availability');
+  assert.equal(v.form.collected.src, 'secunderabad');
+  assert.ok(v.form.missing.includes('dst'), `missing=${JSON.stringify(v.form.missing)}`);
+  assert.ok(!v.form.missing.includes('src'), 'src should not be missing');
+  const srcField = v.form.fields.find((f) => (f.name ?? f.key) === 'src');
+  const dstField = v.form.fields.find((f) => (f.name ?? f.key) === 'dst');
+  assert.ok(srcField && dstField);
+  assert.equal(srcField.required, true);
+  assert.equal(dstField.required, true);
+  assert.equal(srcField.value, 'secunderabad');
+  assert.equal(dstField.value, '');
+  // intent should be seat_availability with at least 2 candidates
+  assert.ok(Array.isArray(v.form.candidates) && v.form.candidates.length >= 2);
+});
+
+test('form-spec: best food near pune -> help with candidates >=2 and null/low-confidence intent', () => {
+  const v = gate.classify('best food near pune');
+  assert.equal(v.kind, 'help');
+  assert.ok(v.form);
+  assert.ok(Array.isArray(v.form.candidates) && v.form.candidates.length >= 2, `candidates=${JSON.stringify(v.form.candidates)}`);
+  const low = v.form.intentId == null || (typeof v.form.confidence === 'number' && v.form.confidence < 0.45);
+  assert.ok(low, `intentId=${v.form.intentId} confidence=${v.form.confidence} should be null or low`);
+  // when null/low confidence, fields should include intent picker
+  if (v.form.intentId == null || v.form.confidence < 0.45) {
+    const picker = v.form.fields.find((f) => (f.name ?? f.key) === 'intent');
+    assert.ok(picker, 'low-confidence form should include intent picker');
+    assert.equal(picker.required, true);
+    assert.ok(Array.isArray(picker.options) && picker.options.length >= 2, 'picker options >=2');
+  }
+});
+
+test('form-spec: live status 1295 (4 digits) -> train not collected missing train', () => {
+  const v = gate.classify('live status 1295');
+  assert.equal(v.kind, 'help');
+  assert.ok(v.form);
+  // 4-digit number must NOT be treated as train
+  assert.equal(v.form.collected.train, undefined, '4-digit train should not be collected');
+  assert.ok(v.form.missing.includes('train'), `missing should include train: ${JSON.stringify(v.form.missing)}`);
+  // intent should still be live_status (best guess) but missing train
+  assert.equal(v.form.intentId, 'live_status');
+  const trainField = v.form.fields.find((f) => (f.name ?? f.key) === 'train');
+  assert.ok(trainField);
+  assert.equal(trainField.required, true);
+  assert.equal(trainField.value, '');
+});
+
+test('buildFormSpec is exported and returns fields array with correct required flags', () => {
+  assert.equal(typeof gate.buildFormSpec, 'function');
+  assert.ok(gate.REQUIRED_FIELDS, 'REQUIRED_FIELDS should be exported');
+  // live_status
+  const s1 = gate.buildFormSpec('where is my train');
+  assert.equal(s1.intentId, 'live_status');
+  assert.ok(Array.isArray(s1.fields));
+  const f1train = s1.fields.find((f) => (f.name ?? f.key) === 'train');
+  assert.ok(f1train);
+  assert.equal(f1train.required, true);
+  // seat_availability
+  const s2 = gate.buildFormSpec('seat availability from secunderabad to pune');
+  assert.equal(s2.intentId, 'seat_availability');
+  const srcReq = s2.fields.find((f) => (f.name ?? f.key) === 'src');
+  const dstReq = s2.fields.find((f) => (f.name ?? f.key) === 'dst');
+  assert.ok(srcReq && dstReq);
+  assert.equal(srcReq.required, true);
+  assert.equal(dstReq.required, true);
+  assert.equal(srcReq.value, 'secunderabad');
+  assert.equal(dstReq.value, 'pune');
+  // trains_between also src/dst required
+  const s3 = gate.buildFormSpec('trains between sc and pune');
+  // may be trains_between
+  if (s3.intentId === 'trains_between') {
+    const sf = s3.fields.find((f) => (f.name ?? f.key) === 'src');
+    const df = s3.fields.find((f) => (f.name ?? f.key) === 'dst');
+    assert.equal(sf.required, true);
+    assert.equal(df.required, true);
+  }
+  // station_board
+  const s4 = gate.buildFormSpec('station board pune');
+  if (s4.intentId === 'station_board') {
+    const st = s4.fields.find((f) => (f.name ?? f.key) === 'station');
+    assert.ok(st);
+    assert.equal(st.required, true);
+  }
+  // date field is optional when present
+  for (const spec of [s1, s2, s3, s4]) {
+    if (!spec.intentId) continue;
+    const date = spec.fields.find((f) => (f.name ?? f.key) === 'date');
+    if (date) assert.equal(date.required, false, `${spec.intentId} date should be optional`);
+  }
+  // null intent case has picker
+  const sNull = gate.buildFormSpec('best food near pune');
+  assert.ok(sNull.intentId == null || sNull.confidence < 0.45);
+  if (sNull.intentId == null || sNull.confidence < 0.45) {
+    const picker = sNull.fields.find((f) => (f.name ?? f.key) === 'intent');
+    assert.ok(picker, 'null intent should have picker');
+    assert.equal(picker.required, true);
+  }
+  // all required fields listed in REQUIRED_FIELDS must appear as fields with required true
+  for (const [intentId, req] of Object.entries(gate.REQUIRED_FIELDS)) {
+    const sample = {
+      live_status: 'live status 12951',
+      average_delay: 'average delay 12951',
+      train_schedule: 'route of 12951',
+      trains_between: 'trains between sc and pune',
+      station_board: 'station board pune',
+      seat_availability: 'seat availability from sc to pune',
+      chart_status: 'chart status 12951'
+    }[intentId];
+    const spec = gate.buildFormSpec(sample);
+    assert.equal(spec.intentId, intentId, `sample for ${intentId} should resolve to ${intentId}`);
+    for (const r of req) {
+      const fld = spec.fields.find((f) => (f.name ?? f.key) === r);
+      assert.ok(fld, `${intentId} should have field ${r}`);
+      assert.equal(fld.required, true, `${intentId} field ${r} required`);
+    }
+    // collected should match sample
+    assert.deepEqual(spec.missing, [], `${intentId} complete sample should have no missing`);
+  }
+});

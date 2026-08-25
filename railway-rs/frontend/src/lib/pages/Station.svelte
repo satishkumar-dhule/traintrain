@@ -7,41 +7,23 @@
   import { Button } from '$lib/components/ui/button/index.js'
   import { Label } from '$lib/components/ui/label/index.js'
   import * as Tabs from '$lib/components/ui/tabs/index.js'
-  import * as Select from '$lib/components/ui/select/index.js'
   import { Skeleton } from '$lib/components/ui/skeleton/index.js'
-  import * as Alert from '$lib/components/ui/alert/index.js'
-import AutoCompleteInput from '$lib/components/AutoCompleteInput.svelte'
-import DateStrip from '$lib/components/DateStrip.svelte'
-import DataTable from '$lib/components/DataTable.svelte'
-import EmptyState from '$lib/components/EmptyState.svelte'
-import RecentSearches from '$lib/components/RecentSearches.svelte'
-import { loadRecent, rememberRecent, clearStored } from '$lib/recent.js'
-import PageHeader from '$lib/components/PageHeader.svelte'
-import SignalDot from '$lib/components/SignalDot.svelte'
-import Breadcrumbs from '$lib/components/Breadcrumbs.svelte'
-import RouteContextBar from '$lib/components/RouteContextBar.svelte'
-import EntityChip from '$lib/components/EntityChip.svelte'
-import ResultMeta from '$lib/components/ResultMeta.svelte'
-import StatPill from '$lib/components/StatPill.svelte'
-import { pickNearbyStation } from '$lib/nearby.svelte.js'
-import {
-  StationCodeBadge,
-  DelayBadge,
-  TrainDelayBadge,
-  RunsOnBadges,
-  StatusBadge,
-  CountBadge
-} from '$lib/components/badges/index.js'
-  import ActivityIcon from 'lucide-svelte/icons/activity'
-  import CalendarClockIcon from 'lucide-svelte/icons/calendar-clock'
-  import MapPinIcon from 'lucide-svelte/icons/map-pin'
+  import EmptyState from '$lib/components/EmptyState.svelte'
+  import RecentSearches from '$lib/components/RecentSearches.svelte'
+  import { loadRecent, rememberRecent, clearStored } from '$lib/recent.js'
+  import PageHeader from '$lib/components/PageHeader.svelte'
+  import Breadcrumbs from '$lib/components/Breadcrumbs.svelte'
+  import RouteContextBar from '$lib/components/RouteContextBar.svelte'
+  import EntityChip from '$lib/components/EntityChip.svelte'
+  import ResultMeta from '$lib/components/ResultMeta.svelte'
+  import StatPill from '$lib/components/StatPill.svelte'
+  import { pickNearbyStation } from '$lib/nearby.svelte.js'
 
-  let { code = '', view = '' } = $props()
+  let { code = '' } = $props()
 
   let query = $state('')
   let hours = $state('2')
   let dateInput = $state('')
-  let destInput = $state('')
   let tab = $state('live')
   let committedCode = $state('')
 
@@ -56,28 +38,13 @@ import {
   let stationInfo = $state(null)
   let infoFetched = ''
 
-  // Nearby uses the shared blocking dialog (`nearby.svelte.js`): locate ->
-  // list stations around the user -> jump straight to that board.
-  async function pickNearbyBoard() {
-    const picked = await pickNearbyStation()
-    if (!picked || !picked.code) return
-    onPickStation({ code: picked.code })
-  }
-
-  let liveKey = ''
-  let ttKey = ''
-
   const RECENT_KEY = 'rc-station-recent'
   let recent = $state(loadRecent(RECENT_KEY))
 
   function rememberStation(c, d) {
     if (!c) return
     const name = String(d?.station_name ?? '').trim()
-    recent = rememberRecent(
-      RECENT_KEY,
-      { id: c, label: c, sub: name },
-      (r) => r && typeof r?.id === 'string',
-    )
+    recent = rememberRecent(RECENT_KEY, { id: c, label: c, sub: name }, (r) => r && typeof r?.id === 'string')
   }
 
   const MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
