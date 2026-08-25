@@ -335,7 +335,7 @@ import { asText, fmtDash, numOrNull, todayISO, DATE_RE } from '$lib/format.js'
         <span class="data-num text-[11px] max-lg:text-xs font-semibold">{fmtDash(classCode(row))}</span>
         {#if quotaLabel(row)}
           <span
-            class="rounded border border-border bg-muted px-1 text-[9px] leading-tight font-medium tracking-wide uppercase text-muted-foreground"
+            class="rounded border border-border bg-muted px-1 text-[10px] leading-tight font-medium tracking-wide uppercase text-muted-foreground"
             title={`${quotaLabel(row)} quota`}
           >
             {quotaLabel(row)}

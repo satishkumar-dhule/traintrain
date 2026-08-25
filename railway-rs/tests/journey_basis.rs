@@ -180,7 +180,7 @@ async fn journey_stations_returns_normalized_list() {
     let (status, body) = app.get("/rail-api/ntes/journey-stations?train=12055").await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["train_no"], "12055");
-    assert_eq!(body["data_source"], "ntes");
+    assert_eq!(body["data_source"], "NTES");
 
     let stations = body["stations"].as_array().unwrap();
     assert_eq!(stations.len(), 3, "placeholder option must be skipped");

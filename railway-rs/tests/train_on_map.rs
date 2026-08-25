@@ -66,7 +66,7 @@ async fn route_only_returns_map_with_coords() {
     assert_eq!(body["destination"], "DEHRADOON");
     assert_eq!(body["source_code"], "NDLS");
     assert_eq!(body["dest_code"], "DDN");
-    assert_eq!(body["data_source"], "ntes");
+    assert_eq!(body["data_source"], "NTES");
 
     let route = body["route"].as_array().unwrap();
     assert_eq!(route.len(), 3);
