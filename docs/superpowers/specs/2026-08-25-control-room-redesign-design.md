@@ -1,8 +1,39 @@
 # Control Room — Radical Aesthetics Upgrade (Design Spec)
 
 Date: 2026-08-25
-Status: Approved direction, pending spec review
+Status: REBASED — see Addendum below. Original Control Room direction superseded.
 Scope: `railway-rs/frontend` only. No Rust API changes.
+
+## ADDENDUM (2026-08-25, post-commit 709f4ec)
+
+A parallel session shipped its own radical identity, **"Signal & Steel"**, which
+the user chose as the foundation (user decision: option 1). Superseded vs kept:
+
+- **Identity**: Signal & Steel wins — coach-indigo primary, saffron accent,
+  signal lamps `--signal-go/hold/stop` (+ `-ink` AA text variants), cool-paper
+  light / night-indigo dark on the 255–272 blue-steel axis.
+- **Type**: Archivo Variable (signage/UI, `signage` utility) + JetBrains Mono
+  (`data-num`, tabular numerals) — replaces IBM Plex. Fonts already bundled.
+- **Tokens**: `go/hold/stop` naming replaces `run/warn/halt`. Radius stays
+  0.625rem. `lamp-pulse` replaces `signal-pulse`.
+- **Already shipped** (do not rebuild): token layer + utilities in `app.css`;
+  `tokens.test.mjs`, extended `contrast.test.mjs`; `uniformity.test.mjs`
+  (incl. U3 raw-palette ban); components PageShell, PageHeader, Breadcrumbs,
+  TabBar, TrackRule, AsyncState, EmptyState, FilterChipGroup, EntityBadge,
+  SignalDot, StatPill, badges kit on signal tones; DRY fan-out of pages.
+- **Remaining scope of this plan** (the actual work):
+  1. Shell restyle to full identity: Layout rail (darker-than-bg sidebar,
+     micro-label groups, active signal-bar), mobile tab bar active glow dot.
+  2. Home hero: departure-board search panel (signage face) + live StatPill row.
+  3. Extract still-duplicated composables: `Timeline` (Train stops),
+     `RouteStrip` (between-stations progress), `KeyValueGrid` (PNR/station
+     facts); adopt across pages; delete hand-rolled equivalents.
+  4. Page-by-page aesthetic adoption sweep (all 12 pages): signage titles,
+     data-num on every numeral, SectionHeader rhythm, glow discipline
+     (live-only), zero raw palette literals (U3 enforced).
+  5. Screenshot QA matrix (12 pages × 2 themes) via ui-layout-harness.
+- Execution waves unchanged in shape (Wave 1 lanes A/B/C → Wave 2 D–H → Wave 3
+  integration), with lane A scoped to the three missing composables above.
 
 ## 1. Context
 
