@@ -20,9 +20,12 @@
     AvailabilityStatusBadge,
     DataSourceBadge,
     TrainDelayBadge,
+    STATUS_TONES,
     availabilityStatusKind,
     dayFlags
   } from '$lib/components/badges/index.js'
+  import PageHeader from '$lib/components/PageHeader.svelte'
+  import SignalDot from '$lib/components/SignalDot.svelte'
 import ArrowDownUpIcon from 'lucide-svelte/icons/arrow-down-up'
 import CalendarDaysIcon from 'lucide-svelte/icons/calendar-days'
 import CalendarClockIcon from 'lucide-svelte/icons/calendar-clock'
@@ -314,11 +317,11 @@ import { journeysHref, trainHref } from '$lib/utils.js'
       title={`Confirmation chance ${Math.round(pct)}%`}
     >
       <div
-        class={`h-full rounded-full ${pct >= 90 ? 'bg-emerald-500' : pct >= 60 ? 'bg-amber-500' : 'bg-red-500'}`}
+        class={`h-full rounded-full ${pct >= 90 ? 'bg-signal-go' : pct >= 60 ? 'bg-signal-hold' : 'bg-signal-stop'}`}
         style={`width:${w}%`}
       ></div>
     </div>
-    <div class="mt-0.5 text-right text-[9px] leading-none tabular-nums text-muted-foreground max-lg:text-[11px]">
+    <div class="data-num mt-0.5 text-right text-[9px] leading-none text-muted-foreground max-lg:text-[11px]">
       {Math.round(pct)}% confirm
     </div>
   {/if}
@@ -328,17 +331,17 @@ import { journeysHref, trainHref } from '$lib/utils.js'
   {@const kind = availabilityStatusKind(row?.status)}
   {@const tone =
     kind === 'available'
-      ? 'border-emerald-600/25 bg-emerald-500/10 text-emerald-700 dark:border-emerald-500/35 dark:bg-emerald-400/10 dark:text-emerald-400'
+      ? STATUS_TONES.success
       : kind === 'rac'
-        ? 'border-amber-600/30 bg-amber-500/10 text-amber-700 dark:border-amber-500/35 dark:bg-amber-400/10 dark:text-amber-400'
+        ? STATUS_TONES.warning
         : kind === 'waitlist' || kind === 'closed'
-          ? 'border-red-600/30 bg-red-500/10 text-red-700 dark:border-red-500/35 dark:bg-red-400/10 dark:text-red-400'
-          : 'border-border bg-muted/50 text-muted-foreground'}
+          ? STATUS_TONES.danger
+          : STATUS_TONES.neutral}
   {@const fare = numOrNull(row?.fare)}
   <div class={`overflow-hidden rounded-md border px-2 py-1 ${tone}`}>
     <div class="flex items-baseline justify-between gap-2">
       <span class="flex min-w-0 items-baseline gap-1">
-        <span class="font-mono text-[11px] max-lg:text-xs font-semibold">{fmt(classCode(row))}</span>
+        <span class="data-num text-[11px] max-lg:text-xs font-semibold">{fmt(classCode(row))}</span>
         {#if quotaLabel(row)}
           <span
             class="rounded border border-border bg-muted px-1 text-[9px] leading-tight font-medium tracking-wide uppercase text-muted-foreground"
@@ -348,7 +351,7 @@ import { journeysHref, trainHref } from '$lib/utils.js'
           </span>
         {/if}
       </span>
-      <span class="font-mono text-[11px] max-lg:text-xs tabular-nums">{fare != null ? `₹${fare.toLocaleString('en-IN')}` : ''}</span>
+      <span class="data-num text-[11px] max-lg:text-xs">{fare != null ? `₹${fare.toLocaleString('en-IN')}` : ''}</span>
     </div>
     <div class="flex min-w-0 items-center gap-1 text-[10px] max-lg:text-sm max-lg:font-medium">
       <span class="size-1.5 shrink-0 rounded-full bg-current opacity-80"></span>
@@ -359,12 +362,11 @@ import { journeysHref, trainHref } from '$lib/utils.js'
 {/snippet}
 
 <section class="grid grid-cols-[minmax(0,1fr)] gap-3">
-  <div class="flex flex-wrap items-baseline gap-x-3 gap-y-0">
-    <h1 class="text-xl font-semibold tracking-tight">Availability</h1>
-    <p class="text-xs max-lg:hidden text-muted-foreground">
-      Class-wise availability, fares and confirm chances across every train.
-    </p>
-  </div>
+  <PageHeader
+    size="sm"
+    title="Availability"
+    description="Class-wise availability, fares and confirm chances across every train."
+  />
 
   {#if !embedded}
     <form
@@ -475,23 +477,23 @@ import { journeysHref, trainHref } from '$lib/utils.js'
           class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs"
           role="status"
         >
-          <span><span class="font-mono font-semibold tabular-nums">{trains.length}</span> <span class="text-muted-foreground">trains</span></span>
+          <span><span class="data-num font-semibold">{trains.length}</span> <span class="text-muted-foreground">trains</span></span>
           <span class="inline-flex items-center gap-1">
-            <span class="size-1.5 rounded-full {stats.availRows > 0 ? 'bg-emerald-500' : 'bg-red-500'}"></span>
-            <span class="font-medium tabular-nums">{stats.availRows}</span>
+            <SignalDot tone={stats.availRows > 0 ? 'go' : 'stop'} />
+            <span class="data-num font-medium">{stats.availRows}</span>
             <span class="text-muted-foreground">classes open now</span>
           </span>
           {#if stats.cheapest}
             <span>
               <span class="text-muted-foreground">Cheapest</span>
-              <span class="font-mono font-medium">₹{stats.cheapest.fare.toLocaleString('en-IN')}</span>
+              <span class="data-num font-medium">₹{stats.cheapest.fare.toLocaleString('en-IN')}</span>
               <span class="text-muted-foreground">· {stats.cheapest.cls}{stats.cheapest.number ? ` · ${stats.cheapest.number}` : ''}</span>
             </span>
           {/if}
           {#if stats.bestChance}
             <span>
               <span class="text-muted-foreground">Best chance</span>
-              <span class="font-mono font-medium tabular-nums">{stats.bestChance.pct}%</span>
+              <span class="data-num font-medium">{stats.bestChance.pct}%</span>
               <span class="text-muted-foreground">· {stats.bestChance.cls}{stats.bestChance.number ? ` · ${stats.bestChance.number}` : ''}</span>
             </span>
           {/if}
@@ -533,7 +535,7 @@ import { journeysHref, trainHref } from '$lib/utils.js'
                   aria-pressed={!hiddenClasses.includes(c)}
                   title={hiddenClasses.includes(c) ? `Show ${c}` : `Hide ${c}`}
                   onclick={() => toggleClass(c)}
-                  class={`inline-flex h-6 max-lg:h-11 cursor-pointer items-center rounded-md border px-2 max-lg:px-3.5 font-mono text-[11px] max-lg:text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                  class={`inline-flex h-6 max-lg:h-11 cursor-pointer items-center rounded-md border px-2 max-lg:px-3.5 data-num text-[11px] max-lg:text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
                     hiddenClasses.includes(c)
                       ? 'border-border text-muted-foreground opacity-50 hover:opacity-100'
                       : 'border-transparent bg-secondary text-secondary-foreground hover:bg-secondary/80'
@@ -611,6 +613,8 @@ import { journeysHref, trainHref } from '$lib/utils.js'
         </div>
       </div>
 
+      <div class="track-rule" aria-hidden="true"></div>
+
       {#if filteredTrains.length === 0}
         <Card.Root>
           <Card.Content class="py-8 text-center text-sm text-muted-foreground">
@@ -629,7 +633,7 @@ import { journeysHref, trainHref } from '$lib/utils.js'
                     <span class="truncate text-sm font-medium">{asText(tr?.name)}</span>
                     <TrainDelayBadge number={tr?.number} name={tr?.name} compact />
                   </div>
-                  <div class="mt-0.5 font-mono text-[11px] max-lg:text-xs tabular-nums text-muted-foreground">
+                  <div class="data-num mt-0.5 text-[11px] max-lg:text-xs text-muted-foreground">
                     {fmt(tr?.departure_time)} → {fmt(tr?.arrival_time)} · {durationLabel(tr)}
                   </div>
                 </div>
@@ -637,13 +641,13 @@ import { journeysHref, trainHref } from '$lib/utils.js'
                   {#each matrixClasses as c (c)}
                     {@const row = visibleRows(tr).find((r) => classCode(r) === c)}
                     <div class="grid content-start gap-0.5">
-                      <span class="font-mono text-[10px] leading-tight font-medium tracking-wide uppercase text-muted-foreground">
+                      <span class="data-num text-[10px] leading-tight font-medium tracking-wide uppercase text-muted-foreground">
                         {c}
                       </span>
                       {#if row}
                         <AvailabilityStatusBadge status={row?.status} size="xs" class="max-w-full" />
                         {#if numOrNull(row?.fare) != null}
-                          <span class="font-mono text-[11px] max-lg:text-xs tabular-nums text-muted-foreground">
+                          <span class="data-num text-[11px] max-lg:text-xs text-muted-foreground">
                             ₹{numOrNull(row?.fare).toLocaleString('en-IN')}
                           </span>
                         {/if}
@@ -668,7 +672,7 @@ import { journeysHref, trainHref } from '$lib/utils.js'
                   Train
                 </Table.Head>
                 {#each matrixClasses as c (c)}
-                  <Table.Head class="text-center font-mono" scope="col">{c}</Table.Head>
+                  <Table.Head class="text-center data-num" scope="col">{c}</Table.Head>
                 {/each}
               </Table.Row>
             </Table.Header>
@@ -681,7 +685,7 @@ import { journeysHref, trainHref } from '$lib/utils.js'
                       <span class="max-w-36 truncate font-medium">{asText(tr?.name)}</span>
                       <TrainDelayBadge number={tr?.number} name={tr?.name} compact />
                     </div>
-                    <div class="mt-0.5 font-mono text-[10px] tabular-nums text-muted-foreground">
+                    <div class="data-num mt-0.5 text-[10px] text-muted-foreground">
                       {fmt(tr?.departure_time)} → {fmt(tr?.arrival_time)} · {durationLabel(tr)}
                     </div>
                   </Table.Cell>
@@ -693,7 +697,7 @@ import { journeysHref, trainHref } from '$lib/utils.js'
                           <AvailabilityStatusBadge status={row?.status} size="xs" class="max-w-28 truncate" />
                         </div>
                         {#if numOrNull(row?.fare) != null}
-                          <div class="mt-0.5 font-mono text-[10px] tabular-nums text-muted-foreground">
+                          <div class="data-num mt-0.5 text-[10px] text-muted-foreground">
                             ₹{numOrNull(row?.fare).toLocaleString('en-IN')}
                           </div>
                         {/if}
@@ -743,7 +747,7 @@ import { journeysHref, trainHref } from '$lib/utils.js'
                     {#if flags}
                       <RunsOnBadges {flags} format="letter" />
                     {/if}
-                    <span class="font-mono text-xs tabular-nums text-muted-foreground">
+                    <span class="data-num text-xs text-muted-foreground">
                       {fmt(tr?.departure_time)} → {fmt(tr?.arrival_time)} · {durationLabel(tr)}
                     </span>
                     {#if asText(tr?.number)}

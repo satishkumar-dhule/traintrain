@@ -19,12 +19,29 @@ import RouteContextBar from '$lib/components/RouteContextBar.svelte'
 import EntityChip from '$lib/components/EntityChip.svelte'
 import ResultMeta from '$lib/components/ResultMeta.svelte'
 import StatPill from '$lib/components/StatPill.svelte'
+import SignalDot from '$lib/components/SignalDot.svelte'
 import {
   PnrStatusBadge,
+  pnrStatusKind,
   DataSourceBadge,
   StatusBadge,
   TrainDelayBadge
 } from '$lib/components/badges/index.js'
+
+  /* Chart-lamp tone for a passenger row: confirmed→go, RAC/waitlist→hold,
+     cancelled/flushed→stop, anything else stays dark (idle). */
+  function chartTone(p) {
+    const head = String(p?.current_status ?? p?.booking_status ?? '')
+      .trim()
+      .toUpperCase()
+      .split(/[\s/-]/)[0]
+    if (head === 'FLW' || head === 'FLUSHED') return 'stop'
+    const kind = pnrStatusKind(p?.current_status ?? p?.booking_status)
+    if (kind === 'confirmed') return 'go'
+    if (kind === 'rac' || kind === 'waitlist') return 'hold'
+    if (kind === 'cancelled') return 'stop'
+    return 'idle'
+  }
 
   const RECENT_KEY = 'rc-pnr-recent'
 
@@ -148,19 +165,22 @@ import {
     {
       key: 'n',
       label: '#',
-      class: 'w-12',
+      class: 'w-12 uppercase tracking-wide text-muted-foreground',
       sortable: false,
       value: (p) => String(passengers.indexOf(p) + 1),
     },
-    { key: 'booking_status', label: 'Booking status', value: (p) => fmt(p.booking_status) },
-    { key: 'coach', label: 'Coach', cellClass: 'font-mono', value: (p) => fmt(p.coach) },
-    { key: 'berth', label: 'Berth', cellClass: 'font-mono', value: (p) => fmt(p.berth) },
-    { key: 'current_status', label: 'Current', cellClass: 'font-mono', value: (p) => fmt(p.current_status) },
+    { key: 'booking_status', label: 'Booking status', class: 'uppercase tracking-wide text-muted-foreground', value: (p) => fmt(p.booking_status) },
+    { key: 'coach', label: 'Coach', class: 'uppercase tracking-wide text-muted-foreground', cellClass: 'data-num', value: (p) => fmt(p.coach) },
+    { key: 'berth', label: 'Berth', class: 'uppercase tracking-wide text-muted-foreground', cellClass: 'data-num', value: (p) => fmt(p.berth) },
+    { key: 'current_status', label: 'Current', class: 'uppercase tracking-wide text-muted-foreground', cellClass: 'data-num', value: (p) => fmt(p.current_status) },
   ]
 </script>
 
 {#snippet numCell(p)}
-  <span class="text-muted-foreground">{passengers.indexOf(p) + 1}</span>
+  <span class="flex items-center gap-1.5">
+    <SignalDot tone={chartTone(p)} />
+    <span class="data-num text-muted-foreground">{passengers.indexOf(p) + 1}</span>
+  </span>
 {/snippet}
 
 {#snippet bookingCell(p)}
@@ -194,6 +214,7 @@ import {
           placeholder="e.g. 1234567890"
           inputmode="numeric"
           maxlength={10}
+          class="data-num"
           onkeydown={(e) => e.key === 'Enter' && !e.defaultPrevented && lookup()}
         />
         {#if query && !valid}
@@ -266,6 +287,7 @@ import {
       <Card.Header class="gap-3 space-y-0">
         <div class="flex flex-wrap items-center justify-between gap-2">
           <Card.Title class="flex flex-wrap items-center gap-2">
+            <span class="data-num text-xl leading-none font-semibold text-primary sm:text-2xl" title="PNR {committed}">{committed}</span>
             <EntityChip type="train" code={data.train_number} name={data.train_name} />
             <span>{data.train_name ?? ''}</span>
             <TrainDelayBadge number={data.train_number} name={data.train_name} />
@@ -279,7 +301,7 @@ import {
           <div class="grid min-w-24 sm:min-w-28 gap-0.5 min-w-0">
             <EntityChip type="station" code={data.from?.code} name={data.from?.name} size="sm" />
             <span class="truncate text-xs text-muted-foreground [overflow-wrap:anywhere]">{fmt(data.from?.name)}</span>
-            <span class="text-xs text-muted-foreground">
+            <span class="data-num text-xs text-muted-foreground">
               {fmt(data.from?.time)}{#if data.from?.day}&nbsp;· day {data.from.day}{/if}
             </span>
           </div>
@@ -287,14 +309,14 @@ import {
           <div class="grid min-w-24 sm:min-w-28 gap-0.5 min-w-0">
             <EntityChip type="station" code={data.to?.code} name={data.to?.name} size="sm" />
             <span class="truncate text-xs text-muted-foreground [overflow-wrap:anywhere]">{fmt(data.to?.name)}</span>
-            <span class="text-xs text-muted-foreground">
+            <span class="data-num text-xs text-muted-foreground">
               {fmt(data.to?.time)}{#if data.to?.day}&nbsp;· day {data.to.day}{/if}
             </span>
           </div>
-          <StatusBadge tone="info" class="ml-auto shrink-0 max-lg:w-full max-lg:justify-center">journey {fmt(data.journey_date)}</StatusBadge>
+          <StatusBadge tone="info" class="data-num ml-auto shrink-0 max-lg:w-full max-lg:justify-center">journey {fmt(data.journey_date)}</StatusBadge>
         </div>
       </Card.Header>
-      <Card.Content>
+      <Card.Content class="border-t border-dashed pt-3">
         <DataTable
           columns={cols}
           rows={passengers}
@@ -307,6 +329,7 @@ import {
       </Card.Content>
     </Card.Root>
     {#if notice || lastUpdated}
+      <div class="track-rule" aria-hidden="true"></div>
       <div class="flex flex-wrap items-center gap-x-3 gap-y-1 px-1 text-xs text-muted-foreground">
         {#if notice}
           <span class="max-w-full truncate" title={notice}>{notice}</span>

@@ -148,6 +148,11 @@
 </script>
 
 <div class="min-h-screen bg-background">
+  <!-- Livery stripe: coach indigo / saffron / signal green, as on rolling stock. -->
+  <div aria-hidden="true" class="fixed inset-x-0 top-0 z-50 hidden h-1 lg:flex">
+    <span class="flex-1 bg-primary"></span><span class="w-24 bg-saffron"></span
+    ><span class="w-12 bg-signal-go"></span>
+  </div>
   <aside
     class="fixed inset-y-0 left-0 z-40 hidden w-60 flex-col border-r bg-sidebar text-sidebar-foreground lg:flex"
   >
@@ -155,7 +160,7 @@
       <span class="flex size-8 items-center justify-center rounded-md bg-primary text-primary-foreground">
         <TrainFront class="size-4" />
       </span>
-      <span class="font-semibold tracking-tight">Train Bro</span>
+      <span class="signage text-sm">Train Bro</span>
     </a>
     <nav class="flex-1 space-y-1 overflow-y-auto p-3">
       <a
@@ -171,7 +176,7 @@
         {homeItem.label}
       </a>
       {#each groups as group (group.label)}
-        <div class="px-3 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{group.label}</div>
+        <div class="px-3 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">{group.label}</div>
         {#each group.items as item (item.href)}
           <a
             href={item.href}
@@ -205,7 +210,7 @@
 
   <header
     onfocusin={revealChrome}
-    class={`sticky top-0 z-30 flex h-[calc(3.25rem+env(safe-area-inset-top))] items-center gap-0.5 border-b bg-background/95 px-2 pt-[env(safe-area-inset-top)] backdrop-blur transition-transform duration-200 supports-[backdrop-filter]:bg-background/80 motion-reduce:transition-none lg:hidden ${
+    class={`sticky top-0 z-30 flex h-[calc(3rem+env(safe-area-inset-top))] items-center gap-0.5 border-b bg-background/95 px-2 pt-[env(safe-area-inset-top)] backdrop-blur transition-transform duration-200 supports-[backdrop-filter]:bg-background/80 motion-reduce:transition-none lg:hidden ${
       chromeHidden ? 'max-lg:-translate-y-full' : 'translate-y-0'
     }`}
   >
@@ -217,7 +222,7 @@
       <span class="flex size-7 items-center justify-center rounded-md bg-primary text-primary-foreground">
         <TrainFront class="size-4" />
       </span>
-      <span class="whitespace-nowrap font-semibold tracking-tight">Train Bro</span>
+      <span class="signage whitespace-nowrap text-xs">Train Bro</span>
     </a>
     <div class="ml-auto flex items-center gap-1">
       <SourceTrustChip />
@@ -243,7 +248,7 @@
           <span class="h-1.5 w-10 rounded-full bg-muted-foreground/25"></span>
         </div>
         <div class="flex items-center justify-between pl-5 pr-2 pt-1">
-          <span class="text-sm font-semibold tracking-tight">More</span>
+          <span class="signage text-xs">More</span>
           <button
             type="button"
             class="flex size-11 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
@@ -268,7 +273,7 @@
             {homeItem.label}
           </a>
           {#each sheetGroups as group (group.label)}
-            <div class="px-3.5 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{group.label}</div>
+            <div class="px-3.5 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">{group.label}</div>
             {#each group.items as item (item.href)}
               <a
                 href={item.href}
@@ -304,7 +309,7 @@
   <div class="lg:pl-60">
     <VisitTrail />
     <main
-      class="mx-auto w-full max-w-5xl px-4 pt-4 md:px-8 md:pt-10 max-lg:pb-[calc(7rem+env(safe-area-inset-bottom))] lg:pb-[calc(2rem+env(safe-area-inset-bottom))]"
+      class="mx-auto w-full max-w-5xl px-3 pt-3 max-lg:px-4 max-lg:pt-4 md:px-8 md:pt-10 max-lg:pb-[calc(6rem+env(safe-area-inset-bottom))] lg:pb-[calc(2rem+env(safe-area-inset-bottom))]"
     >
       {@render children()}
     </main>
@@ -324,10 +329,13 @@
           href={item.href}
           onclick={(e) => go(e, item.href)}
           aria-current={isActive(item) ? 'page' : undefined}
-          class={`flex min-h-12 flex-col items-center justify-center gap-0.5 px-1 pt-0.5 text-[10px] font-medium transition-colors ${
+          class={`relative flex min-h-12 flex-col items-center justify-center gap-0.5 px-1 pt-0.5 text-[10px] font-medium transition-colors ${
             isActive(item) ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
           }`}
         >
+          {#if isActive(item)}
+            <span aria-hidden="true" class="absolute inset-x-4 top-0 h-0.5 rounded-full bg-primary"></span>
+          {/if}
           <item.icon class="size-5" />
           {item.short ?? item.label}
         </a>
@@ -337,9 +345,9 @@
         onclick={() => (mobileOpen = true)}
         aria-expanded={mobileOpen}
         aria-haspopup="dialog"
-        class="flex min-h-12 flex-col items-center justify-center gap-0.5 px-1 pt-0.5 text-[10px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+        class="flex min-h-11 flex-col items-center justify-center gap-0.5 px-1 pt-0.5 text-[10px] font-medium text-muted-foreground transition-colors hover:text-foreground"
       >
-        <EllipsisIcon class="size-5" />
+        <EllipsisIcon class="size-4.5" />
         More
       </button>
     </div>

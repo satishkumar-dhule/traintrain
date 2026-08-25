@@ -91,7 +91,7 @@
         <Card.Root class="gap-1 py-3">
           <Card.Title class="text-xs font-medium uppercase tracking-wide text-muted-foreground">Live enabled</Card.Title>
           <Card.Description
-            class={`text-lg font-semibold ${state.data.live_enabled ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}
+            class={`text-lg font-semibold ${state.data.live_enabled ? 'text-signal-go-ink' : 'text-signal-stop-ink'}`}
           >
             {state.data.live_enabled ? 'Yes' : 'No'}
           </Card.Description>

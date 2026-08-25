@@ -3,11 +3,12 @@
   import { api } from '$lib/api.js'
   import { viewport } from '$lib/media.svelte.js'
   import SourceStatus from '$lib/SourceStatus.svelte'
+  import SignalDot from '$lib/components/SignalDot.svelte'
   import * as Card from '$lib/components/ui/card/index.js'
   import { Skeleton } from '$lib/components/ui/skeleton/index.js'
   import * as Alert from '$lib/components/ui/alert/index.js'
   import { Button } from '$lib/components/ui/button/index.js'
-  import { StatusBadge, LogLevelBadge, CountBadge } from '$lib/components/badges/index.js'
+  import { LogLevelBadge, CountBadge } from '$lib/components/badges/index.js'
   import Activity from 'lucide-svelte/icons/activity'
   import RefreshCw from 'lucide-svelte/icons/refresh-cw'
   import Clock from 'lucide-svelte/icons/clock'
@@ -132,28 +133,28 @@
       label: 'Request rate',
       fmt: (v) => (num(v) === null ? '—' : String(num(v))),
       rangeFmt: (v) => String(v),
-      bar: 'bg-sky-500'
+      bar: 'bg-chart-1'
     },
     {
       key: 'latency_ms',
       label: 'Latency',
       fmt: (v) => (num(v) === null ? '—' : `${num(v)} ms`),
       rangeFmt: (v) => `${v} ms`,
-      bar: 'bg-violet-500'
+      bar: 'bg-chart-2'
     },
     {
       key: 'mem_mb',
       label: 'Memory',
       fmt: (v) => (num(v) === null ? '—' : `${num(v)} MB`),
       rangeFmt: (v) => `${v} MB`,
-      bar: 'bg-emerald-500'
+      bar: 'bg-chart-3'
     },
     {
       key: 'cpu_frac',
       label: 'CPU',
       fmt: pctFromFrac,
       rangeFmt: (v) => `${(v * 100).toFixed(1)}%`,
-      bar: 'bg-amber-500'
+      bar: 'bg-chart-4'
     }
   ]
 
@@ -187,11 +188,11 @@
   }
 
   function codeClass(code) {
-    if (code >= 200 && code < 300) return 'bg-emerald-500'
-    if (code >= 300 && code < 400) return 'bg-sky-500'
-    if (code >= 400 && code < 500) return 'bg-amber-500'
-    if (code >= 500 && code < 600) return 'bg-red-500'
-    return 'bg-zinc-500'
+    if (code >= 200 && code < 300) return 'bg-signal-go'
+    if (code >= 300 && code < 400) return 'bg-chart-3'
+    if (code >= 400 && code < 500) return 'bg-signal-hold'
+    if (code >= 500 && code < 600) return 'bg-signal-stop'
+    return 'bg-muted-foreground/40'
   }
 
   function cacheValue(key, v) {
@@ -374,7 +375,7 @@
       key: 'requests',
       label: 'Requests',
       class: 'w-28',
-      cellClass: 'font-mono text-xs tabular-nums',
+      cellClass: 'data-num text-xs',
       value: (o) => (num(o.requests) ?? 0).toLocaleString(),
       sortValue: (o) => num(o.requests) ?? 0
     },
@@ -390,15 +391,15 @@
   const logCols = [
     { key: 'time', label: 'Time', class: 'w-28', cellClass: 'font-mono text-xs max-lg:text-sm', value: (l) => tsTime(l?.ts), sortValue: (l) => num(l?.ts) },
     { key: 'level', label: 'Level', class: 'w-24', value: (l) => String(l?.level ?? '').toLowerCase() },
-    { key: 'event', label: 'Event', cellClass: 'max-w-md truncate font-mono text-xs', value: (l) => logLine(l) }
+    { key: 'event', label: 'Event', cellClass: 'max-w-md truncate data-num text-xs', value: (l) => logLine(l) }
   ]
 
   const toneChip = {
-    sky: 'bg-sky-500/10 text-sky-600 dark:text-sky-400',
-    violet: 'bg-violet-500/10 text-violet-600 dark:text-violet-400',
-    emerald: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
-    amber: 'bg-amber-500/10 text-amber-600 dark:text-amber-400',
-    rose: 'bg-red-500/10 text-red-600 dark:text-red-400',
+    sky: 'bg-primary/10 text-primary',
+    violet: 'bg-chart-3/10 text-chart-3',
+    emerald: 'bg-signal-go/10 text-signal-go-ink',
+    amber: 'bg-signal-hold/10 text-signal-hold-ink',
+    rose: 'bg-signal-stop/10 text-signal-stop-ink',
     slate: 'bg-muted text-muted-foreground'
   }
 
@@ -412,7 +413,7 @@
 {#snippet latencyCell(o)}
   <div class="flex items-center gap-2">
     <span
-      class={`w-16 shrink-0 text-right font-mono text-xs tabular-nums ${(num(o.latency) ?? 0) <= 0 ? 'text-muted-foreground' : ''}`}
+      class={`w-16 shrink-0 text-right data-num text-xs ${(num(o.latency) ?? 0) <= 0 ? 'text-muted-foreground' : ''}`}
     >
       {o.latency} ms
     </span>
@@ -423,11 +424,15 @@
 {/snippet}
 
 {#snippet originStatusCell(o)}
-  {#if o.status === 'up' || o.status === 'reachable'}
-    <StatusBadge tone="success" dot>up</StatusBadge>
-  {:else}
-    <StatusBadge tone="danger" dot>{o.status}</StatusBadge>
-  {/if}
+  <span class="inline-flex items-center gap-1.5 text-xs">
+    {#if o.status === 'up' || o.status === 'reachable'}
+      <SignalDot tone="go" pulse />
+      <span class="text-signal-go-ink">up</span>
+    {:else}
+      <SignalDot tone="stop" />
+      <span class="text-signal-stop-ink">{o.status}</span>
+    {/if}
+  </span>
 {/snippet}
 
 {#snippet logLevelCell(l)}
@@ -438,13 +443,13 @@
   {#if !viewport.narrow}
     <div class="grid gap-1">
       <div class="flex flex-wrap items-center justify-between gap-3">
-        <h1 class="flex items-center gap-2 text-2xl font-semibold tracking-tight">
+        <h1 class="signage flex items-center gap-2 text-2xl">
           <Activity class="size-5 text-muted-foreground" />
           System
         </h1>
         <div class="flex items-center gap-4">
           {#if updatedAt && !note}
-            <span class="hidden text-xs text-muted-foreground sm:inline">
+            <span class="hidden text-xs text-muted-foreground data-num sm:inline">
               Updated {updatedTime(updatedAt)}
             </span>
           {/if}
@@ -480,6 +485,8 @@
       {/if}
     </div>
   {/if}
+
+  <div class="track-rule" aria-hidden="true"></div>
 
   <div class="grid gap-2">
     <h2 class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Overview</h2>
@@ -522,7 +529,7 @@
           {#each runtimeStats as [label, value] (label)}
             <div class="grid gap-0.5 bg-card px-2 py-1.5 lg:px-3 lg:py-2.5">
               <span class="text-[9px] font-medium uppercase tracking-wide text-muted-foreground lg:text-[10px]">{label}</span>
-              <span class="truncate font-mono text-xs font-semibold tabular-nums lg:text-sm" title={value}>{value}</span>
+              <span class="truncate data-num text-xs font-semibold lg:text-sm" title={value}>{value}</span>
             </div>
           {/each}
         </div>
@@ -547,7 +554,7 @@
           {@const range = seriesRange(seriesArr)}
           <Card.Root class="gap-1 py-2 lg:gap-2 lg:py-4">
             <Card.Title class="px-3 text-[10px] font-medium uppercase tracking-wide text-muted-foreground lg:px-4 lg:text-xs">{s.label}</Card.Title>
-            <Card.Description class="px-3 font-mono text-base font-semibold tabular-nums lg:px-4 lg:text-lg">{s.fmt(lastVal)}</Card.Description>
+            <Card.Description class="px-3 data-num text-base font-semibold lg:px-4 lg:text-lg">{s.fmt(lastVal)}</Card.Description>
             <Card.Content class="px-3 lg:px-4">
               {#if pts.length}
                 <div class="flex h-10 items-end gap-[2px] lg:h-14" role="img" aria-label={`${s.label} sparkline, last ${pts.length} samples`}>
@@ -612,8 +619,8 @@
               <ol class="grid gap-2">
                 {#each paths as p, i (p[0])}
                   <li class="flex items-center gap-3">
-                    <span class="w-5 text-right font-mono text-xs text-muted-foreground">{i + 1}.</span>
-                    <span class="min-w-0 flex-1 truncate font-mono text-xs">{String(p[0])}</span>
+                    <span class="w-5 text-right data-num text-xs text-muted-foreground">{i + 1}.</span>
+                    <span class="min-w-0 flex-1 truncate data-num text-xs">{String(p[0])}</span>
                     <CountBadge value={Number(p[1])} />
                   </li>
                 {/each}
@@ -644,7 +651,7 @@
                 {#each statusBars as s (`legend-${s.code}`)}
                   <span class="flex items-center gap-1.5 text-xs text-muted-foreground">
                     <span class={`inline-block size-2 rounded-sm ${s.cls}`} aria-hidden="true"></span>
-                    <span class="font-mono">{s.code}</span> × {s.count.toLocaleString()}
+                    <span class="data-num">{s.code}</span> × {s.count.toLocaleString()}
                   </span>
                 {/each}
               </div>
@@ -667,7 +674,7 @@
               {#each cacheEntries as e (e.key)}
                 <div class="flex items-baseline justify-between gap-2 border-b pb-1 lg:gap-3">
                   <dt class="text-[10px] uppercase tracking-wide text-muted-foreground lg:text-xs">{e.label}</dt>
-                  <dd class="truncate font-mono text-xs font-medium max-lg:whitespace-normal max-lg:break-words lg:text-sm" title={e.value}>{e.value}</dd>
+                  <dd class="truncate data-num text-xs font-medium max-lg:whitespace-normal max-lg:break-words lg:text-sm" title={e.value}>{e.value}</dd>
                 </div>
               {/each}
             </dl>

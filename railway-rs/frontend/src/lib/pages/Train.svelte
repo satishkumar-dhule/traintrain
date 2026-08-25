@@ -22,11 +22,13 @@ import {
   HaltStatusBadge,
   StatusBadge,
   ExceptionKindBadge,
-  parseDelayMinutes
+  parseDelayMinutes,
+  haltStatusKind
 } from '$lib/components/badges/index.js'
 import { primeTrainDelay } from '$lib/trainDelay.svelte.js'
 import RouteMap from '$lib/components/RouteMap.svelte'
 import PageHeader from '$lib/components/PageHeader.svelte'
+import SignalDot from '$lib/components/SignalDot.svelte'
 import Breadcrumbs from '$lib/components/Breadcrumbs.svelte'
 import RouteContextBar from '$lib/components/RouteContextBar.svelte'
 import EntityChip from '$lib/components/EntityChip.svelte'
@@ -379,8 +381,8 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
   const statusCols = $derived.by(() => {
     const cols = [
       { key: 'station', label: 'Station', value: (s) => `${s.name ?? ''} ${s.code ?? ''}` },
-      { key: 'sched', label: 'Sched', cellClass: 'font-mono text-xs max-lg:text-sm', value: (s) => fmtTime(s.scheduled_arrival) },
-      { key: 'actual', label: 'Actual', cellClass: 'font-mono text-xs max-lg:text-sm', value: (s) => fmtTime(s.actual_arrival) },
+      { key: 'sched', label: 'Sched', cellClass: 'data-num text-xs max-lg:text-sm', value: (s) => fmtTime(s.scheduled_arrival) },
+      { key: 'actual', label: 'Actual', cellClass: 'data-num text-xs max-lg:text-sm', value: (s) => fmtTime(s.actual_arrival) },
       {
         key: 'delay',
         label: 'Delay',
@@ -396,21 +398,21 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
       },
     ]
     if (statusRows.some((s) => s?.platform)) {
-      cols.splice(1, 0, { key: 'pf', label: 'PF', cellClass: 'font-mono text-xs max-lg:text-sm', value: (s) => String(s.platform ?? '') })
+      cols.splice(1, 0, { key: 'pf', label: 'PF', cellClass: 'data-num text-xs max-lg:text-sm', value: (s) => String(s.platform ?? '') })
     }
     return cols
   })
 
   const schedCols = [
-    { key: 'code', label: 'Code', cellClass: 'font-mono text-xs max-lg:text-sm', value: (s) => s.code },
+    { key: 'code', label: 'Code', cellClass: 'data-num text-xs max-lg:text-sm', value: (s) => s.code },
     { key: 'station', label: 'Station', cellClass: 'font-medium', value: (s) => s.name },
-    { key: 'arrival', label: 'Arr', cellClass: 'font-mono text-xs max-lg:text-sm', value: (s) => fmtTime(s.arrival) },
-    { key: 'departure', label: 'Dep', cellClass: 'font-mono text-xs max-lg:text-sm', value: (s) => fmtTime(s.departure) },
+    { key: 'arrival', label: 'Arr', cellClass: 'data-num text-xs max-lg:text-sm', value: (s) => fmtTime(s.arrival) },
+    { key: 'departure', label: 'Dep', cellClass: 'data-num text-xs max-lg:text-sm', value: (s) => fmtTime(s.departure) },
     {
       key: 'distance',
       label: 'Dist',
       class: 'w-20',
-      cellClass: 'font-mono text-xs max-lg:text-sm',
+      cellClass: 'data-num text-xs max-lg:text-sm',
       value: (s) => (s.distance_km == null ? '' : `${s.distance_km}`),
       sortValue: (s) => numOrNull(s.distance_km),
     },
@@ -418,7 +420,7 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
       key: 'day',
       label: 'Day',
       class: 'w-16',
-      cellClass: 'font-mono text-xs max-lg:text-sm',
+      cellClass: 'data-num text-xs max-lg:text-sm',
       value: (s) => (s.day == null ? '' : String(s.day)),
       sortValue: (s) => numOrNull(s.day),
     },
@@ -441,15 +443,15 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
   ]
 
   const mapCols = [
-    { key: 'code', label: 'Code', cellClass: 'font-mono text-xs max-lg:text-sm', value: (s) => s.code },
+    { key: 'code', label: 'Code', cellClass: 'data-num text-xs max-lg:text-sm', value: (s) => s.code },
     { key: 'station', label: 'Station', cellClass: 'font-medium', value: (s) => s.name },
-    { key: 'arrival', label: 'Arr', cellClass: 'font-mono text-xs max-lg:text-sm', value: (s) => fmtTime(s.arrival) },
-    { key: 'departure', label: 'Dep', cellClass: 'font-mono text-xs max-lg:text-sm', value: (s) => fmtTime(s.departure) },
+    { key: 'arrival', label: 'Arr', cellClass: 'data-num text-xs max-lg:text-sm', value: (s) => fmtTime(s.arrival) },
+    { key: 'departure', label: 'Dep', cellClass: 'data-num text-xs max-lg:text-sm', value: (s) => fmtTime(s.departure) },
     {
       key: 'day',
       label: 'Day',
       class: 'w-16',
-      cellClass: 'font-mono text-xs max-lg:text-sm',
+      cellClass: 'data-num text-xs max-lg:text-sm',
       value: (s) => String(s.day ?? ''),
       sortValue: (s) => numOrNull(s.day),
     },
@@ -457,12 +459,12 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
       key: 'distance',
       label: 'Dist (km)',
       class: 'w-24',
-      cellClass: 'font-mono text-xs max-lg:text-sm',
+      cellClass: 'data-num text-xs max-lg:text-sm',
       value: (s) => String(s.distance ?? ''),
       sortValue: (s) => numOrNull(s.distance),
     },
-    { key: 'exp_arrival', label: 'Exp. arr', cellClass: 'font-mono text-xs max-lg:text-sm', value: (s) => fmtTime(s.expected_arrival) },
-    { key: 'exp_departure', label: 'Exp. dep', cellClass: 'font-mono text-xs max-lg:text-sm', value: (s) => fmtTime(s.expected_departure) },
+    { key: 'exp_arrival', label: 'Exp. arr', cellClass: 'data-num text-xs max-lg:text-sm', value: (s) => fmtTime(s.expected_arrival) },
+    { key: 'exp_departure', label: 'Exp. dep', cellClass: 'data-num text-xs max-lg:text-sm', value: (s) => fmtTime(s.expected_departure) },
     {
       key: 'delay',
       label: 'Spot delay',
@@ -553,8 +555,11 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
 </script>
 
 {#snippet statusStationCell(s)}
-  <span class="font-medium">{s.name}</span>
-  <span class="ml-2"><StationCodeBadge code={s.code} name={s.name} /></span>
+  <span class="flex flex-wrap items-center gap-2">
+    {#if haltStatusKind(s.status) === 'live'}<SignalDot tone="go" pulse />{/if}
+    <span class="font-medium">{s.name}</span>
+    <span class="ml-0.5"><StationCodeBadge code={s.code} name={s.name} /></span>
+  </span>
 {/snippet}
 
 {#snippet statusDelayCell(s)}
@@ -588,14 +593,16 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
     <div class="h-2 flex-1 overflow-hidden rounded bg-muted">
       <div class="h-full rounded bg-primary" style={`width:${pct ?? 0}%`}></div>
     </div>
-    <span class="w-12 shrink-0 text-right font-mono text-xs">{delayLabel(s[key])}</span>
+    <span class="data-num w-12 shrink-0 text-right text-xs">{delayLabel(s[key])}</span>
   </div>
 {/snippet}
 
 {#snippet mapCodeCell(s)}
   <span class="inline-flex items-center gap-2">
     {#if isCurrentStop(s.code)}
-      <span class="size-2 shrink-0 rounded-full bg-red-500" aria-label="current position"></span>
+      <span class="inline-flex" aria-label="current position">
+        <SignalDot tone="go" pulse />
+      </span>
     {/if}
     <StationCodeBadge code={s.code} name={s.name} />
   </span>
@@ -616,7 +623,7 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
 {/snippet}
 
 {#snippet excDateCell(e)}
-  <span class="font-mono text-xs max-lg:text-sm">{fmtExcDate(e.date)}</span>
+  <span class="data-num text-xs max-lg:text-sm">{fmtExcDate(e.date)}</span>
 {/snippet}
 
 {#snippet excKindCell(e)}
@@ -638,6 +645,8 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
     </PageHeader>
   {/if}
 
+  <div class="track-rule" aria-hidden="true"></div>
+
   {#if committed && viewport.narrow && !searchOpen}
     <button
       type="button"
@@ -645,7 +654,7 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
       onclick={() => (searchOpen = true)}
       aria-expanded="false"
     >
-      <span class="min-w-0 flex-1 truncate font-mono font-medium">{committed}</span>
+      <span class="data-num min-w-0 flex-1 truncate font-medium">{committed}</span>
       <span class="text-xs font-medium text-primary">Change</span>
       <ChevronDownIcon class="size-4 shrink-0 text-muted-foreground" />
     </button>
@@ -678,10 +687,10 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
             type="checkbox"
             checked={auto}
             onchange={(e) => setAuto(e.currentTarget.checked)}
-            class="size-4 accent-[var(--primary)]"
+            class="size-4 accent-primary"
           />
           Auto 30s
-          {#if auto}<span class="font-mono text-xs">next {nextIn}s</span>{/if}
+          {#if auto}<span class="data-num text-xs">next {nextIn}s</span>{/if}
         </label>
       </Card.Content>
     </Card.Root>
@@ -762,6 +771,7 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
                     variant={i === runIdx ? 'default' : 'outline'}
                     aria-pressed={i === runIdx}
                     onclick={() => pickRun(i)}
+                    class="data-num"
                   >
                     {runLabel(inst.start_date)}
                   </Button>
@@ -971,7 +981,7 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
                   <div class="flex flex-wrap items-center gap-2">
                     <StatusBadge tone="info" dot>Current: <EntityChip type="station" code={mapData.current_station.code} name={mapData.current_station.name} /></StatusBadge>
                     {#if mapData.train_name}
-                      <span class="text-sm text-muted-foreground">{mapData.train_no ?? ''} {mapData.train_name}</span>
+                      <span class="text-sm text-muted-foreground"><span class="data-num">{mapData.train_no ?? ''}</span> {mapData.train_name}</span>
                       <TrainDelayBadge number={mapData.train_no} name={mapData.train_name} />
                     {/if}
                   </div>
@@ -984,10 +994,10 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
                       {#if j.label}<span><span class="text-muted-foreground">Status: </span><span class="font-medium">{j.label}</span></span>{/if}
                     </div>
                     <div class="flex flex-wrap gap-x-8 gap-y-1">
-                      {#if j.expected_arrival}<span><span class="text-muted-foreground">Exp. arrival: </span><span class="font-mono">{j.expected_arrival}</span></span>{/if}
-                      {#if j.actual_arrival}<span><span class="text-muted-foreground">Actual arrival: </span><span class="font-mono">{j.actual_arrival}</span></span>{/if}
+                      {#if j.expected_arrival}<span><span class="text-muted-foreground">Exp. arrival: </span><span class="data-num">{j.expected_arrival}</span></span>{/if}
+                      {#if j.actual_arrival}<span><span class="text-muted-foreground">Actual arrival: </span><span class="data-num">{j.actual_arrival}</span></span>{/if}
                       {#if j.delay_status}<StatusBadge tone={/on time/i.test(String(j.delay_status)) ? 'success' : 'warning'} dot class="font-normal">{j.delay_status}</StatusBadge>{/if}
-                      {#if j.platform}<span><span class="text-muted-foreground">Platform: </span><span class="font-medium">{j.platform}</span></span>{/if}
+                      {#if j.platform}<span><span class="text-muted-foreground">Platform: </span><span class="data-num font-medium">{j.platform}</span></span>{/if}
                     </div>
                   </div>
                 {/if}

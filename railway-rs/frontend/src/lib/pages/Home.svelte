@@ -35,10 +35,6 @@
   let pnrErr = $state('')
 
   // ---- Plan from where you are -------------------------------------------
-  // Step 1: "Stations near me" opens a blocking dialog that locates the user
-  // and lists every nearby station; picking one sets the trip origin here.
-  // Step 2: pick a destination (+ date) -> jump straight to the availability
-  // page for that trip instead of mutating the home page.
   function todayISO() {
     const d = new Date()
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
@@ -153,7 +149,6 @@
       goTrain(t)
       return
     }
-    // Free-text name: resolve to a train number via the suggest index.
     trainErr = ''
     trainResolving = true
     const res = await api(`/rail-api/search/suggest?q=${encodeURIComponent(t)}`)
@@ -323,19 +318,23 @@
 
 <section class="grid gap-4 max-lg:gap-3">
   <div class="grid gap-1 max-lg:gap-0.5">
-    <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight">Train Bro</h1>
-    <p class="max-lg:hidden text-sm text-muted-foreground">
+    <p class="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+      <span class="rounded-sm bg-saffron px-1.5 py-px text-[10px] font-bold tracking-[0.12em] text-saffron-ink">
+        Indian Railways
+      </span>
+      Live &amp; free
+    </p>
+    <h1 class="signage text-xl sm:text-2xl max-lg:text-2xl">Train Bro</h1>
+    <p class="max-lg:hidden text-xs text-muted-foreground">
       Live status, PNR, journeys & station boards — free, no accounts.
     </p>
 
-    <div
-      class="flex flex-wrap items-center gap-2 pt-1 max-lg:-mx-4 max-lg:px-4 max-lg:flex-nowrap max-lg:overflow-x-auto max-lg:snap-x [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-    >
-      <span class="max-lg:hidden text-xs text-muted-foreground">Popular trains</span>
+    <div class="flex items-center gap-1 pt-0.5 max-lg:flex-nowrap max-lg:overflow-x-auto max-lg:snap-x">
+      <span class="max-lg:hidden text-[0.75em] text-muted-foreground">Popular trains</span>
       {#each popularTrains as n (n)}
         <button
           type="button"
-          class="inline-flex h-6 items-center rounded-full border px-2.5 font-mono text-xs transition-colors hover:bg-muted hover:text-foreground max-lg:h-9 max-lg:px-3 max-lg:shrink-0 max-lg:snap-start"
+          class="inline-flex h-5 items-center rounded-full border px-1.5 text-[0.75px] transition-colors hover:bg-muted hover:text-foreground max-lg:h-7 max-lg:px-1.5 max-lg:shrink-0 max-lg:snap-start"
           onclick={() => navigate(`/train/${n}`)}
         >
           {n}
@@ -344,53 +343,55 @@
     </div>
   </div>
 
+  <div class="track-rule" aria-hidden="true"></div>
+
   <Card.Root class="transition-colors hover:border-primary/50">
     <form class="grid grid-cols-[minmax(0,1fr)] gap-3 max-lg:gap-2 p-4 max-lg:p-3" onsubmit={submitPlan}>
-      <div class="flex items-start gap-2.5 max-lg:gap-2">
-        <span class="flex size-9 max-lg:size-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-          <MapPinIcon class="size-5 max-lg:size-4" />
+      <div class="flex items-start gap-1.5 max-lg:gap-1">
+        <span class="flex size-8 max-lg:size-6 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+          <MapPinIcon class="size-4 max-lg:size-3" />
         </span>
         <div class="grid gap-0.5">
-          <h2 class="text-sm sm:text-base font-semibold">Plan from where you are</h2>
-          <p class="max-lg:hidden text-sm text-muted-foreground">
-            Find stations around you, pick one as your start, then jump straight to trains and live seat availability.
+          <h2 class="text-[0.85em] sm:text-base font-semibold">Plan from where you are</h2>
+          <p class="max-lg:hidden text-[0.75em] text-muted-foreground">
+            Pick a start station, then choose a destination and journey date.
           </p>
         </div>
       </div>
 
-      <div class="flex flex-wrap items-center gap-1.5 max-lg:gap-1">
-        <Button type="button" variant="outline" onclick={pickOrigin} class="max-lg:h-9 max-lg:text-xs">
-          <MapPinIcon class="max-lg:size-3.5" />
+      <div class="flex flex-wrap items-center gap-0.5 max-lg:gap-0.5">
+        <Button type="button" variant="outline" onclick={pickOrigin} class="max-lg:h-8 max-lg:text-[0.65em]">
+          <MapPinIcon class="max-lg:size-3" />
           {originCode ? 'Change start' : 'Stations near me'}
         </Button>
         {#if originCode}
           <span
-            class="inline-flex items-center gap-1.5 rounded-full border border-primary/40 bg-primary/10 px-2 py-0.5 text-xs font-medium"
+            class="inline-flex items-center gap-0.5 rounded-full border border-primary/40 bg-primary/10 px-1.5 py-0.5 text-[0.65em] font-medium"
           >
             From
             <StationCodeBadge code={originCode} name={originName} link={false} size="xs" />
-            <span class="max-w-32 truncate">{originName || originCode}</span>
+            <span class="max-w-20 truncate">{originName || originCode}</span>
             <button
               type="button"
               aria-label="Clear chosen station"
-              class="inline-flex items-center justify-center max-lg:size-9"
+              class="inline-flex items-center justify-center max-lg:size-7"
               onclick={clearOrigin}
             >
-              <XIcon class="size-3 opacity-70 hover:opacity-100" />
+              <XIcon class="size-2 opacity-70 hover:opacity-100" />
             </button>
           </span>
         {/if}
         {#if canPlan}
-          <Button type="button" variant="outline" onclick={swapPlan} class="max-lg:h-9 max-lg:text-xs">
-            <ArrowLeftRight class="max-lg:size-3.5" />
+          <Button type="button" variant="outline" onclick={swapPlan} class="max-lg:h-8 max-lg:text-[0.65em]">
+            <ArrowLeftRight class="max-lg:size-3" />
             Swap
           </Button>
         {/if}
       </div>
 
-        <div class="flex flex-wrap items-end gap-2">
-          <div class="grid min-w-32 sm:min-w-44 flex-1 gap-1.5">
-            <Label for="home-plan-to">Destination</Label>
+        <div class="flex flex-wrap items-end gap-2 max-lg:gap-1.5">
+          <div class="grid min-w-32 sm:min-w-44 flex-1 gap-1">
+            <Label for="home-plan-to" class="max-lg:text-xs">Destination</Label>
             <AutoCompleteInput
               id="home-plan-to"
               kind="station"
@@ -399,8 +400,8 @@
               onpick={onDestPick}
             />
           </div>
-          <Button type="submit" disabled={!canPlan} class="max-lg:min-h-11 shrink-0 max-lg:w-full sm:w-auto">
-            <SearchIcon data-icon="inline-start" />
+          <Button type="submit" disabled={!canPlan} class="max-lg:min-h-10 max-lg:text-xs shrink-0 max-lg:w-full sm:w-auto">
+            <SearchIcon data-icon="inline-start" class="max-lg:size-3.5" />
             Find trains &amp; availability
           </Button>
         </div>
@@ -414,35 +415,35 @@
   <div class="grid grid-cols-2 gap-2 max-lg:gap-1.5 sm:grid-cols-4">
     <button
       type="button"
-      class="rounded-xl border bg-card p-3 max-lg:p-2 text-center transition-colors hover:border-primary/50 hover:bg-muted/50"
+      class="rounded-xl border bg-card p-3 max-lg:p-2 text-center transition-all hover:-translate-y-0.5 hover:border-primary/50 hover:bg-muted/50 hover:shadow-md"
       onclick={() => navigate('/train')}
     >
       <TrainFront class="mx-auto mb-1.5 max-lg:mb-1 size-6 text-primary" />
-      <span class="text-sm max-lg:text-xs font-medium">Live Train</span>
+      <span class="signage max-lg:text-xs text-sm leading-none">Live Train</span>
     </button>
     <button
       type="button"
-      class="rounded-xl border bg-card p-3 max-lg:p-2 text-center transition-colors hover:border-primary/50 hover:bg-muted/50"
+      class="rounded-xl border bg-card p-3 max-lg:p-2 text-center transition-all hover:-translate-y-0.5 hover:border-primary/50 hover:bg-muted/50 hover:shadow-md"
       onclick={() => navigate('/pnr')}
     >
       <Ticket class="mx-auto mb-1.5 max-lg:mb-1 size-6 text-primary" />
-      <span class="text-sm max-lg:text-xs font-medium">PNR Status</span>
+      <span class="signage max-lg:text-xs text-sm leading-none">PNR Status</span>
     </button>
     <button
       type="button"
-      class="rounded-xl border bg-card p-3 max-lg:p-2 text-center transition-colors hover:border-primary/50 hover:bg-muted/50"
+      class="rounded-xl border bg-card p-3 max-lg:p-2 text-center transition-all hover:-translate-y-0.5 hover:border-primary/50 hover:bg-muted/50 hover:shadow-md"
       onclick={() => navigate('/station')}
     >
       <Building2 class="mx-auto mb-1.5 max-lg:mb-1 size-6 text-primary" />
-      <span class="text-sm max-lg:text-xs font-medium">Station Board</span>
+      <span class="signage max-lg:text-xs text-sm leading-none">Station Board</span>
     </button>
     <button
       type="button"
-      class="rounded-xl border bg-card p-3 max-lg:p-2 text-center transition-colors hover:border-primary/50 hover:bg-muted/50"
+      class="rounded-xl border bg-card p-3 max-lg:p-2 text-center transition-all hover:-translate-y-0.5 hover:border-primary/50 hover:bg-muted/50 hover:shadow-md"
       onclick={() => navigate('/exceptions')}
     >
       <TriangleAlert class="mx-auto mb-1.5 max-lg:mb-1 size-6 text-primary" />
-      <span class="text-sm max-lg:text-xs font-medium">Service Alerts</span>
+      <span class="signage max-lg:text-xs text-sm leading-none">Service Alerts</span>
     </button>
   </div>
 
@@ -457,7 +458,7 @@
         </p>
       </div>
       {#if explorerOpen}
-        <span class="text-xs text-muted-foreground tabular-nums">{stationView.matched} matched</span>
+        <span class="data-num text-xs text-muted-foreground">{stationView.matched} matched</span>
       {/if}
     </div>
 

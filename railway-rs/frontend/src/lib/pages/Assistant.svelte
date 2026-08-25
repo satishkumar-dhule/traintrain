@@ -4,13 +4,15 @@
   import { Button } from '$lib/components/ui/button/index.js'
   import { Textarea } from '$lib/components/ui/textarea/index.js'
   import { Badge } from '$lib/components/ui/badge/index.js'
+  import SignalDot from '$lib/components/SignalDot.svelte'
   import * as Alert from '$lib/components/ui/alert/index.js'
   import BotMessageSquareIcon from 'lucide-svelte/icons/bot-message-square'
   import SendHorizontalIcon from 'lucide-svelte/icons/send-horizontal'
   import { renderMarkdown } from '$lib/markdown.js'
   import { viewport } from '$lib/media.svelte.js'
   import ToolCard from '$lib/components/chat/ToolCards.svelte'
-  import { classify, executePlan, PROJECTORS, nextActionsFor } from '$lib/chat/gate.js'
+  import IntentForm from '$lib/components/chat/IntentForm.svelte'
+  import { classify, executePlan, PROJECTORS, nextActionsFor, buildPlanFor } from '$lib/chat/gate.js'
   import { createMemory, remember } from '$lib/chat/memory.js'
 
   const HISTORY_KEY = 'rc-assistant-history'
@@ -59,16 +61,17 @@
             t &&
             (t.role === 'user' || t.role === 'assistant') &&
             ((typeof t.content === 'string' && t.content.length > 0) ||
-              (t.role === 'assistant' && t.confirm))
+              (t.role === 'assistant' && (t.confirm || t.form)))
         )
         .slice(-MAX_TURNS)
         // Stale buttons are never clickable after reload: an open prompt that
         // survived persistence is dead on arrival.
-        .map((t) =>
-          t?.confirm?.state === 'open'
-            ? { ...t, confirm: { ...t.confirm, state: 'expired' } }
-            : t
-        )
+        .map((t) => {
+          if (t?.confirm?.state === 'open') return { ...t, confirm: { ...t.confirm, state: 'expired' } }
+          if (t?.form && !t.form._submitted && !t.form._superseded && !t.form._expired)
+            return { ...t, form: { ...t.form, _expired: true } }
+          return t
+        })
     } catch {
       return []
     }
@@ -135,6 +138,79 @@
     if (changed) persist()
   }
 
+  function supersedeOpenForms() {
+    let changed = false
+    for (const t of turns) {
+      if (t?.form && !t.form._submitted && !t.form._superseded && !t.form._expired) {
+        t.form._superseded = true
+        changed = true
+      }
+    }
+    if (changed) persist()
+  }
+
+  function formatSubmission(intentId, values) {
+    const train = String(values.train ?? '').trim()
+    const src = String(values.src ?? '').trim()
+    const dst = String(values.dst ?? '').trim()
+    const station = String(values.station ?? '').trim()
+    const date = String(values.date ?? '').trim()
+    switch (intentId) {
+      case 'live_status':
+        return train ? `live status of ${train}` : 'live status'
+      case 'average_delay':
+        return train ? `average delay of ${train}` : 'average delay'
+      case 'train_schedule':
+        return train ? `route of ${train}` : 'train schedule'
+      case 'trains_between': {
+        if (src && dst) {
+          const base = `trains from ${src} to ${dst}`
+          return date ? `${base} on ${date}` : base
+        }
+        return `trains between ${src || ''} and ${dst || ''}`.trim()
+      }
+      case 'station_board':
+        return station ? `station board ${station}` : 'station board'
+      case 'seat_availability': {
+        if (src && dst) {
+          const base = `seat availability from ${src} to ${dst}`
+          // example spec: "seat availability SC→PUNE on 2026-08-25" — keep from/to for clarity
+          return date ? `${base} on ${date}` : base
+        }
+        if (src || dst) return `seat availability ${src} → ${dst}`.trim()
+        return 'seat availability'
+      }
+      case 'chart_status':
+        return train ? `chart status of ${train}${date ? ` on ${date}` : ''}` : 'chart status'
+      default:
+        return train ? `live status of ${train}` : src && dst ? `trains from ${src} to ${dst}` : station ? `station board ${station}` : intentId || 'request'
+    }
+  }
+
+  function handleFormSubmit(turnIdx, { intentId, values }) {
+    const t = turns[turnIdx]
+    if (!t?.form) return
+    t.form._submitted = true
+    const echo = formatSubmission(intentId, values)
+    turns.push({ role: 'user', content: echo })
+    persist()
+    const plan = buildPlanFor(
+      intentId,
+      { train: values.train, date: values.date },
+      { srcQuery: values.src, dstQuery: values.dst, stationQuery: values.station, src: values.src, dst: values.dst, station: values.station }
+    )
+    void runTool(echo, plan, { userPushed: true })
+  }
+
+  function handleFormCancel(turnIdx) {
+    const t = turns[turnIdx]
+    if (!t?.form) return
+    t.form._submitted = true
+    t.form._cancelled = true
+    turns.push({ role: 'user', content: 'Cancelled' })
+    persist()
+  }
+
   async function runTool(userText, plan, { userPushed = false } = {}) {
     busy = true
     streamError = null
@@ -172,6 +248,7 @@
 
     // Typed free text (or any chip) while a choice prompt is open closes it.
     supersedeOpenConfirms()
+    supersedeOpenForms()
 
     // Local-first gate: everything below is served without any LLM round-trip.
     const verdict = classify(text, sessionMemory)
@@ -215,23 +292,24 @@
     }
   if (verdict.kind === 'help') {
     draft = ''
+    // keep embedding tier: if it fires, prefer its intent to override the lexical guess
     const emb = await tryEmbedMatch(text)
-    if (emb) {
-      turns.push({ role: 'user', content: text })
-      turns.push({
-        role: 'assistant',
-        content: emb.text,
-        reasoning: '',
-        tokens: null,
-        tools: [],
-        cards: [],
-        actions: [],
-        confirm: { state: 'open', text: emb.text, choices: emb.choices, plan: emb.plan }
-      })
-      persist()
-      return
+    if (emb && verdict.form) {
+      const overrideId = emb.cardKind ?? emb.plan?.cardKind
+      if (overrideId) verdict.form.intentId = overrideId
     }
-    pushLocal(text, verdict.reply ?? '', { actions: verdict.actions ?? [] })
+    turns.push({ role: 'user', content: text })
+    turns.push({
+      role: 'assistant',
+      content: verdict.reply ?? `I need a bit more info to check **${verdict.form?.intentLabel ?? 'that'}**.`,
+      reasoning: '',
+      tokens: null,
+      tools: [],
+      cards: [],
+      actions: [],
+      form: verdict.form
+    })
+    persist()
     return
   }
     // Unknown/unmatched input: never dead-end, offer the local starters.
@@ -335,7 +413,7 @@
 <section class="grid gap-6 max-lg:gap-3 max-lg:h-[calc(100dvh-4rem)] max-lg:grid-rows-[auto_1fr]">
   {#if !viewport.narrow}
     <div class="grid gap-1">
-      <h1 class="text-2xl font-semibold tracking-tight">Ask Train Bro</h1>
+      <h1 class="signage text-2xl">Ask Train Bro</h1>
       <p class="flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
         Live-data answers about Indian Railways — served locally.
         {#if model}
@@ -381,8 +459,11 @@
                 <div class="mb-1.5 flex flex-wrap gap-1">
                   {#each t.tools as name}
                     <span
-                      class="rounded-full border bg-muted px-2 py-0.5 text-[11px] text-muted-foreground"
-                    >checked live data: {name}</span>
+                      class="inline-flex items-center gap-1.5 rounded-full border bg-muted px-2 py-0.5 text-[11px] text-muted-foreground"
+                    >
+                      <SignalDot tone="go" />
+                      checked live data: {name}
+                    </span>
                   {/each}
                 </div>
               {/if}
@@ -399,6 +480,19 @@
                   {@html renderMarkdown(t.content)}
                 </div>
               {/if}
+              {#if t.form}
+                <div class="mt-3">
+                  {#if t.form._submitted}
+                    <p class="mt-2 text-xs font-medium">✓ Submitted — checking...</p>
+                  {:else if t.form._superseded}
+                    <p class="mt-2 text-xs italic text-muted-foreground">Superseded by a newer message.</p>
+                  {:else if t.form._expired}
+                    <p class="mt-2 text-xs italic text-muted-foreground">Offer expired — ask again to run it.</p>
+                  {:else}
+                    <IntentForm form={t.form} onSubmit={(payload)=>handleFormSubmit(i, payload)} onCancel={()=>handleFormCancel(i)} />
+                  {/if}
+                </div>
+              {/if}
               {#if t.cards?.length}
                 <div class="mt-2 grid gap-2">
                   {#each t.cards as c, ci (ci)}
@@ -411,7 +505,7 @@
                   {#each t.actions as a (a.label)}
                     <button
                       type="button"
-                      class="rounded-full border bg-muted/60 px-2.5 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground max-lg:min-h-11 max-lg:items-center max-lg:px-4 max-lg:inline-flex"
+                      class="rounded-full border bg-accent px-2.5 py-0.5 text-xs text-accent-foreground transition-colors hover:bg-primary/10 hover:text-primary max-lg:min-h-11 max-lg:items-center max-lg:px-4 max-lg:inline-flex"
                       onclick={() => sendText(a.prompt)}
                     >{a.label}</button>
                   {/each}
@@ -425,7 +519,7 @@
                         type="button"
                         data-confirm-choice={c.value}
                         data-label={c.label}
-                        class="rounded-full border bg-muted/60 px-2.5 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground max-lg:min-h-11 max-lg:items-center max-lg:px-4 max-lg:inline-flex"
+                        class="rounded-full border bg-accent px-2.5 py-0.5 text-xs text-accent-foreground transition-colors hover:bg-primary/10 hover:text-primary max-lg:min-h-11 max-lg:items-center max-lg:px-4 max-lg:inline-flex"
                       >{c.label}</button>
                     {/each}
                   </div>
@@ -439,7 +533,7 @@
                         aria-disabled="true"
                         data-confirm-choice={c.value}
                         data-label={c.label}
-                        class="rounded-full border bg-muted/60 px-2.5 py-0.5 text-xs text-muted-foreground max-lg:min-h-11 max-lg:items-center max-lg:px-4 max-lg:inline-flex"
+                        class="rounded-full border bg-accent px-2.5 py-0.5 text-xs text-accent-foreground max-lg:min-h-11 max-lg:items-center max-lg:px-4 max-lg:inline-flex"
                       >{c.label}</button>
                     {/each}
                   </div>
@@ -452,7 +546,7 @@
                 {/if}
               {/if}
               {#if typeof t.tokens === 'number'}
-                <p class="mt-1 text-xs text-muted-foreground">{model} · {t.tokens} tokens</p>
+                <p class="data-num mt-1 text-xs text-muted-foreground">{model} · {t.tokens} tokens</p>
               {/if}
             </div>
           </div>
@@ -466,7 +560,7 @@
             {#each DEFAULT_CHIPS as c (c.label)}
               <button
                 type="button"
-                class="rounded-full border bg-muted/60 px-2.5 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground max-lg:min-h-11 max-lg:items-center max-lg:px-4 max-lg:inline-flex"
+                class="rounded-full border bg-accent px-2.5 py-0.5 text-xs text-accent-foreground transition-colors hover:bg-primary/10 hover:text-primary max-lg:min-h-11 max-lg:items-center max-lg:px-4 max-lg:inline-flex"
                 onclick={() => sendText(c.prompt)}
               >{c.label}</button>
             {/each}

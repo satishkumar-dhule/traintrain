@@ -17,6 +17,7 @@
   import ResultMeta from '$lib/components/ResultMeta.svelte'
   import StatPill from '$lib/components/StatPill.svelte'
   import { ExceptionKindBadge } from '$lib/components/badges/index.js'
+  import SignalDot from '$lib/components/SignalDot.svelte'
   import CalendarX2Icon from 'lucide-svelte/icons/calendar-x-2'
 
   const RUN_MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
@@ -89,7 +90,7 @@
 </script>
 
 {#snippet excDateCell(e)}
-  <span class="font-mono text-xs max-lg:text-sm">{fmtExcDate(e.date)}</span>
+  <span class="data-num text-xs max-lg:text-sm">{fmtExcDate(e.date)}</span>
 {/snippet}
 
 {#snippet excKindCell(e)}
@@ -111,6 +112,7 @@
         <Breadcrumbs items={[{ label: 'Home', href: '/' }, { label: 'Service Alerts' }]} />
       {/snippet}
     </PageHeader>
+    <div aria-hidden="true" class="track-rule"></div>
   {/if}
 
   <Card.Root>
@@ -163,7 +165,11 @@
           {#if train.name}<span class="break-words">{train.name}</span>{/if}
         </Card.Title>
         <Card.Description class="break-words [overflow-wrap:anywhere] max-lg:text-xs">
-          {entries.length} exception{entries.length === 1 ? '' : 's'}{excRoute ? ` · ${excRoute}` : ''}
+          <span class="inline-flex items-center gap-1.5">
+            <SignalDot tone={entries.length === 0 ? 'go' : 'stop'} pulse={entries.length > 0} />
+            <span class="data-num">{entries.length}</span>
+            exception{entries.length === 1 ? '' : 's'}{excRoute ? ` · ${excRoute}` : ''}
+          </span>
         </Card.Description>
         <ResultMeta source={data?.data_source}>
           <StatPill label="Records" value={entries.length} />

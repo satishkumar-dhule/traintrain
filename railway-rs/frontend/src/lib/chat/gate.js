@@ -322,9 +322,251 @@ export const INTENTS = [
   }
 ]
 
+export const REQUIRED_FIELDS = {
+  live_status: ['train'],
+  average_delay: ['train'],
+  train_schedule: ['train'],
+  trains_between: ['src', 'dst'],
+  station_board: ['station'],
+  seat_availability: ['src', 'dst'],
+  chart_status: ['train']
+}
+
+export const INTENT_LABELS = {
+  live_status: 'Live running status',
+  average_delay: 'Average delay',
+  train_schedule: 'Train schedule',
+  trains_between: 'Trains between stations',
+  station_board: 'Station board',
+  seat_availability: 'Seat availability',
+  chart_status: 'Chart status'
+}
+
 const PHRASES = INTENTS.flatMap((intent) =>
   intent.phrases.map((raw) => ({ intent, raw, text: normalize(raw) }))
 )
+
+function todayISO() {
+  return new Date().toISOString().slice(0, 10)
+}
+
+// Fallback slot extraction for partial "from X" without "to Y" – used only on help path to prefill collected.
+function enrichSlotsForHelp(mapped, slots) {
+  const out = { ...slots }
+  const isGeneric = (s) => {
+    const t = String(s ?? '').toLowerCase().trim()
+    return /^(these|those|this|that|station|stations|these station|these stations|this station)$/i.test(t)
+  }
+  if (!out.srcQuery) {
+    let m =
+      mapped.match(/\bfrom\s+([a-z][a-z .'-]{1,29}?)(?=\s+to\b|\s+tak\b|\s*$)/i) ||
+      mapped.match(/\bfrom\s+([a-z][a-z .'-]{1,29}?)\s*$/i)
+    if (m && !isGeneric(m[1])) out.srcQuery = m[1].trim().toLowerCase()
+    else {
+      const simple = mapped.match(/\bfrom\s+([a-z]{2,30})\b/i)
+      if (simple && !isGeneric(simple[1])) out.srcQuery = simple[1].trim().toLowerCase()
+    }
+  }
+  if (out.srcQuery && !out.dstQuery) {
+    const mTo =
+      mapped.match(/\bto\s+([a-z][a-z .'-]{1,29}?)\s*$/i) ||
+      mapped.match(/\bto\s+([a-z][a-z .'-]{1,29}?)(?:\s+tak)?\s*$/i)
+    if (mTo && !isGeneric(mTo[1])) out.dstQuery = mTo[1].trim().toLowerCase()
+  }
+  if (!out.stationQuery) {
+    const mBoard = mapped.match(/\bboard\s+([a-z][a-z .'-]{1,30})\s*$/i)
+    if (mBoard && !isGeneric(mBoard[1])) out.stationQuery = mBoard[1].trim().toLowerCase()
+  }
+  return out
+}
+
+function buildCandidates(mapped) {
+  const base = String(mapped ?? '')
+  if (!base) {
+    return INTENTS.slice(0, 3).map((intent) => ({
+      intentId: intent.id,
+      label: INTENT_LABELS[intent.id] ?? intent.id,
+      score: 0
+    }))
+  }
+  const body0 = stripEntities(base)
+  const slots = extractSlots(body0)
+  const body = stripStrings(body0, [slots.srcQuery, slots.dstQuery, slots.stationQuery])
+  let qTokens = contentTokens(body)
+  if (!qTokens.length) qTokens = contentTokens(base)
+  if (!qTokens.length) {
+    return INTENTS.slice(0, 3).map((intent) => ({
+      intentId: intent.id,
+      label: INTENT_LABELS[intent.id] ?? intent.id,
+      score: 0
+    }))
+  }
+  const q = qTokens.join(' ')
+  // Try MiniSearch hits first; fall back to brute-force scoring when no hits
+  let scored
+  const hits = getIndex().search(q, { fuzzy: 0.2, prefix: false, combineWith: 'OR' }).slice(0, 5)
+  if (hits.length) {
+    scored = hits.map((h) => {
+      const p = PHRASES[Number(h.id)]
+      return { p, score: tokenSetDice(qTokens, contentTokens(p.text)) }
+    })
+    // If distinct intent count <3, supplement with brute-force for remaining intents
+    const seenIds = new Set(scored.map((s) => s.p.intent.id))
+    if (seenIds.size < 3) {
+      const extra = PHRASES.map((p) => ({ p, score: tokenSetDice(qTokens, contentTokens(p.text)) }))
+        .filter((e) => !seenIds.has(e.p.intent.id))
+        .sort((a, b) => b.score - a.score)
+      // add best per extra intent until we have enough
+      const added = new Set()
+      for (const e of extra) {
+        const id = e.p.intent.id
+        if (added.has(id) || seenIds.has(id)) continue
+        added.add(id)
+        scored.push(e)
+        seenIds.add(id)
+        if (seenIds.size >= INTENTS.length) break
+      }
+    }
+    scored.sort((a, b) => b.score - a.score)
+  } else {
+    scored = PHRASES.map((p) => ({ p, score: tokenSetDice(qTokens, contentTokens(p.text)) })).sort(
+      (a, b) => b.score - a.score
+    )
+  }
+  const seen = new Set()
+  const distinct = []
+  for (const c of scored) {
+    const id = c.p.intent.id
+    if (seen.has(id)) continue
+    seen.add(id)
+    distinct.push({ intentId: id, label: INTENT_LABELS[id] ?? id, score: round3(c.score) })
+    if (distinct.length >= 3) break
+  }
+  // pad if still <3 (should not happen but guard)
+  if (distinct.length < 3) {
+    for (const intent of INTENTS) {
+      if (distinct.find((d) => d.intentId === intent.id)) continue
+      distinct.push({ intentId: intent.id, label: INTENT_LABELS[intent.id] ?? intent.id, score: 0 })
+      if (distinct.length >= 3) break
+    }
+  }
+  return distinct
+}
+
+export function getIntentCandidates(text) {
+  const mapped = normalize(String(text ?? ''))
+  return buildCandidates(mapped)
+}
+
+function collectForForm(rawText, mapped) {
+  const ent = extractEntities(rawText)
+  const body0 = stripEntities(mapped)
+  let slots = extractSlots(body0)
+  slots = enrichSlotsForHelp(mapped, slots)
+  const collected = {}
+  if (ent.train) collected.train = ent.train
+  if (ent.date) collected.date = ent.date
+  if (slots.srcQuery) collected.src = slots.srcQuery
+  if (slots.dstQuery) collected.dst = slots.dstQuery
+  if (slots.stationQuery) collected.station = slots.stationQuery
+  return collected
+}
+
+function makeForm({ intentId, confidence, collected, candidates }) {
+  const required = intentId ? REQUIRED_FIELDS[intentId] || [] : []
+  const missing = required.filter((f) => !collected[f] || String(collected[f]).trim() === '')
+  const fields = []
+  if (confidence < 0.45 || intentId == null) {
+    fields.push({
+      name: 'intent',
+      label: 'What do you want to check?',
+      type: 'select',
+      required: true,
+      value: intentId || '',
+      options: INTENTS.map((i) => ({ value: i.id, label: INTENT_LABELS[i.id] }))
+    })
+  }
+  for (const name of required) {
+    let spec = null
+    if (name === 'train') {
+      spec = {
+        name,
+        label: 'Train number',
+        placeholder: 'e.g. 12951',
+        value: collected.train || '',
+        required: true,
+        type: 'text',
+        pattern: '\\d{5}'
+      }
+    } else if (name === 'src') {
+      spec = {
+        name,
+        label: 'From station',
+        placeholder: 'e.g. NDLS or New Delhi',
+        value: collected.src || '',
+        required: true,
+        type: 'text'
+      }
+    } else if (name === 'dst') {
+      spec = {
+        name,
+        label: 'To station',
+        placeholder: 'e.g. PUNE or Pune',
+        value: collected.dst || '',
+        required: true,
+        type: 'text'
+      }
+    } else if (name === 'station') {
+      spec = {
+        name,
+        label: 'Station',
+        placeholder: 'e.g. PUNE or Pune',
+        value: collected.station || '',
+        required: true,
+        type: 'text'
+      }
+    }
+    if (spec) fields.push(spec)
+  }
+  if (intentId) {
+    let dateVal = collected.date || ''
+    if (String(dateVal).toLowerCase() === 'today') dateVal = todayISO()
+    else {
+      const dmy = String(dateVal).match(/^(\d{2})-(\d{2})-(\d{4})$/)
+      if (dmy) dateVal = `${dmy[3]}-${dmy[2]}-${dmy[1]}`
+    }
+    if (!dateVal) dateVal = todayISO()
+    fields.push({
+      name: 'date',
+      label: 'Date',
+      type: 'date',
+      value: dateVal,
+      required: false,
+      placeholder: ''
+    })
+  }
+  const form = {
+    intentId,
+    intentLabel: intentId ? INTENT_LABELS[intentId] || '' : '',
+    confidence,
+    collected,
+    missing,
+    fields
+  }
+  if (candidates && candidates.length) form.candidates = candidates
+  return form
+}
+
+export function buildFormSpec(text) {
+  const raw = String(text ?? '')
+  const mapped = normalize(raw)
+  const collected = collectForForm(raw, mapped)
+  const candidates = buildCandidates(mapped)
+  const best = candidates[0] || null
+  const intentId = best && best.score >= 0.3 ? best.intentId : null
+  const confidence = best ? best.score : 0
+  return makeForm({ intentId, confidence, collected, candidates })
+}
 
 // ---------- plan builder (stable export; embed.js reuses it) ----------
 
@@ -562,7 +804,19 @@ export const HELP_CHIPS = [
   { label: 'Avg delay', prompt: 'average delay of 12626' }
 ]
 
-const helpVerdict = () => ({ kind: 'help', reply: HELP_REPLY, actions: HELP_CHIPS })
+function helpVerdictWithForm(text, fallback) {
+  const raw = String(text ?? '')
+  const form = buildFormSpec(raw)
+  const base = { kind: 'help', reply: HELP_REPLY, actions: HELP_CHIPS, form }
+  if (fallback) {
+    // preserve fallback tailored reply when we already have one
+    base.reply = fallback.reply
+    base.actions = fallback.actions
+  }
+  return base
+}
+
+const helpVerdict = (text) => helpVerdictWithForm(text ?? '')
 
 const TRAIN_EXAMPLE_PROMPTS = {
   live_status: 'live status of 12951',
@@ -571,34 +825,44 @@ const TRAIN_EXAMPLE_PROMPTS = {
   chart_status: 'chart status of 12951'
 }
 
-function missingSlotHelp(intentId, missing) {
+function missingSlotHelp(intentId, missing, text) {
+  let base
   if (missing === 'train') {
     const prompt = TRAIN_EXAMPLE_PROMPTS[intentId] ?? 'live status of 12951'
-    return {
+    base = {
       kind: 'help',
       reply: `Which train? Give me the 5-digit number — e.g. "${prompt}".`,
       actions: [{ label: 'Try 12951', prompt }]
     }
-  }
-  if (missing === 'stations' && intentId === 'seat_availability') {
-    return {
+  } else if (missing === 'stations' && intentId === 'seat_availability') {
+    base = {
       kind: 'help',
       reply: 'From where to where? e.g. "seat availability from SC to PUNE".',
       actions: [{ label: 'SC → PUNE', prompt: 'seat availability from SC to PUNE' }]
     }
-  }
-  if (missing === 'stations') {
-    return {
+  } else if (missing === 'stations') {
+    base = {
       kind: 'help',
       reply: 'Between which stations? e.g. "trains from SC to PUNE".',
       actions: [{ label: 'SC → PUNE', prompt: 'trains from SC to PUNE' }]
     }
+  } else {
+    base = {
+      kind: 'help',
+      reply: 'Which station? e.g. "station board Pune".',
+      actions: [{ label: 'Pune board', prompt: 'station board pune' }]
+    }
   }
-  return {
-    kind: 'help',
-    reply: 'Which station? e.g. "station board Pune".',
-    actions: [{ label: 'Pune board', prompt: 'station board pune' }]
-  }
+  const raw = String(text ?? '')
+  const mapped = normalize(raw)
+  const collected = collectForForm(raw, mapped)
+  const candidates = buildCandidates(mapped)
+  // For missing-slot help, force intentId to the matched intent (even if candidates would pick different)
+  const best = candidates.find((c) => c.intentId === intentId) || candidates[0]
+  const confidence = best ? best.score : 0
+  const form = makeForm({ intentId, confidence, collected, candidates })
+  // Override candidates to ensure top 2-3 include the intended intent first
+  return { ...base, form }
 }
 
 function requiredSlotMissing(intent, ent, slots) {
@@ -684,7 +948,7 @@ const TRIVIALS = [
  * header for the full kind contract. */
 export function classify(text, memory) {
   const q = String(text ?? '').trim()
-  if (!q) return helpVerdict()
+  if (!q) return helpVerdict(q)
 
   for (const [re, reply] of TRIVIALS) {
     if (re.test(q)) return { kind: 'trivial', reply }
@@ -700,14 +964,14 @@ export function classify(text, memory) {
   if (t0) return t0
 
   const m = matchIntent(mapped)
-  if (!m) return helpVerdict()
+  if (!m) return helpVerdict(q)
 
   const ent = extractEntities(q)
   const slots = extractSlots(stripEntities(mapped))
 
   // Heavy intent: always confirm before spending the expensive call.
   if (m.intent.id === 'seat_availability') {
-    if (!slots.srcQuery || !slots.dstQuery) return missingSlotHelp('seat_availability', 'stations')
+    if (!slots.srcQuery || !slots.dstQuery) return missingSlotHelp('seat_availability', 'stations', q)
     return {
       kind: 'confirm',
       plan: buildPlanFor('seat_availability', ent, slots),
@@ -723,7 +987,7 @@ export function classify(text, memory) {
   // Missing a hard requirement -> targeted help beats confirming a plan
   // that cannot execute yet (applies in both bands).
   const missing = requiredSlotMissing(m.intent, ent, slots)
-  if (missing) return missingSlotHelp(m.intent.id, missing)
+  if (missing) return missingSlotHelp(m.intent.id, missing, q)
 
   if (m.confidence === 'confident') {
     return { kind: 'tool', plan: buildPlanFor(m.intent.id, ent, slots), confidence: m.score }

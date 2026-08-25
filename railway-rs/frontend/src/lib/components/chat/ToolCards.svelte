@@ -34,10 +34,10 @@
 
   /* Seat status -> colour: bookable green, waitlist amber, RAC blue, regret red. */
   const SEAT_TONE_CLS = {
-    green: 'text-emerald-600 dark:text-emerald-400',
-    amber: 'text-amber-600 dark:text-amber-400',
-    blue: 'text-blue-600 dark:text-blue-400',
-    red: 'text-red-600 dark:text-red-400',
+    green: 'text-signal-go-ink',
+    amber: 'text-signal-hold-ink',
+    blue: 'text-primary',
+    red: 'text-signal-stop-ink',
   }
   const seatTone = (status) => {
     const s = String(status ?? '').toUpperCase()
@@ -60,14 +60,14 @@
   }
 
   const DOT_CLS = {
-    red: 'bg-red-500',
-    amber: 'bg-amber-500',
-    green: 'bg-emerald-500',
+    red: 'bg-signal-stop',
+    amber: 'bg-signal-hold',
+    green: 'bg-signal-go',
   }
   const BAR_CLS = {
-    red: 'bg-red-500',
-    amber: 'bg-amber-400',
-    green: 'bg-emerald-400',
+    red: 'bg-signal-stop',
+    amber: 'bg-signal-hold',
+    green: 'bg-signal-go',
   }
 
   const delayTone = (m) => {
@@ -130,11 +130,11 @@
     <p class="rounded-md bg-muted px-2 py-1 text-xs">{d.position || 'Position unavailable'}</p>
     <div class="mt-2 flex flex-wrap items-center gap-1.5">
       {#if num(d.last_seen_delay_minutes) > 0}
-        <span class="inline-flex items-center rounded-full border border-red-500/30 bg-red-500/10 px-2 py-0.5 text-[11px] max-lg:text-xs font-medium text-red-600 dark:text-red-400">
+        <span class="inline-flex items-center rounded-full border border-signal-stop/30 bg-signal-stop/10 px-2 py-0.5 text-[11px] max-lg:text-xs font-medium text-signal-stop-ink">
           {num(d.last_seen_delay_minutes)}m late
         </span>
       {:else}
-        <span class="inline-flex items-center rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[11px] max-lg:text-xs font-medium text-emerald-600 dark:text-emerald-400">
+        <span class="inline-flex items-center rounded-full border border-signal-go/30 bg-signal-go/10 px-2 py-0.5 text-[11px] max-lg:text-xs font-medium text-signal-go-ink">
           on time
         </span>
       {/if}
@@ -151,7 +151,7 @@
           </span>
           <span class="shrink-0 tabular-nums text-muted-foreground">{txt(s?.sch)} → {txt(s?.act)}</span>
           <span
-            class={`w-10 shrink-0 text-right tabular-nums ${s?.delay_min > 0 ? 'text-red-600 dark:text-red-400' : ''}`}
+            class={`w-10 shrink-0 text-right tabular-nums ${s?.delay_min > 0 ? 'text-signal-stop-ink' : ''}`}
           >
             {s?.delay_min != null ? `${num(s.delay_min)}m` : DASH}
           </span>
@@ -259,7 +259,7 @@
       {#each list(d.trains) as r, i (r?.number + i)}
         <div class="flex items-center gap-2 text-xs max-lg:text-sm">
           <span
-            class={`size-1.5 shrink-0 rounded-full ${r?.late ? 'bg-red-500' : 'bg-transparent'}`}
+            class={`size-1.5 shrink-0 rounded-full ${r?.late ? 'bg-signal-stop' : 'bg-transparent'}`}
             title={r?.late ? 'late' : undefined}
           ></span>
           <Badge variant="outline" class="shrink-0 font-mono">{txt(r?.number)}</Badge>
@@ -342,11 +342,11 @@
   <div class="rounded-xl border bg-card p-3 text-sm">
     {@render header(ClipboardCheck, `Chart · ${txt(d.train_number)}`, undefined)}
     {#if prepared === true}
-      <p class="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-xs font-medium text-emerald-600 dark:text-emerald-400 max-lg:text-sm">
+      <p class="rounded-md border border-signal-go/30 bg-signal-go/10 px-2 py-1 text-xs font-medium text-signal-go-ink max-lg:text-sm">
         Chart prepared — reservation charts are out.
       </p>
     {:else if prepared === false}
-      <p class="rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-xs font-medium text-amber-600 dark:text-amber-400 max-lg:text-sm">
+      <p class="rounded-md border border-signal-hold/40 bg-signal-hold/15 px-2 py-1 text-xs font-medium text-signal-hold-ink max-lg:text-sm">
         Chart not prepared yet.
       </p>
     {:else}

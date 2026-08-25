@@ -97,7 +97,7 @@
 </script>
 
 <div
-  class={`flex w-full min-w-0 items-center gap-1 rounded-lg border bg-card px-1.5 py-1 shadow-sm ${klass}`}
+  class={`flex w-full min-w-0 items-center gap-0.5 max-lg:gap-0 rounded-lg border bg-card px-1.5 py-1 shadow-sm ${klass}`}
   role="group"
   aria-label={label}
 >
@@ -125,7 +125,7 @@
           aria-current={active ? 'date' : undefined}
           aria-label={`${label}: ${iso}`}
           onclick={() => pickDate(iso)}
-          class={`flex min-h-11 w-[4.25rem] shrink-0 cursor-pointer snap-center flex-col items-center justify-center rounded-md border px-1 py-1 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+          class={`flex min-h-11 max-lg:min-h-10 w-[4.25rem] max-lg:w-[3.75rem] shrink-0 cursor-pointer snap-center flex-col items-center justify-center rounded-md border px-1 py-1 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
             active
               ? 'border-transparent bg-primary text-primary-foreground shadow-sm'
               : 'border-transparent hover:bg-muted'

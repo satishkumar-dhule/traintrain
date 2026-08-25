@@ -17,6 +17,7 @@ import EmptyState from '$lib/components/EmptyState.svelte'
 import RecentSearches from '$lib/components/RecentSearches.svelte'
 import { loadRecent, rememberRecent, clearStored } from '$lib/recent.js'
 import PageHeader from '$lib/components/PageHeader.svelte'
+import SignalDot from '$lib/components/SignalDot.svelte'
 import Breadcrumbs from '$lib/components/Breadcrumbs.svelte'
 import RouteContextBar from '$lib/components/RouteContextBar.svelte'
 import EntityChip from '$lib/components/EntityChip.svelte'
@@ -143,8 +144,8 @@ import {
 
   const liveCols = [
     { key: 'train', label: 'Train', value: (t) => `${t.number ?? ''} ${t.name ?? ''}` },
-    { key: 'sta', label: 'Sched', cellClass: 'font-mono text-xs max-lg:text-sm', value: (t) => fmt(t.sta) },
-    { key: 'eta', label: 'ETA', cellClass: 'font-mono text-xs max-lg:text-sm', value: (t) => fmt(t.eta) },
+    { key: 'sta', label: 'Sched', cellClass: 'data-num text-xs max-lg:text-sm', value: (t) => fmt(t.sta) },
+    { key: 'eta', label: 'ETA', cellClass: 'data-num text-xs max-lg:text-sm', value: (t) => fmt(t.eta) },
     {
       key: 'delay',
       label: 'Delay',
@@ -156,7 +157,7 @@ import {
       key: 'platform',
       label: 'Platform',
       class: 'w-24',
-      cellClass: 'font-mono text-xs max-lg:text-sm',
+      cellClass: 'data-num text-xs max-lg:text-sm',
       value: (t) => fmt(t.platform),
       sortValue: (t) => numOrNull(t.platform),
     },
@@ -166,8 +167,8 @@ import {
     { key: 'train', label: 'Train', value: (t) => `${t.number ?? ''} ${t.name ?? ''}` },
     { key: 'type', label: 'Type', class: 'w-20 lg:w-28', value: (t) => t.train_type || '' },
     { key: 'classes', label: 'Cls', class: 'w-16 lg:w-28', value: (t) => t.classes || '' },
-    { key: 'arrival', label: 'Arr', cellClass: 'font-mono text-xs max-lg:text-sm', value: (t) => fmt(t.arrival) },
-    { key: 'departure', label: 'Dep', cellClass: 'font-mono text-xs max-lg:text-sm', value: (t) => fmt(t.departure) },
+    { key: 'arrival', label: 'Arr', cellClass: 'data-num text-xs max-lg:text-sm', value: (t) => fmt(t.arrival) },
+    { key: 'departure', label: 'Dep', cellClass: 'data-num text-xs max-lg:text-sm', value: (t) => fmt(t.departure) },
     {
       key: 'days',
       label: 'Days',
@@ -418,6 +419,8 @@ import {
     />
   {/if}
 
+  <div class="track-rule" aria-hidden="true"></div>
+
   <Tabs.Root class="min-w-0" bind:value={tab} onValueChange={onTabChange}>
     <Tabs.List class="w-full justify-start overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden max-lg:h-9">
       <Tabs.Trigger value="live" class="max-lg:px-3 max-lg:text-xs"><ActivityIcon class="mr-1.5 size-3.5 max-lg:mr-1 max-lg:size-3" />Live</Tabs.Trigger>
@@ -439,11 +442,20 @@ import {
       {:else if live}
         <Card.Root>
           <Card.Header class="flex flex-col items-start justify-between gap-3 space-y-0 sm:flex-row sm:items-center">
-            <Card.Title>{live.station ?? '—'} departures &amp; arrivals</Card.Title>
+            <Card.Title class="flex flex-wrap items-center gap-2">
+              <SignalDot tone="go" pulse />
+              <StationCodeBadge code={live.station} link={false} />
+              <span>departures &amp; arrivals</span>
+            </Card.Title>
             <ResultMeta source={live.data_source}>
               <StatPill label="Trains" value={live.trains?.length ?? 0} />
               <StatPill label="Window" value={`${live.hours}h`} />
-              {#if live.destination}<StatPill label="Towards" value={live.destination} />{/if}
+              {#if live.destination}
+                <span class="inline-flex items-center gap-1 text-xs">
+                  <span class="text-muted-foreground">Towards</span>
+                  <StationCodeBadge code={live.destination} link={false} size="xs" />
+                </span>
+              {/if}
             </ResultMeta>
           </Card.Header>
           <Card.Content>
@@ -483,7 +495,10 @@ import {
       {:else if timetable}
         <Card.Root>
           <Card.Header class="flex flex-col items-start justify-between gap-3 space-y-0 sm:flex-row sm:items-center">
-            <Card.Title>{timetable.station_name ?? timetable.station ?? '—'} timetable</Card.Title>
+            <Card.Title>
+              {#if timetable.station_name}{timetable.station_name}{:else}<span class="data-num tracking-[0.14em] uppercase">{timetable.station ?? '—'}</span>{/if}
+              timetable
+            </Card.Title>
             <ResultMeta source={timetable.data_source}>
               <StatPill label="Trains" value={timetable.total ?? timetable.trains?.length ?? 0} />
               {#if timetable.date}<StatPill label="Date" value={timetable.date} />{/if}

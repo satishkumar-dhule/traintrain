@@ -9,7 +9,8 @@
     const head = t.split(/[\s/-]/)[0];
     if (head === 'CNF' || head === 'CONFIRMED') return 'confirmed';
     if (head === 'RAC') return 'rac';
-    if (head === 'CAN' || head === 'CANCELLED') return 'cancelled';
+    if (head === 'CAN' || head === 'CANCELLED' || head === 'FLW' || head === 'FLUSHED')
+      return 'cancelled';
     if (head === 'WL' || head === 'WAITLIST' || head === 'WAITLISTED') return 'waitlist';
     return 'other';
   }

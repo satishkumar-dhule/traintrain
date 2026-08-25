@@ -54,12 +54,30 @@ import CalendarClockIcon from 'lucide-svelte/icons/calendar-clock'
   let trains = $derived(Array.isArray(result?.trains) ? result.trains : [])
 
   const cols = [
-    { key: 'train', label: 'Train', value: (t) => `${t.number ?? ''} ${t.name ?? ''}` },
-    { key: 'dep', label: 'Departs', cellClass: 'font-mono text-xs max-lg:text-sm', value: (t) => t.departure_time },
-    { key: 'arr', label: 'Arrives', cellClass: 'font-mono text-xs max-lg:text-sm', value: (t) => t.arrival_time },
+    {
+      key: 'train',
+      label: 'Train',
+      class: 'uppercase tracking-wide text-muted-foreground',
+      value: (t) => `${t.number ?? ''} ${t.name ?? ''}`,
+    },
+    {
+      key: 'dep',
+      label: 'Departs',
+      class: 'uppercase tracking-wide text-muted-foreground',
+      cellClass: 'data-num text-xs max-lg:text-sm',
+      value: (t) => t.departure_time,
+    },
+    {
+      key: 'arr',
+      label: 'Arrives',
+      class: 'uppercase tracking-wide text-muted-foreground',
+      cellClass: 'data-num text-xs max-lg:text-sm',
+      value: (t) => t.arrival_time,
+    },
     {
       key: 'runs',
       label: 'Runs on',
+      class: 'uppercase tracking-wide text-muted-foreground',
       value: (t) => daysText(t.runs_on),
       sortValue: (t) => (Array.isArray(t.runs_on) ? t.runs_on.filter(Boolean).length : null),
     },

@@ -28,10 +28,10 @@
 
   const tone = $derived(
     {
-      available: 'border-emerald-600/30 bg-emerald-500/10 text-emerald-700 dark:border-emerald-500/35 dark:bg-emerald-400/10 dark:text-emerald-400',
-      rac: 'border-amber-600/30 bg-amber-500/10 text-amber-700 dark:border-amber-500/35 dark:bg-amber-400/10 dark:text-amber-400',
-      waitlist: 'border-red-600/30 bg-red-500/10 text-red-700 dark:border-red-500/35 dark:bg-red-400/10 dark:text-red-400',
-      regret: 'border-red-600/30 bg-red-500/10 text-red-700 dark:border-red-500/35 dark:bg-red-400/10 dark:text-red-400',
+      available: 'border-signal-go/30 bg-signal-go/10 text-signal-go-ink dark:border-signal-go/40 dark:bg-signal-go/15',
+      rac: 'border-primary/25 bg-primary/10 text-primary dark:border-primary/35 dark:bg-primary/15',
+      waitlist: 'border-signal-hold/40 bg-signal-hold/15 text-signal-hold-ink dark:border-signal-hold/45 dark:bg-signal-hold/20',
+      regret: 'border-signal-stop/30 bg-signal-stop/10 text-signal-stop-ink dark:border-signal-stop/40 dark:bg-signal-stop/15',
       idle: 'border-border bg-muted/50 text-muted-foreground',
       other: 'border-border bg-muted/50 text-muted-foreground',
     }[statusKind],
@@ -40,9 +40,9 @@
 
 <div class={cn('overflow-hidden rounded-lg border px-3 py-2 text-xs', tone, className)}>
   <div class="flex items-baseline justify-between gap-2">
-    <span class="font-mono text-sm font-semibold">{fmtStatus(classCode)}</span>
+    <span class="data-num text-sm font-semibold">{fmtStatus(classCode)}</span>
     {#if fare != null}
-      <span class="font-mono text-sm tabular-nums">₹{fare.toLocaleString('en-IN')}</span>
+      <span class="data-num text-sm tabular-nums">₹{fare.toLocaleString('en-IN')}</span>
     {:else}
       <span class="text-muted-foreground">₹</span>
     {/if}

@@ -21,6 +21,7 @@ import {
   RunsOnBadges,
   DataSourceBadge
 } from '$lib/components/badges/index.js'
+import SignalDot from '$lib/components/SignalDot.svelte'
 
   let { view = '', selection = '' } = $props()
 
@@ -175,11 +176,11 @@ import {
     { key: 'number', label: 'Number', class: 'w-24', value: (t) => fmt(t.number) },
     { key: 'name', label: 'Name', value: (t) => fmt(t.name), cellClass: 'font-medium' },
     { key: 'runs', label: 'Runs', cellClass: 'text-muted-foreground', value: (t) => fmt(t.runs) },
-    { key: 'duration', label: 'Duration', class: 'w-28', cellClass: 'font-mono text-xs', value: (t) => fmt(t.duration) },
+    { key: 'duration', label: 'Duration', class: 'w-28', cellClass: 'data-num text-xs', value: (t) => fmt(t.duration) },
     {
       key: 'route',
       label: 'Source → Destination',
-      cellClass: 'font-mono text-xs',
+      cellClass: 'data-num text-xs',
       value: (t) => routeText(t),
     },
   ]
@@ -192,10 +193,10 @@ import {
       key: 'validity',
       label: 'Validity',
       class: 'w-48',
-      cellClass: 'whitespace-nowrap font-mono text-xs',
+      cellClass: 'data-num text-xs whitespace-nowrap',
       value: (t) => validityOf(t),
     },
-    { key: 'travel_time', label: 'Travel time', class: 'w-24', cellClass: 'font-mono text-xs', value: (t) => fmt(t.travel_time) },
+    { key: 'travel_time', label: 'Travel time', class: 'w-24', cellClass: 'data-num text-xs', value: (t) => fmt(t.travel_time) },
     {
       key: 'days',
       label: 'Days',
@@ -232,12 +233,12 @@ import {
   <div class="flex flex-wrap items-center gap-x-2 text-xs">
     <span class="flex items-center gap-1.5">
       <StationCodeBadge code={src.code} name={src.name} size="xs" />
-      {#if src.time}<span class="font-mono text-muted-foreground">{src.time}</span>{/if}
+      {#if src.time}<span class="data-num text-muted-foreground">{src.time}</span>{/if}
     </span>
     <span class="text-muted-foreground">→</span>
     <span class="flex items-center gap-1.5">
       <StationCodeBadge code={dst.code} name={dst.name} size="xs" />
-      {#if dst.time}<span class="font-mono text-muted-foreground">{dst.time}</span>{/if}
+      {#if dst.time}<span class="data-num text-muted-foreground">{dst.time}</span>{/if}
     </span>
   </div>
 {/snippet}
@@ -257,9 +258,10 @@ import {
 
 <section class="grid gap-6">
   <div class="grid gap-1">
-    <h1 class="text-2xl font-semibold tracking-tight">Extras</h1>
+    <h1 class="signage text-2xl sm:text-3xl">Extras</h1>
     <p class="max-lg:hidden text-sm text-muted-foreground">Heritage trains and running parcel specials, live from NTES.</p>
   </div>
+  <div aria-hidden="true" class="track-rule"></div>
 
   <Tabs.Root class="min-w-0" bind:value={tab} onValueChange={onTabChange}>
     <Tabs.List class="w-full justify-start overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
@@ -299,12 +301,18 @@ import {
       {:else if hData}
         <Card.Root>
           <Card.Header class="flex flex-col items-start justify-between gap-3 space-y-0 sm:flex-row sm:items-center min-w-0">
-            <div class="grid gap-1 min-w-0">
-              <Card.Title class="break-words">Heritage trains</Card.Title>
-              <Card.Description class="flex flex-wrap items-center gap-x-1 break-words [overflow-wrap:anywhere]">
-                <span>{hTotal} train{hTotal === 1 ? '' : 's'}</span>
-                {#if hCaption}<span class="truncate max-w-[60vw]">· {hCaption}</span>{/if}
-              </Card.Description>
+            <div class="grid gap-2 min-w-0">
+              <span class="grid size-9 place-items-center rounded-md bg-primary/10 text-primary">
+                <LandmarkIcon class="size-4" aria-hidden="true" />
+              </span>
+              <div class="grid gap-1 min-w-0">
+                <span class="w-fit rounded bg-saffron/15 px-1.5 text-xs font-semibold uppercase tracking-wide text-saffron-ink">Heritage</span>
+                <Card.Title class="break-words">Heritage trains</Card.Title>
+                <Card.Description class="flex flex-wrap items-center gap-x-1 break-words [overflow-wrap:anywhere]">
+                  <span><span class="data-num">{hTotal}</span> train{hTotal === 1 ? '' : 's'}</span>
+                  {#if hCaption}<span class="truncate max-w-[60vw]">· {hCaption}</span>{/if}
+                </Card.Description>
+              </div>
             </div>
             <div class="flex flex-wrap items-center justify-end gap-2 min-w-0">
               {#if str(selection).trim()}<Badge variant="outline" class="max-w-[60vw] truncate">keyword: {selection}</Badge>{/if}
@@ -346,9 +354,18 @@ import {
       {:else if pData}
         <Card.Root>
           <Card.Header class="flex flex-col items-start justify-between gap-3 space-y-0 sm:flex-row sm:items-center">
-            <div class="grid gap-1">
-              <Card.Title>Parcel special trains</Card.Title>
-              <Card.Description>{pTotal} train{pTotal === 1 ? '' : 's'} currently listed</Card.Description>
+            <div class="grid gap-2 min-w-0">
+              <span class="grid size-9 place-items-center rounded-md bg-primary/10 text-primary">
+                <PackageIcon class="size-4" aria-hidden="true" />
+              </span>
+              <div class="grid gap-1 min-w-0">
+                <span class="w-fit rounded bg-saffron/15 px-1.5 text-xs font-semibold uppercase tracking-wide text-saffron-ink">Parcel</span>
+                <Card.Title>Parcel special trains</Card.Title>
+                <Card.Description class="flex flex-wrap items-center gap-x-1.5 break-words">
+                  <SignalDot tone="go" pulse />
+                  <span><span class="data-num">{pTotal}</span> train{pTotal === 1 ? '' : 's'} currently listed</span>
+                </Card.Description>
+              </div>
             </div>
             <DataSourceBadge source={pSource} />
           </Card.Header>

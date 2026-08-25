@@ -4,6 +4,8 @@
   import { navigate } from '$lib/router.svelte.js'
   import * as Card from '$lib/components/ui/card/index.js'
   import { Skeleton } from '$lib/components/ui/skeleton/index.js'
+  import { StatusBadge } from '$lib/components/badges/index.js'
+  import SignalDot from '$lib/components/SignalDot.svelte'
 
   import TrainFront from 'lucide-svelte/icons/train-front'
   import Clock from 'lucide-svelte/icons/clock'
@@ -162,27 +164,17 @@
         <TrainFront class="size-9 sm:size-11" />
       </div>
       <div class="grid gap-2 min-w-0">
-        <h1 class="text-2xl font-bold tracking-tight sm:text-3xl break-words">Train Bro</h1>
+        <h1 class="signage text-2xl sm:text-3xl break-words">Train Bro</h1>
         <div class="flex flex-wrap items-center gap-1.5">
-          <span
-            class="rounded-full border bg-background px-2.5 py-0.5 text-xs font-medium text-muted-foreground"
-          >
-            Free forever
-          </span>
-          <span
-            class="rounded-full border bg-background px-2.5 py-0.5 text-xs font-medium text-muted-foreground"
-          >
-            No login
-          </span>
-          <span
-            class="rounded-full border bg-background px-2.5 py-0.5 text-xs font-medium text-muted-foreground"
-          >
-            Indian Railways data
-          </span>
+          <StatusBadge tone="neutral">Free forever</StatusBadge>
+          <StatusBadge tone="neutral">No login</StatusBadge>
+          <StatusBadge tone="neutral">Indian Railways data</StatusBadge>
         </div>
       </div>
     </div>
   </header>
+
+  <div class="track-rule" aria-hidden="true"></div>
 
   <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
     {#if obs.data === null}
@@ -196,7 +188,7 @@
         >
           <Clock class="size-3.5" /> Uptime
         </Card.Title>
-        <Card.Description class="px-4 font-mono text-2xl font-semibold tabular-nums">
+        <Card.Description class="px-4 data-num text-2xl font-semibold">
           {fmtUptime(d?.uptime_secs)}
         </Card.Description>
       </Card.Root>
@@ -207,7 +199,7 @@
         >
           <Activity class="size-3.5" /> Requests
         </Card.Title>
-        <Card.Description class="px-4 font-mono text-2xl font-semibold tabular-nums">
+        <Card.Description class="px-4 data-num text-2xl font-semibold">
           {fmtInt(d?.requests_total)}
         </Card.Description>
       </Card.Root>
@@ -218,7 +210,7 @@
         >
           <Zap class="size-3.5" /> Req / sec
         </Card.Title>
-        <Card.Description class="px-4 font-mono text-2xl font-semibold tabular-nums">
+        <Card.Description class="px-4 data-num text-2xl font-semibold">
           {fmtInt(d?.req_per_sec)}
         </Card.Description>
         {#if rpsSpark}
@@ -244,7 +236,7 @@
         >
           <Gauge class="size-3.5" /> Avg latency
         </Card.Title>
-        <Card.Description class="px-4 font-mono text-2xl font-semibold tabular-nums">
+        <Card.Description class="px-4 data-num text-2xl font-semibold">
           {fmtInt(d?.latency_ms)}<span class="text-sm font-normal text-muted-foreground">ms</span>
         </Card.Description>
         {#if latencySpark}
@@ -271,7 +263,7 @@
           <Database class="size-3.5" /> Cache hit
         </Card.Title>
         <div class="flex items-center justify-between gap-2 px-4">
-          <span class="font-mono text-2xl font-semibold tabular-nums">
+          <span class="data-num text-2xl font-semibold">
             {rate === null ? '—' : `${Math.round(rate)}%`}
           </span>
           <svg viewBox="0 0 64 64" class="size-12 shrink-0 -rotate-90" aria-hidden="true">
@@ -297,15 +289,15 @@
         <Card.Title
           class="flex items-center gap-1.5 px-4 text-[11px] font-medium uppercase tracking-wide text-muted-foreground"
         >
-          <Radio class="size-3.5" /> Sources live
+          <Radio class="size-3.5" /> Sources live <SignalDot tone="go" pulse />
         </Card.Title>
-        <Card.Description class="px-4 font-mono text-2xl font-semibold tabular-nums">
+        <Card.Description class="px-4 data-num text-2xl font-semibold">
           {fmtInt(d?.origins?.length)}
         </Card.Description>
         <div class="flex flex-wrap gap-1 px-4">
           {#each d?.origins ?? [] as o (o.name)}
             <span
-              class="rounded border bg-muted/50 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground"
+              class="data-num rounded border bg-muted/50 px-1.5 py-0.5 text-[10px] text-muted-foreground"
             >
               {srcShort(o.name)}
             </span>
@@ -342,7 +334,7 @@
     {#each PRINCIPLES as p (p.label)}
       {@const Icon = p.icon}
       <div class="flex items-center gap-3 rounded-xl border bg-card p-4 shadow-sm">
-        <span class="grid size-10 shrink-0 place-items-center rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+        <span class="grid size-10 shrink-0 place-items-center rounded-full bg-signal-go/10 text-signal-go-ink dark:bg-signal-go/15">
           <Icon class="size-5" />
         </span>
         <span class="text-sm font-semibold">{p.label}</span>
@@ -351,17 +343,17 @@
   </div>
 
   <footer class="flex flex-wrap items-center justify-center gap-2 pb-2 text-center">
-    <span class="inline-flex items-center gap-1.5 rounded-full border bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground">
+    <StatusBadge tone="neutral" class="gap-1.5 px-3 py-1.5 font-normal normal-case">
       <Database class="size-3.5 shrink-0" />
-      Data © Indian Railways · NTES · IRCTC & partners
-    </span>
-    <span class="inline-flex items-center gap-1.5 rounded-full border bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground">
+      Data © Indian Railways · NTES · IRCTC &amp; partners
+    </StatusBadge>
+    <StatusBadge tone="neutral" class="gap-1.5 px-3 py-1.5 font-normal normal-case">
       <TriangleAlert class="size-3.5 shrink-0" />
       Verify critical info with official sources
-    </span>
-    <span class="inline-flex items-center gap-1.5 rounded-full border bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground">
-      <Heart class="size-3.5 shrink-0 text-red-500" />
+    </StatusBadge>
+    <StatusBadge tone="neutral" class="gap-1.5 px-3 py-1.5 font-normal normal-case">
+      <Heart class="size-3.5 shrink-0 text-signal-stop" />
       Made for the Indian railway community
-    </span>
+    </StatusBadge>
   </footer>
 </section>

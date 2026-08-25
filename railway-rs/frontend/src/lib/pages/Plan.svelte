@@ -10,10 +10,6 @@
   import DateStrip from '$lib/components/DateStrip.svelte'
   import Breadcrumbs from '$lib/components/Breadcrumbs.svelte'
   import RouteContextBar from '$lib/components/RouteContextBar.svelte'
-  import MobileFilterBar from '$lib/components/MobileFilterBar.svelte'
-  import TrainSearchFilter from '$lib/components/TrainSearchFilter.svelte'
-  import JourneysTable from '$lib/pages/JourneysTable.svelte'
-  import Availability from '$lib/pages/Availability.svelte'
 
   let { src = '', dst = '', date = '', tab = 'trains' } = $props()
 
@@ -78,20 +74,20 @@
 <!-- PageHeader + Breadcrumbs (desktop always, mobile when no route) -->
 {#if !viewport.narrow || !hasRoute}
   <div class="hidden lg:block">
-    <PageHeader title="Plan a trip" description="Trains and seat availability between any two stations." />
-    <Breadcrumbs items={[{ label: 'Home', href: '/' }, { label: 'Plan a trip' }]} class="mb-3" />
+    <PageHeader title="Plan a trip" description="Trains and seat availability between two stations." />
+    <Breadcrumbs items={[{ label: 'Home', href: '/' }, { label: 'Plan a trip' }]} />
   </div>
   <div class="lg:hidden">
     <PageHeader title="Plan a trip" size="sm" />
   </div>
 {/if}
 
-<!-- Search form card — visible on both mobile and desktop -->
+<!-- Search form card -->
 <Card.Root>
-  <Card.Content class="grid gap-3 p-4">
+  <Card.Content class="grid gap-2 p-2">
     <StationPairInput bind:from bind:to onSwap={() => { if (canSearch) search() }} />
     <DateStrip bind:value={journeyDate} />
-    <Button onclick={search} disabled={!canSearch} class="w-full mt-1">Search</Button>
+    <Button onclick={search} disabled={!canSearch} class="w-full">Search</Button>
   </Card.Content>
 </Card.Root>
 
@@ -102,15 +98,8 @@
   </div>
 {/if}
 
-<!-- Mobile: inline search filter in availability tab -->
-{#if viewport.narrow && activeTab === 'availability' && hasRoute}
-  <div class="px-4 pt-3 lg:hidden">
-    <TrainSearchFilter count={0} bind:query={filterQuery} />
-  </div>
-{/if}
-
 <!-- Tabs -->
-<Tabs.Root bind:value={activeTab} class="mt-4">
+<Tabs.Root bind:value={activeTab} class="mt-3">
   <Tabs.List>
     <Tabs.Trigger value="trains">Trains</Tabs.Trigger>
     <Tabs.Trigger value="availability">Availability</Tabs.Trigger>
@@ -120,12 +109,8 @@
     <JourneysTable src={cSrc} dst={cDst} embedded />
   </Tabs.Content>
   <Tabs.Content value="availability">
-    <Availability src={cSrc} dst={cDst} date={cDate} embedded filterQuery={activeTab === 'availability' ? filterQuery : ''} />
+    <Availability src={cSrc} dst={cDst} date={cDate} embedded filterQuery={filterQuery} />
   </Tabs.Content>
 </Tabs.Root>
 
-<!-- Mobile: sticky bottom filter bar in availability tab -->
-{#if viewport.narrow && activeTab === 'availability' && hasRoute}
-  <MobileFilterBar />
-  <div class="h-14 lg:hidden"></div>
-{/if}
+
