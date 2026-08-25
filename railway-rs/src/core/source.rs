@@ -4,6 +4,26 @@ use serde_json::Value;
 use super::error::{AppError, CaptchaContext};
 use super::http::HttpClient;
 
+pub mod labels {
+    pub const NTES: &str = "NTES";
+    pub const RAILYATRI: &str = "Railyatri";
+    pub const IRCTC: &str = "IRCTC";
+    pub const PAYTM: &str = "Paytm";
+    pub const COROVER: &str = "CoRover";
+    pub const INDIAN_RAILWAYS: &str = "Indian Railways";
+    pub const ETRAIN: &str = "etrain";
+}
+pub mod metric {
+    pub const NTES: &str = "ntes";
+    pub const RAILYATRI: &str = "railyatri";
+    pub const IRCTC: &str = "irctc";
+    pub const PAYTM: &str = "paytm";
+    pub const COROVER_API: &str = "corover-api";
+    pub const COROVER_CDN: &str = "corover-cdn";
+}
+pub const RETRY_DELAY_MS: u64 = 400;
+pub const BROWSER_UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
+
 /// Result of a single source fetch.
 #[derive(Debug)]
 pub struct SourceOutcome {

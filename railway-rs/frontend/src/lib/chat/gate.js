@@ -108,6 +108,10 @@ const HINGLISH_PHRASES = Object.entries(HINGLISH)
  * spaces -> light suffix strip -> Hinglish glossary. */
 export function normalize(q) {
   let s = String(q ?? '').toLowerCase()
+  // Arrow / route separators become explicit " to " so "SC→PUNE" or "SC->PUNE" keeps signal
+  s = s.replace(/[→⇒⟶➝➜➔➤]/g, ' to ')
+  s = s.replace(/\s*->\s*/g, ' to ')
+  s = s.replace(/\s*=>\s*/g, ' to ')
   s = s.replace(/[^a-z0-9\s-]/g, ' ').replace(/\s+/g, ' ').trim()
   if (!s) return ''
   s = s.split(' ').map(stripSuffix).join(' ')

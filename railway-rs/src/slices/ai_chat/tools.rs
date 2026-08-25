@@ -758,11 +758,11 @@ fn project_station_board(dto: &crate::models::LiveStationResponse) -> Value {
 /// accepted formats and is normalized to ISO (`YYYY-MM-DD`).
 fn resolve_journey_date(args: &Value) -> Result<String, AppError> {
     match args.get("date").and_then(Value::as_str) {
-        None => Ok(today_ist()),
+        None => Ok(crate::core::time::today_ist()),
         Some(raw) => {
             let raw = raw.trim();
             if raw.is_empty() || raw.eq_ignore_ascii_case("today") {
-                return Ok(today_ist());
+                return Ok(crate::core::time::today_ist());
             }
             for fmt in ["%Y-%m-%d", "%Y%m%d", "%d-%m-%Y", "%d/%m/%Y"] {
                 if let Ok(d) = chrono::NaiveDate::parse_from_str(raw, fmt) {
@@ -774,14 +774,6 @@ fn resolve_journey_date(args: &Value) -> Result<String, AppError> {
             )))
         }
     }
-}
-
-fn today_ist() -> String {
-    let offset = chrono::FixedOffset::east_opt(5 * 3600 + 30 * 60).expect("IST offset is valid");
-    chrono::Utc::now()
-        .with_timezone(&offset)
-        .date_naive()
-        .to_string()
 }
 
 fn require_str(args: &Value, key: &str) -> Result<String, AppError> {
@@ -1036,7 +1028,7 @@ mod tests {
 
     #[test]
     fn journey_date_accepts_known_formats_defaults_today() {
-        let today = today_ist();
+        let today = crate::core::time::today_ist();
         assert_eq!(resolve_journey_date(&json!({})).unwrap(), today);
         assert_eq!(resolve_journey_date(&json!({"date": ""})).unwrap(), today);
         assert_eq!(

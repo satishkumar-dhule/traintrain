@@ -15,6 +15,7 @@ import RecentSearches from '$lib/components/RecentSearches.svelte'
 import PageHeader from '$lib/components/PageHeader.svelte'
 import Breadcrumbs from '$lib/components/Breadcrumbs.svelte'
 import RouteContextBar from '$lib/components/RouteContextBar.svelte'
+import PageShell from '$lib/components/PageShell.svelte'
 import EntityChip from '$lib/components/EntityChip.svelte'
 import ResultMeta from '$lib/components/ResultMeta.svelte'
 import StatPill from '$lib/components/StatPill.svelte'
@@ -28,6 +29,7 @@ import {
 } from '$lib/components/badges/index.js'
 import TrackRule from '$lib/components/TrackRule.svelte'
 import BottomSpacer from '$lib/components/BottomSpacer.svelte'
+import AsyncState from '$lib/components/AsyncState.svelte'
 import { asText, fmtDash } from '$lib/format.js'
 
   /* Chart-lamp tone for a passenger row: confirmed→go, RAC/waitlist→hold,
@@ -182,21 +184,15 @@ import { asText, fmtDash } from '$lib/format.js'
 {/snippet}
 
 <section class="grid gap-4 md:gap-6" class:idle-center={phase === 'idle'}>
-  {#if !viewport.narrow}
-    <PageHeader title="PNR status" description="10-digit passenger name record. Upstream may require a captcha.">
-      {#snippet children()}
-        <Breadcrumbs items={[{ label: 'Home', href: '/' }, { label: 'PNR', href: '/pnr' }]} />
-      {/snippet}
-    </PageHeader>
-  {/if}
-
-  {#if viewport.narrow && data}
-    <RouteContextBar
-      from={committed}
-      to={data?.train_name || 'PNR Status'}
-      onEdit={() => { query = ''; committed = ''; data = null; }}
-    />
-  {/if}
+  <PageShell
+    title="PNR status"
+    description="10-digit passenger name record. Upstream may require a captcha."
+    breadcrumbs={[{ label: 'Home', href: '/' }, { label: 'PNR', href: '/pnr' }]}
+    routeFrom={committed}
+    routeTo={data?.train_name || 'PNR Status'}
+    onEdit={() => { query = ''; committed = ''; data = null; }}
+    showRouteBar={!!data}
+  />
 
   <Card.Root>
     <Card.Content class="flex flex-wrap items-end gap-3 max-lg:p-3">
@@ -265,80 +261,75 @@ import { asText, fmtDash } from '$lib/format.js'
         </div>
       </Card.Content>
     </Card.Root>
-  {:else if phase === 'loading'}
-    <div class="grid gap-2" aria-busy="true">
-      {#each [0, 1, 2] as i (i)}
-        <Skeleton class="h-12 w-full" />
-      {/each}
-    </div>
-  {:else if phase === 'error'}
-    <Alert.Root variant="destructive" role="alert">
-      <Alert.Title>Could not load PNR</Alert.Title>
-      <Alert.Description>{errorMsg}</Alert.Description>
-    </Alert.Root>
-  {:else if data}
-    <Card.Root>
-      <Card.Header class="gap-3 space-y-0">
-        <div class="flex flex-wrap items-center justify-between gap-2">
-          <Card.Title class="flex flex-wrap items-center gap-2">
-            <span class="data-num text-xl leading-none font-semibold text-primary sm:text-2xl" title="PNR {committed}">{committed}</span>
-            <EntityChip type="train" code={data.train_number} name={data.train_name} />
-            <span>{data.train_name ?? ''}</span>
-            <TrainDelayBadge number={data.train_number} name={data.train_name} />
-          </Card.Title>
-          <DataSourceBadge source={data.data_source} freshness={data.freshness} />
-        </div>
-        <ResultMeta>
-          <StatPill label="Passengers" value={passengers.length} />
-        </ResultMeta>
-        <div class="flex flex-wrap items-center gap-x-6 gap-y-3 rounded-lg border bg-muted/40 px-5 py-3.5 max-lg:gap-x-4 max-lg:px-3 max-lg:py-2.5 min-w-0">
-          <div class="grid min-w-24 sm:min-w-28 gap-0.5 min-w-0">
-            <EntityChip type="station" code={data.from?.code} name={data.from?.name} size="sm" />
-            <span class="truncate text-xs text-muted-foreground [overflow-wrap:anywhere]">{fmtDash(data.from?.name)}</span>
-            <span class="data-num text-xs text-muted-foreground">
-              {fmtDash(data.from?.time)}{#if data.from?.day}&nbsp;· day {data.from.day}{/if}
-            </span>
-          </div>
-          <ArrowRight class="size-4 shrink-0 text-muted-foreground" />
-          <div class="grid min-w-24 sm:min-w-28 gap-0.5 min-w-0">
-            <EntityChip type="station" code={data.to?.code} name={data.to?.name} size="sm" />
-            <span class="truncate text-xs text-muted-foreground [overflow-wrap:anywhere]">{fmtDash(data.to?.name)}</span>
-            <span class="data-num text-xs text-muted-foreground">
-              {fmtDash(data.to?.time)}{#if data.to?.day}&nbsp;· day {data.to.day}{/if}
-            </span>
-          </div>
-          <StatusBadge tone="info" class="data-num ml-auto shrink-0 max-lg:w-full max-lg:justify-center">journey {fmtDash(data.journey_date)}</StatusBadge>
-        </div>
-      </Card.Header>
-      <Card.Content class="border-t border-dashed pt-3">
-        <DataTable
-          columns={cols}
-          rows={passengers}
-          primary="booking_status"
-          titleText={(p) => `Passenger ${p.n ?? ''}`.trim()}
-          rowKey={(p, i) => i}
-          cells={{ n: numCell, booking_status: bookingCell }}
-          empty="No passengers returned."
-        />
-      </Card.Content>
-    </Card.Root>
-    {#if notice || lastUpdated}
-      <TrackRule />
-      <div class="flex flex-wrap items-center gap-x-3 gap-y-1 px-1 text-xs text-muted-foreground">
-        {#if notice}
-          <span class="max-w-full truncate" title={notice}>{notice}</span>
-        {/if}
-        {#if lastUpdated}
-          <span>updated {fmtUpdated(lastUpdated)}</span>
-        {/if}
-      </div>
-    {/if}
   {:else}
-    <EmptyState
-      icon={Ticket}
-      title="No PNR checked yet"
-      hint="Enter a 10-digit PNR above or pick a recent lookup to see status."
-    />
+    <AsyncState
+      phase={phase}
+      error={errorMsg}
+      empty={!data}
+      skeletonCount={3}
+      emptyIcon={Ticket}
+      emptyTitle="No PNR checked yet"
+      emptyHint="Enter a 10-digit PNR above or pick a recent lookup to see status."
+    >
+      {#snippet children()}
+        <Card.Root>
+          <Card.Header class="gap-3 space-y-0">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <Card.Title class="flex flex-wrap items-center gap-2">
+                <span class="data-num text-xl leading-none font-semibold text-primary sm:text-2xl" title="PNR {committed}">{committed}</span>
+                <EntityChip type="train" code={data.train_number} name={data.train_name} />
+                <span>{data.train_name ?? ''}</span>
+                <TrainDelayBadge number={data.train_number} name={data.train_name} />
+              </Card.Title>
+              <DataSourceBadge source={data.data_source} freshness={data.freshness} />
+            </div>
+            <ResultMeta>
+              <StatPill label="Passengers" value={passengers.length} />
+            </ResultMeta>
+            <div class="flex flex-wrap items-center gap-x-6 gap-y-3 rounded-lg border bg-muted/40 px-5 py-3.5 max-lg:gap-x-4 max-lg:px-3 max-lg:py-2.5 min-w-0">
+              <div class="grid min-w-24 sm:min-w-28 gap-0.5 min-w-0">
+                <EntityChip type="station" code={data.from?.code} name={data.from?.name} size="sm" />
+                <span class="truncate text-xs text-muted-foreground [overflow-wrap:anywhere]">{fmtDash(data.from?.name)}</span>
+                <span class="data-num text-xs text-muted-foreground">
+                  {fmtDash(data.from?.time)}{#if data.from?.day}&nbsp;· day {data.from.day}{/if}
+                </span>
+              </div>
+              <ArrowRight class="size-4 shrink-0 text-muted-foreground" />
+              <div class="grid min-w-24 sm:min-w-28 gap-0.5 min-w-0">
+                <EntityChip type="station" code={data.to?.code} name={data.to?.name} size="sm" />
+                <span class="truncate text-xs text-muted-foreground [overflow-wrap:anywhere]">{fmtDash(data.to?.name)}</span>
+                <span class="data-num text-xs text-muted-foreground">
+                  {fmtDash(data.to?.time)}{#if data.to?.day}&nbsp;· day {data.to.day}{/if}
+                </span>
+              </div>
+              <StatusBadge tone="info" class="data-num ml-auto shrink-0 max-lg:w-full max-lg:justify-center">journey {fmtDash(data.journey_date)}</StatusBadge>
+            </div>
+          </Card.Header>
+          <Card.Content class="border-t border-dashed pt-3">
+            <DataTable
+              columns={cols}
+              rows={passengers}
+              primary="booking_status"
+              titleText={(p) => `Passenger ${p.n ?? ''}`.trim()}
+              rowKey={(p, i) => i}
+              cells={{ n: numCell, booking_status: bookingCell }}
+              empty="No passengers returned."
+            />
+          </Card.Content>
+        </Card.Root>
+        {#if notice || lastUpdated}
+          <TrackRule />
+          <div class="flex flex-wrap items-center gap-x-3 gap-y-1 px-1 text-xs text-muted-foreground">
+            {#if notice}
+              <span class="max-w-full truncate" title={notice}>{notice}</span>
+            {/if}
+            {#if lastUpdated}
+              <span>updated {fmtUpdated(lastUpdated)}</span>
+            {/if}
+          </div>
+        {/if}
+      {/snippet}
+    </AsyncState>
   {/if}
   <BottomSpacer />
 </section>

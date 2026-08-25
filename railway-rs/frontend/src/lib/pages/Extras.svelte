@@ -14,12 +14,12 @@
 import FilterIcon from 'lucide-svelte/icons/filter'
 import DataTable from '$lib/components/DataTable.svelte'
 import EmptyState from '$lib/components/EmptyState.svelte'
+import AsyncState from '$lib/components/AsyncState.svelte'
 import {
   TrainNumberBadge,
   StationCodeBadge,
   RunsOnBadges,
-  DataSourceBadge,
-  DAY_LETTERS
+  DataSourceBadge
 } from '$lib/components/badges/index.js'
 import SignalDot from '$lib/components/SignalDot.svelte'
 import TabBar from '$lib/components/TabBar.svelte'
@@ -280,71 +280,62 @@ import { asText, fmtDash } from '$lib/format.js'
         </Card.Content>
       </Card.Root>
 
-      {#if hPhase === 'loading' || hPhase === 'refreshing'}
-        <div class="grid gap-2" aria-busy="true">
-          {#each [0, 1, 2, 3] as i (i)}
-            <Skeleton class="h-10 w-full" />
-          {/each}
-        </div>
-      {:else if hPhase === 'error'}
-        <Alert.Root variant="destructive" role="alert">
-          <Alert.Title>Could not load heritage trains</Alert.Title>
-          <Alert.Description>{hError}</Alert.Description>
-        </Alert.Root>
-      {:else if hData}
-        <Card.Root>
-          <Card.Header class="flex flex-col items-start justify-between gap-3 space-y-0 sm:flex-row sm:items-center min-w-0">
-            <div class="grid gap-2 min-w-0">
-              <span class="grid size-9 place-items-center rounded-md bg-primary/10 text-primary">
-                <LandmarkIcon class="size-4" aria-hidden="true" />
-              </span>
-              <div class="grid gap-1 min-w-0">
-                <span class="w-fit rounded bg-saffron/15 px-1.5 text-xs font-semibold uppercase tracking-wide text-saffron-ink">Heritage</span>
-                <Card.Title class="break-words">Heritage trains</Card.Title>
-                <Card.Description class="flex flex-wrap items-center gap-x-1 break-words [overflow-wrap:anywhere]">
-                  <span><span class="data-num">{hTotal}</span> train{hTotal === 1 ? '' : 's'}</span>
-                  {#if hCaption}<span class="truncate max-w-[60vw]">· {hCaption}</span>{/if}
-                </Card.Description>
+      <AsyncState
+        phase={hPhase}
+        error={hError}
+        empty={!hData}
+        skeletonCount={4}
+        emptyIcon={LandmarkIcon}
+        emptyTitle="Heritage list not loaded"
+        emptyHint="Heritage trains load automatically — press Filter to narrow by keyword."
+      >
+        {#snippet children()}
+          <Card.Root>
+            <Card.Header class="flex flex-col items-start justify-between gap-3 space-y-0 sm:flex-row sm:items-center min-w-0">
+              <div class="grid gap-2 min-w-0">
+                <span class="grid size-9 place-items-center rounded-md bg-primary/10 text-primary">
+                  <LandmarkIcon class="size-4" aria-hidden="true" />
+                </span>
+                <div class="grid gap-1 min-w-0">
+                  <span class="w-fit rounded bg-saffron/15 px-1.5 text-xs font-semibold uppercase tracking-wide text-saffron-ink">Heritage</span>
+                  <Card.Title class="break-words">Heritage trains</Card.Title>
+                  <Card.Description class="flex flex-wrap items-center gap-x-1 break-words [overflow-wrap:anywhere]">
+                    <span><span class="data-num">{hTotal}</span> train{hTotal === 1 ? '' : 's'}</span>
+                    {#if hCaption}<span class="truncate max-w-[60vw]">· {hCaption}</span>{/if}
+                  </Card.Description>
+                </div>
               </div>
-            </div>
-            <div class="flex flex-wrap items-center justify-end gap-2 min-w-0">
-              {#if asText(selection).trim()}<Badge variant="outline" class="max-w-[60vw] truncate">keyword: {selection}</Badge>{/if}
-              <DataSourceBadge source={hSource} />
-            </div>
-          </Card.Header>
-          <Card.Content>
-            <DataTable
-              columns={heritageCols}
-              rows={hTrains}
-              primary="name"
-              rowKey={(t, i) => `${i}|${asText(t.number)}|${asText(t.name)}`}
-              cells={{ number: hNumberCell, route: hRouteCell }}
-              empty="No heritage trains match this selection."
-            />
-          </Card.Content>
-        </Card.Root>
-      {:else}
-        <EmptyState
-          icon={LandmarkIcon}
-          title="Heritage list not loaded"
-          hint="Heritage trains load automatically — press Filter to narrow by keyword."
-        />
-      {/if}
+              <div class="flex flex-wrap items-center justify-end gap-2 min-w-0">
+                {#if asText(selection).trim()}<Badge variant="outline" class="max-w-[60vw] truncate">keyword: {selection}</Badge>{/if}
+                <DataSourceBadge source={hSource} />
+              </div>
+            </Card.Header>
+            <Card.Content>
+              <DataTable
+                columns={heritageCols}
+                rows={hTrains}
+                primary="name"
+                rowKey={(t, i) => `${i}|${asText(t.number)}|${asText(t.name)}`}
+                cells={{ number: hNumberCell, route: hRouteCell }}
+                empty="No heritage trains match this selection."
+              />
+            </Card.Content>
+          </Card.Root>
+        {/snippet}
+      </AsyncState>
     </Tabs.Content>
 
     <Tabs.Content value="parcel" class="mt-4 grid gap-4">
-      {#if pPhase === 'loading' || pPhase === 'refreshing'}
-        <div class="grid gap-2" aria-busy="true">
-          {#each [0, 1, 2, 3] as i (i)}
-            <Skeleton class="h-10 w-full" />
-          {/each}
-        </div>
-      {:else if pPhase === 'error'}
-        <Alert.Root variant="destructive" role="alert">
-          <Alert.Title>Could not load parcel specials</Alert.Title>
-          <Alert.Description>{pError}</Alert.Description>
-        </Alert.Root>
-      {:else if pData}
+      <AsyncState
+        phase={pPhase}
+        error={pError}
+        empty={!pData}
+        skeletonCount={4}
+        emptyIcon={PackageIcon}
+        emptyTitle="Parcel list not loaded"
+        emptyHint="Parcel specials load automatically — switch tabs and back to retry."
+      >
+        {#snippet children()}
         <Card.Root>
           <Card.Header class="flex flex-col items-start justify-between gap-3 space-y-0 sm:flex-row sm:items-center">
             <div class="grid gap-2 min-w-0">
@@ -373,13 +364,8 @@ import { asText, fmtDash } from '$lib/format.js'
             />
           </Card.Content>
         </Card.Root>
-      {:else}
-        <EmptyState
-          icon={PackageIcon}
-          title="Parcel list not loaded"
-          hint="Parcel specials load automatically when you open this tab — switch tabs and back to retry."
-        />
-      {/if}
+        {/snippet}
+      </AsyncState>
     </Tabs.Content>
   </Tabs.Root>
   <BottomSpacer />

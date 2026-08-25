@@ -104,6 +104,77 @@ impl Cache {
             map.clear();
         }
     }
+    pub fn get_json<T: serde::de::DeserializeOwned>(&self, key: &str) -> Option<T> {
+        self.get(key).and_then(|v| serde_json::from_value(v).ok())
+    }
+    pub fn set_json<T: serde::Serialize>(&self, key: &str, value: &T) -> Result<(), serde_json::Error> {
+        let v = serde_json::to_value(value)?;
+        self.set(key, v);
+        Ok(())
+    }
+    pub fn set_json_with_ttl<T: serde::Serialize>(
+        &self,
+        key: &str,
+        value: &T,
+        ttl: Duration,
+    ) -> Result<(), serde_json::Error> {
+        let v = serde_json::to_value(value)?;
+        self.set_with_ttl(key, v, ttl);
+        Ok(())
+    }
+}
+pub mod keys {
+    pub fn live_status(train: &str, date: &str) -> String {
+        format!("live_status:{train}:{date}")
+    }
+    pub fn schedule(train: &str) -> String {
+        format!("schedule:{train}")
+    }
+    pub fn availability(src: &str, dst: &str, date: &str, source: &str) -> String {
+        format!("availability:{src}:{dst}:{date}:{source}")
+    }
+    pub fn trains_between(src: &str, dst: &str) -> String {
+        format!("trains_between:{src}:{dst}")
+    }
+    pub fn live_station(station: &str, hours: &str) -> String {
+        format!("live_station:{station}:{hours}")
+    }
+    pub fn live_station_to(station: &str, hours: &str, dest: &str) -> String {
+        format!("live_station:{station}:{hours}:to-{dest}")
+    }
+    pub fn average_delay(train: &str) -> String {
+        format!("average_delay:{train}")
+    }
+    pub fn heritage(selection: u8) -> String {
+        format!("heritage:{selection}")
+    }
+    pub fn parcel() -> String {
+        "parcel".to_string()
+    }
+    pub fn exceptional(train: &str) -> String {
+        format!("exceptional:{train}")
+    }
+    pub fn station_timetable(station: &str, date: &str) -> String {
+        format!("station_timetable:{station}:{date}")
+    }
+    pub fn chart(train: &str, date: &str, station: &str) -> String {
+        format!("irctc:chart:{train}:{date}:{station}")
+    }
+    pub fn train_on_map(train: &str) -> String {
+        format!("train_on_map:{train}")
+    }
+    pub fn train_on_map_station(train: &str, station: &str) -> String {
+        format!("train_on_map:{train}:{}", station.to_ascii_uppercase())
+    }
+    pub fn journey_basis(train: &str, station: &str) -> String {
+        format!("journey_basis:{train}:{station}")
+    }
+    pub fn pnr(pnr: &str) -> String {
+        format!("pnr:{pnr}")
+    }
+    pub fn search_stations(q: &str) -> String {
+        format!("search:stations:{q}")
+    }
 }
 
 #[cfg(test)]

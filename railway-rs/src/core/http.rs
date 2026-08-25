@@ -14,7 +14,6 @@ use super::error::AppError;
 #[derive(Clone)]
 pub struct HttpClient {
     inner: Arc<reqwest::Client>,
-    user_agent: String,
 }
 
 impl HttpClient {
@@ -45,7 +44,6 @@ impl HttpClient {
 
         Ok(Self {
             inner: Arc::new(client),
-            user_agent: "".into(),
         })
     }
 
@@ -151,9 +149,5 @@ impl HttpClient {
             ));
         }
         Ok(String::from_utf8_lossy(&bytes).into_owned())
-    }
-
-    pub fn user_agent(&self) -> &str {
-        &self.user_agent
     }
 }

@@ -37,10 +37,7 @@ impl Service {
             .to_string();
         // The form wants the destination as its `CODE - NAME` pair; resolve
         // the official name from the same dataset the browser list uses.
-        let dest_pair = match destination {
-            Some(dest) => Some((dest, state.datasets.station_name(dest).unwrap_or(dest))),
-            None => None,
-        };
+        let dest_pair = destination.map(|dest| (dest, state.datasets.station_name(dest).unwrap_or(dest)));
         let data = state
             .ntes_web
             .live_station(station, &name, hours, dest_pair)

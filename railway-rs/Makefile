@@ -4,8 +4,7 @@ build:
 	cargo build --release
 
 build-ui:
-	npm ci --no-fund --no-audit
-	npm run build
+	(cd frontend && npm ci && npm run build)
 
 run:
 	RAILWAY_PORT=$(PORT) cargo run

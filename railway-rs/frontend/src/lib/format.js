@@ -1,7 +1,6 @@
 // Shared formatting helpers - super-optimized, memoized, single source of truth
 // Fan-out across Train, Station, Availability, Pnr, Exceptions, Extras, Home, System, About
-
-export const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+export { DATE_RE, todayISO, isoShift, diffDays, clampDate, parseIso } from './dates.js'
 export const RUN_MONTHS = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec']
 export const MONTHS_UC = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC']
 
@@ -65,11 +64,6 @@ export function ntesDate(iso) {
   const mi = Number(m[2]) - 1
   if (mi < 0 || mi > 11) return null
   return `${m[3]}-${MONTHS_UC[mi]}-${m[1]}`
-}
-
-export function todayISO() {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
 }
 
 export function fmtUptime(s) {

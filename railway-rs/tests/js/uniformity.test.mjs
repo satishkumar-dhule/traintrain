@@ -51,7 +51,7 @@ test('U1: every page titles through PageHeader or a single signage h1 — never 
   for (const file of pages) {
     const src = fs.readFileSync(file, 'utf8');
     const rel = path.relative(LIB, file);
-    const usesPageHeader = /<PageHeader[\s/>]/.test(src);
+    const usesPageHeader = /<PageHeader[\s/>]/.test(src) || /<PageShell[\s/>]/.test(src);
     const h1s = [...markupOf(src).matchAll(/<h1[^>]*>/g)];
     if (usesPageHeader) {
       assert.equal(h1s.length, 0, `${rel}: PageHeader pages must not hand-roll an <h1>`);
@@ -69,7 +69,7 @@ test('U1: every page titles through PageHeader or a single signage h1 — never 
 test('U2: at most one track-rule per page', () => {
   for (const file of pages) {
     const src = fs.readFileSync(file, 'utf8');
-    const n = (src.match(/track-rule/g) ?? []).length;
+    const n = (src.match(/track-rule/g) ?? []).length + (src.match(/<TrackRule[\s/>]/g) ?? []).length;
     assert.ok(n <= 1, `${path.relative(LIB, file)}: ${n} track-rules (max 1)`);
   }
 });

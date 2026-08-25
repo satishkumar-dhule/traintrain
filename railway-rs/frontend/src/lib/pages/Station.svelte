@@ -20,6 +20,7 @@ import PageHeader from '$lib/components/PageHeader.svelte'
 import SignalDot from '$lib/components/SignalDot.svelte'
 import Breadcrumbs from '$lib/components/Breadcrumbs.svelte'
 import RouteContextBar from '$lib/components/RouteContextBar.svelte'
+import PageShell from '$lib/components/PageShell.svelte'
 import EntityChip from '$lib/components/EntityChip.svelte'
 import ResultMeta from '$lib/components/ResultMeta.svelte'
 import StatPill from '$lib/components/StatPill.svelte'
@@ -292,27 +293,24 @@ import { norm, fmtDash, numOrNull, ntesDate } from '$lib/format.js'
 {/snippet}
 
 <section class="grid grid-cols-[minmax(0,1fr)] gap-4 md:gap-6" class:idle-center={!committedCode}>
-  {#if !viewport.narrow}
-    <PageHeader title="Station board" description="Live board and full-day timetable for any station.">
-      {#snippet children()}
-        <Breadcrumbs items={[{ label: 'Home', href: '/' }, { label: 'Station', href: '/station' }, { label: committedCode ? 'Station ' + committedCode : 'Station' }]} />
-        {#if infoNames.length}
-          <p class="text-sm text-muted-foreground">{infoNames.join(' · ')}</p>
-        {/if}
-        {#if infoMeta}
-          <p class="text-xs text-muted-foreground">{infoMeta}</p>
-        {/if}
-      {/snippet}
-    </PageHeader>
-  {/if}
-
-  {#if viewport.narrow && committedCode}
-    <RouteContextBar
-      from={committedCode}
-      to={stationName}
-      onEdit={() => { committedCode = ''; query = '' }}
-    />
-  {/if}
+  {#snippet stationExtra()}
+    {#if infoNames.length}
+      <p class="text-sm text-muted-foreground">{infoNames.join(' · ')}</p>
+    {/if}
+    {#if infoMeta}
+      <p class="text-xs text-muted-foreground">{infoMeta}</p>
+    {/if}
+  {/snippet}
+  <PageShell
+    title="Station board"
+    description="Live board and full-day timetable for any station."
+    breadcrumbs={[{ label: 'Home', href: '/' }, { label: 'Station', href: '/station' }, { label: committedCode ? 'Station ' + committedCode : 'Station' }]}
+    routeFrom={committedCode}
+    routeTo={stationName}
+    onEdit={() => { committedCode = ''; query = '' }}
+    showRouteBar={!!committedCode}
+    extra={stationExtra}
+  />
 
   <Card.Root>
     <Card.Content class="flex flex-wrap items-end gap-3 max-lg:gap-2">

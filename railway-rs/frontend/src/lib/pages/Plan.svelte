@@ -5,16 +5,17 @@
   import * as Tabs from '$lib/components/ui/tabs/index.js'
   import * as Card from '$lib/components/ui/card/index.js'
   import { Button } from '$lib/components/ui/button/index.js'
-  import PageHeader from '$lib/components/PageHeader.svelte'
-  import StationPairInput from '$lib/components/StationPairInput.svelte'
-  import DateStrip from '$lib/components/DateStrip.svelte'
-  import Breadcrumbs from '$lib/components/Breadcrumbs.svelte'
-  import RouteContextBar from '$lib/components/RouteContextBar.svelte'
-  import JourneysTable from '$lib/components/JourneysTable.svelte'
-  import Availability from '$lib/pages/Availability.svelte'
-  import TabBar from '$lib/components/TabBar.svelte'
-  import TrackRule from '$lib/components/TrackRule.svelte'
-  import BottomSpacer from '$lib/components/BottomSpacer.svelte'
+import PageHeader from '$lib/components/PageHeader.svelte'
+import StationPairInput from '$lib/components/StationPairInput.svelte'
+import DateStrip from '$lib/components/DateStrip.svelte'
+import Breadcrumbs from '$lib/components/Breadcrumbs.svelte'
+import RouteContextBar from '$lib/components/RouteContextBar.svelte'
+import PageShell from '$lib/components/PageShell.svelte'
+import JourneysTable from '$lib/components/JourneysTable.svelte'
+import Availability from '$lib/pages/Availability.svelte'
+import TabBar from '$lib/components/TabBar.svelte'
+import TrackRule from '$lib/components/TrackRule.svelte'
+import BottomSpacer from '$lib/components/BottomSpacer.svelte'
 
   let { src = '', dst = '', date = '', tab = 'trains' } = $props()
 
@@ -26,7 +27,8 @@
   let cDst = $state(norm(dst))
   let cDate = $state(DATE_RE.test(String(date)) ? String(date) : todayISO())
 
-  let activeTab = $state('trains')
+  let activeTab = $state(tab === 'availability' ? 'availability' : 'trains')
+  let prevTab = $state(tab === 'availability' ? 'availability' : 'trains')
   let filterQuery = $state('')
 
   const hasRoute = $derived(Boolean(cSrc) && Boolean(cDst))
@@ -46,6 +48,18 @@
     if (location.pathname !== want) navigate(want)
   }
 
+  function selectRoute(s, d, dt) {
+    const ns = norm(s)
+    const nd = norm(d)
+    const ndt = DATE_RE.test(String(dt)) ? String(dt) : todayISO()
+    if (!ns || !nd || !DATE_RE.test(ndt) || ns === nd) return
+    from = ns
+    to = nd
+    journeyDate = ndt
+    filterQuery = ''
+    search()
+  }
+
   $effect(() => {
     const ns = norm(src)
     const nd = norm(dst)
@@ -63,35 +77,30 @@
       journeyDate = String(date)
       cDate = String(date)
     }
-    if (nt === 'availability') activeTab = 'availability'
+    if (nt !== prevTab) {
+      activeTab = nt
+      prevTab = nt
+    }
   })
 </script>
 
-<!-- Mobile: route context bar replaces header when route is active -->
-{#if viewport.narrow && hasRoute}
-  <RouteContextBar from={cSrc} to={cDst} onEdit={() => {}} />
-{/if}
-
-<!-- PageHeader + Breadcrumbs (desktop always, mobile when no route) -->
-{#if !viewport.narrow || !hasRoute}
-  <div class="hidden lg:block">
-    <PageHeader title="Plan a trip" description="Trains and seat availability between two stations." />
-    <Breadcrumbs items={[{ label: 'Home', href: '/' }, { label: 'Plan a trip' }]} />
-  </div>
-  <div class="lg:hidden">
-    <PageHeader title="Plan a trip" size="sm" />
-  </div>
-{/if}
-
-{#if !viewport.narrow}
-  <TrackRule />
-{/if}
+<PageShell
+  title="Plan a trip"
+  description="Trains and seat availability between two stations."
+  breadcrumbs={[{ label: 'Home', href: '/' }, { label: 'Plan a trip' }]}
+  routeFrom={cSrc}
+  routeTo={cDst}
+  onEdit={() => {}}
+  showRouteBar={hasRoute}
+/>
 
 <!-- Search form card -->
 <Card.Root>
   <Card.Content class="grid gap-2 p-2">
     <StationPairInput bind:from bind:to onSwap={() => { if (canSearch) search() }} />
-    <DateStrip bind:value={journeyDate} />
+    {#if !viewport.narrow || !hasRoute}
+      <DateStrip bind:value={journeyDate} />
+    {/if}
     <Button onclick={search} disabled={!canSearch} class="w-full">Search</Button>
   </Card.Content>
 </Card.Root>
@@ -111,10 +120,23 @@
   </TabBar>
 
   <Tabs.Content value="trains">
-    <JourneysTable src={cSrc} dst={cDst} embedded />
+    <JourneysTable
+      src={cSrc}
+      dst={cDst}
+      date={cDate}
+      embedded
+      onSelectRoute={selectRoute}
+    />
   </Tabs.Content>
   <Tabs.Content value="availability">
-    <Availability src={cSrc} dst={cDst} date={cDate} embedded filterQuery={filterQuery} />
+    <Availability
+      src={cSrc}
+      dst={cDst}
+      date={cDate}
+      embedded
+      filterQuery={filterQuery}
+      onSelectRoute={selectRoute}
+    />
   </Tabs.Content>
 </Tabs.Root>
 

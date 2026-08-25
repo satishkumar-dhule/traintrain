@@ -1,9 +1,10 @@
 <script>
   import { untrack } from 'svelte'
   import { api } from '$lib/api.js'
-  import { viewport } from '$lib/media.svelte.js'
   import SourceStatus from '$lib/SourceStatus.svelte'
   import SignalDot from '$lib/components/SignalDot.svelte'
+  import PageHeader from '$lib/components/PageHeader.svelte'
+  import FilterChipGroup from '$lib/components/FilterChipGroup.svelte'
   import * as Card from '$lib/components/ui/card/index.js'
   import { Skeleton } from '$lib/components/ui/skeleton/index.js'
   import * as Alert from '$lib/components/ui/alert/index.js'
@@ -17,7 +18,21 @@
   import DataTable from '$lib/components/DataTable.svelte'
   import TrackRule from '$lib/components/TrackRule.svelte'
   import BottomSpacer from '$lib/components/BottomSpacer.svelte'
-  import { fmtUptime, humanBytes, fmtInt } from '$lib/format.js'
+  import { fmtUptime, humanBytes } from '$lib/format.js'
+  import {
+    num,
+    memMb,
+    pctFromFrac,
+    latest,
+    seriesRange,
+    sparkPoints,
+    logLine,
+    tsTime,
+    sortedLogs,
+    codeClass,
+    cacheValue,
+    updatedTime
+  } from '$lib/metrics.js'
 
   let obs = $state({ phase: 'loading', data: null })
   let logsState = $state({ phase: 'loading', data: null })
@@ -63,51 +78,7 @@
     return () => clearInterval(timer)
   })
 
-  function num(v) {
-    const n = Number(v)
-    return Number.isFinite(n) ? n : null
-  }
-
-  function memMb(n) {
-    const b = num(n)
-    if (b === null) return '—'
-    return (b / (1024 * 1024)).toFixed(1)
-  }
-
-  function pctFromFrac(v) {
-    const f = num(v)
-    if (f === null) return '—'
-    return `${(f * 100).toFixed(1)}%`
-  }
-
-  function latest(arr) {
-    if (!Array.isArray(arr)) return null
-    for (let i = arr.length - 1; i >= 0; i--) {
-      const n = num(arr[i])
-      if (n !== null) return n
-    }
-    return null
-  }
-
-  function seriesRange(arr) {
-    if (!Array.isArray(arr)) return null
-    const vals = arr.slice(-60).map(num).filter((v) => v !== null)
-    if (!vals.length) return null
-    return { min: Math.min(...vals), max: Math.max(...vals) }
-  }
-
-  function sparkPoints(arr) {
-    if (!Array.isArray(arr)) return []
-    const tail = arr.slice(-60)
-    const vals = tail.map((v) => num(v)).map((v) => (v === null ? 0 : Math.max(v, 0)))
-    const max = Math.max(...vals)
-    return vals.map((v, i) => ({
-      pct: max > 0 ? Math.min(100, (v / max) * 100) : 0,
-      op: vals.length > 1 ? 0.2 + 0.8 * (i / (vals.length - 1)) : 1,
-      val: tail[i]
-    }))
-  }
-
+  // ---- shared spark config (single source, fan-out to 4 cards) ----
   const sparks = [
     {
       key: 'rps',
@@ -139,58 +110,11 @@
     }
   ]
 
-  function logLine(l) {
-    const f = l && typeof l === 'object' ? l.fields ?? {} : {}
-    const msg = l?.message != null ? String(l.message) : ''
-    const bits = []
-    if (f.method) bits.push(f.method)
-    if (f.path) bits.push(f.path)
-    if (f.status_code != null) bits.push(`→ ${f.status_code}`)
-    if (f.latency_ms != null) bits.push(`${f.latency_ms}ms`)
-    return bits.length ? `${msg} · ${bits.join(' ')}` : msg
-  }
-
-  function tsTime(t) {
-    const ms = num(t)
-    if (ms === null) return '—'
-    const d = new Date(ms)
-    if (Number.isNaN(d.getTime())) return '—'
-    return d.toLocaleTimeString('en-GB', { hour12: false })
-  }
-
-  function sortedLogs(raw) {
-    const arr = Array.isArray(raw) ? raw.slice() : []
-    arr.sort((a, b) => {
-      const ta = num(a?.ts) ?? 0
-      const tb = num(b?.ts) ?? 0
-      return tb - ta
-    })
-    return arr
-  }
-
-  function codeClass(code) {
-    if (code >= 200 && code < 300) return 'bg-signal-go'
-    if (code >= 300 && code < 400) return 'bg-chart-3'
-    if (code >= 400 && code < 500) return 'bg-signal-hold'
-    if (code >= 500 && code < 600) return 'bg-signal-stop'
-    return 'bg-muted-foreground/40'
-  }
-
-  function cacheValue(key, v) {
-    if (/bytes/i.test(String(key))) {
-      const b = num(v)
-      if (b !== null) return humanBytes(b)
-    }
-    if (v === null || v === undefined || v === '') return '—'
-    if (typeof v === 'object') {
-      try {
-        return JSON.stringify(v)
-      } catch {
-        return String(v)
-      }
-    }
-    return String(v)
-  }
+  const LOG_FILTER_OPTS = [
+    { value: 'all', label: 'All' },
+    { value: 'warn', label: 'Warn+' },
+    { value: 'errors', label: 'Errors' }
+  ]
 
   /* Aggregated status-code distribution + derived error rate. All values
      come straight from the server counters; guards handle empty data. */
@@ -389,10 +313,68 @@
   const COMPACT_HERO_TITLE = 'text-[10px] font-medium uppercase tracking-wide text-muted-foreground lg:text-xs'
   const COMPACT_HERO_VALUE = 'data-num text-lg font-semibold tabular-nums lg:text-2xl'
 
-  function updatedTime(iso) {
-    if (!iso) return ''
-    const d = new Date(iso)
-    return Number.isNaN(d.getTime()) ? '' : d.toLocaleTimeString('en-GB', { hour12: false })
+  // ---- super n2 deep delegation: ONE handler fans out to N groups × M items = N·M elements ----
+  // Instead of N·M closures (one per row/tile/chip), a single listener at the section root
+  // reads data-* attributes and dispatches. This is O(1) listeners vs O(N·M) closures:
+  // 4 hero tiles + 6 stat tiles + 8 path rows + 5 status chips = 23 elements → 1 handler.
+  // Each branch returns early, so dispatch is O(1) per event (no loops beyond closest()).
+  function handleSystemAction(e) {
+    // 1) top paths — copy path string (8 rows)
+    const pathEl = e.target.closest?.('[data-path]')
+    if (pathEl) {
+      const p = pathEl.getAttribute('data-path')
+      if (p && navigator.clipboard?.writeText) navigator.clipboard.writeText(p).catch(() => {})
+      return
+    }
+    // 2) runtime stat tile — copy value (6 tiles)
+    const statEl = e.target.closest?.('[data-stat]')
+    if (statEl) {
+      const v = statEl.getAttribute('data-stat-value')
+      if (v && v !== '—' && navigator.clipboard?.writeText) navigator.clipboard.writeText(v).catch(() => {})
+      return
+    }
+    // 3) status legend — filter logs (N chips)
+    const statusEl = e.target.closest?.('[data-status-code]')
+    if (statusEl) {
+      const code = Number(statusEl.getAttribute('data-status-code'))
+      if (Number.isFinite(code)) {
+        if (code >= 500) logFilter = 'errors'
+        else if (code >= 400) logFilter = 'warn'
+        else logFilter = 'all'
+        document.getElementById('system-logs')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }
+      return
+    }
+    // 4) hero tile — copy hero value (4 tiles)
+    const heroEl = e.target.closest?.('[data-hero]')
+    if (heroEl) {
+      const v = heroEl.getAttribute('data-hero-value')
+      if (v && v !== '—' && navigator.clipboard?.writeText) navigator.clipboard.writeText(v).catch(() => {})
+      return
+    }
+  }
+
+  function handleSystemKey(e) {
+    if (e.key !== 'Enter' && e.key !== ' ') return
+    // delegate the same as click but via keyboard on focused data-* element
+    const target = e.target?.closest?.('[data-path],[data-stat],[data-status-code],[data-hero]') ?? e.target
+    if (!target) return
+    // synthesize a click-like dispatch through the same handler
+    const fake = { target, closest: target.closest?.bind(target) }
+    // manually check which data attr the focused element carries
+    if (target.hasAttribute?.('data-path') || target.closest?.('[data-path]')) {
+      e.preventDefault()
+      handleSystemAction(e)
+    } else if (target.hasAttribute?.('data-stat') || target.closest?.('[data-stat]')) {
+      e.preventDefault()
+      handleSystemAction(e)
+    } else if (target.hasAttribute?.('data-status-code') || target.closest?.('[data-status-code]')) {
+      e.preventDefault()
+      handleSystemAction(e)
+    } else if (target.hasAttribute?.('data-hero') || target.closest?.('[data-hero]')) {
+      e.preventDefault()
+      handleSystemAction(e)
+    }
   }
 </script>
 
@@ -425,52 +407,33 @@
   <LogLevelBadge level={l?.level} />
 {/snippet}
 
-<section class="grid gap-6">
-  {#if !viewport.narrow}
-    <div class="grid gap-1">
-      <div class="flex flex-wrap items-center justify-between gap-3">
-        <h1 class="signage flex items-center gap-2 text-2xl">
-          <Activity class="size-5 text-muted-foreground" />
-          System
-        </h1>
-        <div class="flex items-center gap-4">
-          {#if updatedAt && !note}
-            <span class="hidden text-xs text-muted-foreground data-num sm:inline">
-              Updated {updatedTime(updatedAt)}
-            </span>
-          {/if}
-          <Button type="button" variant="outline" size="sm" onclick={() => loadAll()} disabled={busy}>
-            <RefreshCw class={`mr-2 size-4${busy ? ' animate-spin' : ''}`} />
-            {busy ? 'Refreshing…' : 'Refresh'}
-          </Button>
-          <label class="mb-0.5 flex min-h-11 cursor-pointer items-center gap-2 py-2 text-sm text-muted-foreground">
-            <input type="checkbox" bind:checked={auto} class="size-5 accent-[var(--primary)]" />
-            Auto 10s
-          </label>
-        </div>
-      </div>
-      <p class="text-sm text-muted-foreground">Runtime metrics and recent request logs — real numbers only.</p>
+<!-- super deep delegation root: ONE click + ONE keydown fan-out to ~23 interactive elements -->
+<section class="grid gap-6" onclick={handleSystemAction} onkeydown={handleSystemKey}>
+  <!-- Unified header via PageHeader — single responsive primitive, no viewport duplication (fan-out) -->
+  <PageHeader title="System" description="Runtime metrics and recent request logs — real numbers only.">
+    {#snippet children()}
       {#if note}
         <p class="text-xs text-destructive">{note}</p>
       {/if}
-    </div>
-  {/if}
-
-  {#if viewport.narrow}
-    <div class="flex items-center gap-3">
-      <Button type="button" variant="outline" size="sm" class="max-lg:h-11 max-lg:px-4" onclick={() => loadAll()} disabled={busy}>
-        <RefreshCw class={`mr-2 size-4${busy ? ' animate-spin' : ''}`} />
-        {busy ? 'Refreshing…' : 'Refresh'}
-      </Button>
-      <label class="mb-0.5 flex min-h-11 cursor-pointer items-center gap-2 py-2 text-sm text-muted-foreground">
-        <input type="checkbox" bind:checked={auto} class="size-5 accent-[var(--primary)]" />
-        Auto
-      </label>
-      {#if note}
-        <p class="ml-auto text-xs text-destructive">{note}</p>
-      {/if}
-    </div>
-  {/if}
+    {/snippet}
+    {#snippet actions()}
+      <div class="flex flex-wrap items-center gap-2">
+        {#if updatedAt && !note}
+          <span class="hidden text-xs text-muted-foreground data-num sm:inline">
+            Updated {updatedTime(updatedAt)}
+          </span>
+        {/if}
+        <Button type="button" variant="outline" size="sm" onclick={() => loadAll()} disabled={busy}>
+          <RefreshCw class={`mr-2 size-4${busy ? ' animate-spin' : ''}`} />
+          {busy ? 'Refreshing…' : 'Refresh'}
+        </Button>
+        <label class="flex min-h-11 cursor-pointer items-center gap-2 text-sm text-muted-foreground">
+          <input type="checkbox" bind:checked={auto} class="size-5 accent-[var(--primary)]" />
+          <span class="hidden sm:inline">Auto 10s</span><span class="sm:hidden">Auto</span>
+        </label>
+      </div>
+    {/snippet}
+  </PageHeader>
 
   <TrackRule />
 
@@ -490,7 +453,14 @@
     {:else}
       <div class="grid grid-cols-2 gap-2 lg:grid-cols-4 lg:gap-3">
         {#each heroTiles as t (t.label)}
-          <Card.Root class={COMPACT_HERO_CARD}>
+          <Card.Root
+            class={`${COMPACT_HERO_CARD} cursor-pointer hover:ring-1 hover:ring-primary/20 transition-shadow`}
+            data-hero={t.label}
+            data-hero-value={t.value}
+            role="button"
+            tabindex="0"
+            title="Copy {t.label}: {t.value}"
+          >
             <Card.Content class="flex items-start justify-between gap-2 px-3 lg:px-4">
               <div class="grid gap-0.5 lg:gap-1">
                 <Card.Title class={COMPACT_HERO_TITLE}>{t.label}</Card.Title>
@@ -511,9 +481,18 @@
         <div
           class="grid grid-cols-2 gap-px overflow-hidden rounded-lg border sm:grid-cols-3 lg:grid-cols-6"
           style="background:var(--border);border-color:var(--border);"
+          role="group"
+          aria-label="Runtime stats — click a value to copy (delegated)"
         >
           {#each runtimeStats as [label, value] (label)}
-            <div class="grid gap-0.5 bg-card px-2 py-1.5 lg:px-3 lg:py-2.5">
+            <div
+              class="grid gap-0.5 bg-card px-2 py-1.5 lg:px-3 lg:py-2.5 cursor-pointer hover:bg-muted/50 transition-colors"
+              data-stat={label}
+              data-stat-value={value}
+              title="Copy {label}: {value}"
+              role="button"
+              tabindex="0"
+            >
               <span class="text-[9px] font-medium uppercase tracking-wide text-muted-foreground lg:text-[10px]">{label}</span>
               <span class="truncate data-num text-xs font-semibold lg:text-sm" title={value}>{value}</span>
             </div>
@@ -598,13 +577,19 @@
         <Card.Root>
           <Card.Header class="max-lg:p-3">
             <Card.Title class="text-sm lg:text-base">Top paths</Card.Title>
-            <Card.Description class="max-lg:text-xs">Most requested routes since process start.</Card.Description>
+            <Card.Description class="max-lg:text-xs">Most requested routes since process start. Click a path to copy.</Card.Description>
           </Card.Header>
           <Card.Content class="max-lg:p-3">
             {#if paths.length}
-              <ol class="grid gap-2">
+              <ol class="grid gap-1.5" role="list" aria-label="Top paths — click to copy (delegated)">
                 {#each paths as p, i (p[0])}
-                  <li class="flex items-center gap-3">
+                  <li
+                    class="flex items-center gap-3 rounded-md px-2 py-1 -mx-2 cursor-pointer hover:bg-muted/50 transition-colors"
+                    data-path={String(p[0])}
+                    title="Copy {String(p[0])}"
+                    role="listitem"
+                    tabindex="0"
+                  >
                     <span class="w-5 text-right data-num text-xs text-muted-foreground">{i + 1}.</span>
                     <span class="min-w-0 flex-1 truncate data-num text-xs">{String(p[0])}</span>
                     <CountBadge value={Number(p[1])} />
@@ -620,7 +605,7 @@
         <Card.Root>
           <Card.Header class="max-lg:p-3">
             <Card.Title class="text-sm lg:text-base">Status distribution</Card.Title>
-            <Card.Description class="max-lg:text-xs">Response counts per HTTP status code.</Card.Description>
+            <Card.Description class="max-lg:text-xs">Response counts per HTTP status code. Click a code to filter logs.</Card.Description>
           </Card.Header>
           <Card.Content class="grid gap-2 p-3 lg:gap-3 lg:p-6">
             {#if statusBars.length}
@@ -633,12 +618,17 @@
                   ></div>
                 {/each}
               </div>
-              <div class="flex flex-wrap gap-x-4 gap-y-1">
+              <div class="flex flex-wrap gap-x-3 gap-y-1" role="group" aria-label="Filter logs by status code (delegated)">
                 {#each statusBars as s (`legend-${s.code}`)}
-                  <span class="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <button
+                    type="button"
+                    class="flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                    data-status-code={s.code}
+                    title="Filter logs for {s.code}"
+                  >
                     <span class={`inline-block size-2 rounded-sm ${s.cls}`} aria-hidden="true"></span>
                     <span class="data-num">{s.code}</span> × {s.count.toLocaleString()}
-                  </span>
+                  </button>
                 {/each}
               </div>
               <p class="text-xs text-muted-foreground">{codeAgg.total.toLocaleString()} responses recorded</p>
@@ -672,23 +662,11 @@
     </div>
   {/if}
 
-  <div class="grid gap-2">
+  <div class="grid gap-2" id="system-logs">
     <div class="flex flex-wrap items-center justify-between gap-2">
       <h2 class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Logs</h2>
-      <div class="flex items-center gap-1" role="group" aria-label="Filter logs by level">
-        {#each [['all', 'All'], ['warn', 'Warn+'], ['errors', 'Errors']] as [value, label] ([value, label])}
-          <Button
-            type="button"
-            size="xs"
-            class="max-lg:h-11 max-lg:px-3.5"
-            variant={logFilter === value ? 'default' : 'ghost'}
-            onclick={() => (logFilter = value)}
-            aria-pressed={logFilter === value}
-          >
-            {label}
-          </Button>
-        {/each}
-      </div>
+      <!-- super fan-out: reusable FilterChipGroup owns its own n2 delegation internally; System fans out to it -->
+      <FilterChipGroup options={LOG_FILTER_OPTS} active={logFilter} onToggle={(v) => (logFilter = v)} />
     </div>
     <Card.Root>
       <Card.Header class="max-lg:p-3">

@@ -12,6 +12,8 @@
   import PageHeader from '$lib/components/PageHeader.svelte'
   import Breadcrumbs from '$lib/components/Breadcrumbs.svelte'
   import RouteContextBar from '$lib/components/RouteContextBar.svelte'
+  import PageShell from '$lib/components/PageShell.svelte'
+  import AsyncState from '$lib/components/AsyncState.svelte'
   import EntityChip from '$lib/components/EntityChip.svelte'
   import ResultMeta from '$lib/components/ResultMeta.svelte'
   import StatPill from '$lib/components/StatPill.svelte'
@@ -89,22 +91,15 @@
 {/snippet}
 
 <section class="grid gap-4 md:gap-6">
-  {#if hasData || trainFilter}
-    <RouteContextBar
-      from={trainFilter || 'All'}
-      to={'Service Alerts'}
-      onEdit={() => { trainFilter = ''; data = null; phase = 'idle' }}
-    />
-  {/if}
-
-  {#if !viewport.narrow}
-    <PageHeader title="Service alerts" description="Cancelled, rescheduled or diverted dates for any train.">
-      {#snippet children()}
-        <Breadcrumbs items={[{ label: 'Home', href: '/' }, { label: 'Service Alerts' }]} />
-      {/snippet}
-    </PageHeader>
-    <TrackRule />
-  {/if}
+  <PageShell
+    title="Service alerts"
+    description="Cancelled, rescheduled or diverted dates for any train."
+    breadcrumbs={[{ label: 'Home', href: '/' }, { label: 'Service Alerts' }]}
+    routeFrom={trainFilter || 'All'}
+    routeTo={'Service Alerts'}
+    onEdit={() => { trainFilter = ''; data = null; phase = 'idle' }}
+    showRouteBar={!!(hasData || trainFilter)}
+  />
 
   <Card.Root>
     <Card.Content class="flex flex-wrap items-end gap-3 max-lg:p-3">
@@ -132,70 +127,63 @@
     </Card.Content>
   </Card.Root>
 
-  {#if phase === 'loading'}
-    <div class="grid gap-2" aria-busy="true">
-      {#each [0, 1, 2, 3, 4] as i (i)}
-        <Skeleton class="h-10 w-full" />
-      {/each}
-    </div>
-  {:else if phase === 'error'}
-    <Alert.Root variant="destructive" role="alert">
-      <Alert.Title>Could not load exceptions</Alert.Title>
-      <Alert.Description>{errorMsg}</Alert.Description>
-    </Alert.Root>
-  {:else if hasData}
-    {@const train = data.train ?? {}}
-    {@const entries = Array.isArray(data.exceptions) ? data.exceptions : []}
-    {@const msg = typeof data.message === 'string' ? data.message.trim() : ''}
-    {@const excRoute =
-      [train.source, train.destination].filter((s) => s && String(s).trim()).join(' → ')}
-    <Card.Root>
-      <Card.Header class="min-w-0 max-lg:p-4">
-        <Card.Title class="flex flex-wrap items-center gap-x-2 break-words max-lg:text-base">
-          <EntityChip type="train" code={train.number || trainFilter} name={train.name} />
-          {#if train.name}<span class="break-words">{train.name}</span>{/if}
-        </Card.Title>
-        <Card.Description class="break-words [overflow-wrap:anywhere] max-lg:text-xs">
-          <span class="inline-flex items-center gap-1.5">
-            <SignalDot tone={entries.length === 0 ? 'go' : 'stop'} pulse={entries.length > 0} />
-            <span class="data-num">{entries.length}</span>
-            exception{entries.length === 1 ? '' : 's'}{excRoute ? ` · ${excRoute}` : ''}
-          </span>
-        </Card.Description>
-        <ResultMeta source={data?.data_source}>
-          <StatPill label="Records" value={entries.length} />
-        </ResultMeta>
-      </Card.Header>
-      <Card.Content class="grid gap-4 max-lg:gap-3 max-lg:p-4">
-        {#if entries.length > 0}
-          <DataTable
-            columns={excCols}
-            rows={entries}
-            primary="date"
-            rowKey={(e, i) => `${e.date ?? ''}|${e.kind ?? ''}|${i}`}
-            cells={{ date: excDateCell, kind: excKindCell }}
-            empty="No exception records found."
-          />
-        {:else if msg}
-          <Alert.Root role="status">
-            <Alert.Title>Nothing to report</Alert.Title>
-            <Alert.Description>{msg}</Alert.Description>
-          </Alert.Root>
-        {:else}
-          <div class="flex flex-col items-center gap-2 rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
-            <CalendarX2Icon class="size-5" />
-            No exception records found for this train.
-          </div>
-        {/if}
-      </Card.Content>
-    </Card.Root>
-  {:else}
-    <EmptyState
-      icon={CalendarX2Icon}
-      title="No exceptions loaded"
-      hint="Enter a train number above to see its cancelled, rescheduled or diverted dates."
-    />
-  {/if}
+  <AsyncState
+    phase={phase}
+    error={errorMsg}
+    empty={!hasData}
+    skeletonCount={5}
+    emptyIcon={CalendarX2Icon}
+    emptyTitle="No exceptions loaded"
+    emptyHint="Enter a train number above to see its cancelled, rescheduled or diverted dates."
+  >
+    {#snippet children()}
+      {@const train = data.train ?? {}}
+      {@const entries = Array.isArray(data.exceptions) ? data.exceptions : []}
+      {@const msg = typeof data.message === 'string' ? data.message.trim() : ''}
+      {@const excRoute =
+        [train.source, train.destination].filter((s) => s && String(s).trim()).join(' → ')}
+      <Card.Root>
+        <Card.Header class="min-w-0 max-lg:p-4">
+          <Card.Title class="flex flex-wrap items-center gap-x-2 break-words max-lg:text-base">
+            <EntityChip type="train" code={train.number || trainFilter} name={train.name} />
+            {#if train.name}<span class="break-words">{train.name}</span>{/if}
+          </Card.Title>
+          <Card.Description class="break-words [overflow-wrap:anywhere] max-lg:text-xs">
+            <span class="inline-flex items-center gap-1.5">
+              <SignalDot tone={entries.length === 0 ? 'go' : 'stop'} pulse={entries.length > 0} />
+              <span class="data-num">{entries.length}</span>
+              exception{entries.length === 1 ? '' : 's'}{excRoute ? ` · ${excRoute}` : ''}
+            </span>
+          </Card.Description>
+          <ResultMeta source={data?.data_source}>
+            <StatPill label="Records" value={entries.length} />
+          </ResultMeta>
+        </Card.Header>
+        <Card.Content class="grid gap-4 max-lg:gap-3 max-lg:p-4">
+          {#if entries.length > 0}
+            <DataTable
+              columns={excCols}
+              rows={entries}
+              primary="date"
+              rowKey={(e, i) => `${e.date ?? ''}|${e.kind ?? ''}|${i}`}
+              cells={{ date: excDateCell, kind: excKindCell }}
+              empty="No exception records found."
+            />
+          {:else if msg}
+            <Alert.Root role="status">
+              <Alert.Title>Nothing to report</Alert.Title>
+              <Alert.Description>{msg}</Alert.Description>
+            </Alert.Root>
+          {:else}
+            <div class="flex flex-col items-center gap-2 rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
+              <CalendarX2Icon class="size-5" />
+              No exception records found for this train.
+            </div>
+          {/if}
+        </Card.Content>
+      </Card.Root>
+    {/snippet}
+  </AsyncState>
 
   <BottomSpacer />
 </section>

@@ -77,6 +77,14 @@
 
   const LINK_BTN =
     'inline-flex w-fit items-center gap-1 text-xs font-medium text-primary hover:underline max-lg:min-h-11 max-lg:px-1 max-lg:-mx-1'
+
+  // Deep delegation: single handler for all "Open …" links inside the card (N² fan-out)
+  function onNavClick(e) {
+    const a = e.target.closest('[data-href]')
+    if (!a) return
+    const href = a.dataset.href
+    if (href) navigate(href)
+  }
 </script>
 
 {#snippet header(Icon, title, source)}
@@ -92,12 +100,15 @@
 {/snippet}
 
 {#snippet footer(label, href)}
-  <button type="button" class={LINK_BTN} onclick={() => navigate(href)}>
+  <button type="button" class={LINK_BTN} data-href={href}>
     {label}
     <ArrowRight class="size-3" />
   </button>
 {/snippet}
 
+<!-- svelte-ignore a11y_click_events_have_key_events -->
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<div onclick={onNavClick}>
 {#if kind === 'trains_between'}
   <div class="rounded-xl border bg-card p-3 text-sm">
     {@render header(TrainFront, `Trains · ${txt(d.from)} → ${txt(d.to)}`, d.data_source)}
@@ -285,8 +296,8 @@
         {@const isStation = String(r?.type ?? '').toLowerCase().includes('station')}
         <button
           type="button"
+          data-href={isStation ? `/station/${r.code}` : `/train/${r.code}`}
           class="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition-colors hover:bg-muted max-lg:min-h-11 max-lg:px-3.5"
-          onclick={() => navigate(isStation ? `/station/${r.code}` : `/train/${r.code}`)}
         >
           {#if isStation}
             <Building2 class="size-3 text-muted-foreground" />
@@ -375,3 +386,4 @@
     {#if kind}<span class="rounded bg-muted px-1 font-mono">{kind}</span>{/if}
   </div>
 {/if}
+</div>

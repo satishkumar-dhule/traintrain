@@ -44,17 +44,8 @@ export function kindLabel(kind) {
   }
 }
 
-/* NTES average-delay strings: "" (unknown), "On Time" (0), "HH:MM" (h:mm),
-   or signed plain minutes ("+12"). → signed minutes, else null. */
-export function parseAvgDelayMinutes(v) {
-  const str = String(v ?? '').trim()
-  if (!str) return null
-  if (/on time/i.test(str)) return 0
-  let m = /^(\d{1,3}):(\d{2})$/.exec(str)
-  if (m) return Number(m[1]) * 60 + Number(m[2])
-  m = /^[+-]?\d+$/.exec(str)
-  return m ? Number(str) : null
-}
+import { parseDelay } from './delay.js'
+export const parseAvgDelayMinutes = parseDelay
 
 /* Summarize the average-delay station pattern into minutes:
    mean over every parseable arrival/departure value plus the worst one. */

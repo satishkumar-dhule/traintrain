@@ -35,7 +35,7 @@ import TrackRule from '$lib/components/TrackRule.svelte'
 import BottomSpacer from '$lib/components/BottomSpacer.svelte'
 import { asText, fmtDash, numOrNull, todayISO, DATE_RE } from '$lib/format.js'
 
-  let { src = '', dst = '', date = '', embedded = false, filterQuery = '' } = $props()
+  let { src = '', dst = '', date = '', embedded = false, filterQuery = '', onSelectRoute = null } = $props()
 
   let from = $state('')
   let to = $state('')
@@ -98,6 +98,10 @@ import { asText, fmtDash, numOrNull, todayISO, DATE_RE } from '$lib/format.js'
     let dt = String(r?.date ?? '')
     if (!s || !d || !DATE_RE.test(dt)) return
     if (dt < todayISO()) dt = todayISO()
+    if (embedded && typeof onSelectRoute === 'function') {
+      onSelectRoute(s, d, dt)
+      return
+    }
     from = s
     to = d
     journeyDate = dt
@@ -260,6 +264,10 @@ import { asText, fmtDash, numOrNull, todayISO, DATE_RE } from '$lib/format.js'
     const d = asText(to).toUpperCase()
     const dt = asText(journeyDate)
     if (!s || !d || !DATE_RE.test(dt)) return
+    if (embedded && typeof onSelectRoute === 'function') {
+      onSelectRoute(s, d, dt)
+      return
+    }
     const want =
       '/availability/' +
       [s, d, dt].filter(Boolean).map((p) => encodeURIComponent(p)).join('/')

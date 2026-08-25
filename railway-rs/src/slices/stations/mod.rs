@@ -33,8 +33,6 @@ pub mod service;
 
 pub use service::{NearbyResponse, NearbyStation};
 
-const MAX_Q_LEN: usize = 128;
-
 #[derive(Deserialize, Default)]
 struct StationQuery {
     q: Option<String>,
@@ -44,13 +42,7 @@ async fn stations_handler(
     State(state): State<AppState>,
     Query(params): Query<StationQuery>,
 ) -> Json<Vec<Station>> {
-    let query = params
-        .q
-        .as_deref()
-        .unwrap_or("")
-        .chars()
-        .take(MAX_Q_LEN)
-        .collect::<String>();
+    let query = crate::core::validate::clamp_q(params.q.as_deref());
     Json(crate::slices::stations::service::Service::search(
         &state, &query, 20,
     ))

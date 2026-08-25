@@ -120,7 +120,6 @@ pub struct SuggestHit {
 }
 
 const SEARCH_LIMIT: usize = 10;
-const MAX_Q_LEN: usize = 128;
 
 #[derive(Deserialize, Default)]
 struct SearchQuery {
@@ -135,7 +134,7 @@ pub fn router() -> Router<AppState> {
 }
 
 fn clamp_q(q: Option<&str>) -> String {
-    q.unwrap_or("").chars().take(MAX_Q_LEN).collect::<String>()
+    crate::core::validate::clamp_q(q)
 }
 
 /// Real train search over the pre-warmed NTES master list, capped at 10 hits.

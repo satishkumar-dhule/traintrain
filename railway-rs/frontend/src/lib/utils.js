@@ -11,12 +11,7 @@ export function cn(...inputs) {
 
 const enc = encodeURIComponent
 
-export function todayISO() {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
-
-export const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+export { DATE_RE, todayISO } from './dates.js'
 
 export function trainHref(number, view = '') {
   return `/train/${enc(String(number ?? '').trim())}${view ? `/${view}` : ''}`

@@ -13,13 +13,23 @@ import DataTable from '$lib/components/DataTable.svelte'
 import EmptyState from '$lib/components/EmptyState.svelte'
 import RecentSearches from '$lib/components/RecentSearches.svelte'
 import { loadRecent, rememberRecent, clearStored } from '$lib/recent.js'
-import { TrainNumberBadge, RunsOnBadges, TrainDelayBadge, DAY_LETTERS, daysSummary, dayFlags } from '$lib/components/badges/index.js'
+import {
+  TrainNumberBadge,
+  RunsOnBadges,
+  TrainDelayBadge,
+  AvailabilityStatusBadge,
+  STATUS_TONES,
+  availabilityStatusKind,
+  DAY_LETTERS,
+  daysSummary,
+  dayFlags
+} from '$lib/components/badges/index.js'
 import { availabilityHref, trainHref } from '$lib/utils.js'
-import { norm } from '$lib/format.js'
+import { norm, todayISO, DATE_RE, asText, fmtDash, numOrNull } from '$lib/format.js'
 import CalendarDaysIcon from 'lucide-svelte/icons/calendar-days'
 import CalendarClockIcon from 'lucide-svelte/icons/calendar-clock'
 
-  let { src = '', dst = '', embedded = false } = $props()
+  let { src = '', dst = '', date = '', embedded = false, onSelectRoute = null } = $props()
 
   let from = $state('')
   let to = $state('')
@@ -35,6 +45,11 @@ import CalendarClockIcon from 'lucide-svelte/icons/calendar-clock'
   function pickRecent(r) {
     const [s, d] = String(r?.id ?? '').split('|')
     if (!s || !d) return
+    if (embedded && typeof onSelectRoute === 'function') {
+      const dt = DATE_RE.test(String(date ?? '')) ? String(date) : todayISO()
+      onSelectRoute(s, d, dt)
+      return
+    }
     from = s
     to = d
     commit()
@@ -46,6 +61,21 @@ import CalendarClockIcon from 'lucide-svelte/icons/calendar-clock'
   let sameCode = $derived(canSearch && fromCode === toCode)
   let loading = $derived(phase === 'loading')
   let trains = $derived(Array.isArray(result?.trains) ? result.trains : [])
+
+  // inline availability expansion (embedded trains tab) — avoids misleading filtered tab
+  let expandedTrain = $state(null)
+  let inlinePhase = $state('idle')
+  let inlineError = $state(null)
+  let inlineData = $state(null)
+  let inlineKey = ''
+
+  function classCode(row) {
+    return asText(row?.class).toUpperCase()
+  }
+  function quotaLabel(row) {
+    const q = asText(row?.quota)
+    return q && !/^(gn|general)$/i.test(q) ? q.toUpperCase() : ''
+  }
 
   const runsCache = new Map()
   function fmtRuns(runsOn) {
@@ -93,10 +123,16 @@ import CalendarClockIcon from 'lucide-svelte/icons/calendar-clock'
   }
 
   function commit() {
-    if (embedded) return
     const s = norm(from)
     const d = norm(to)
     if (!s || !d) return
+    if (embedded) {
+      if (typeof onSelectRoute === 'function') {
+        const dt = DATE_RE.test(String(date ?? '')) ? String(date) : todayISO()
+        onSelectRoute(s, d, dt)
+      }
+      return
+    }
     const target = `/journeys/${encodeURIComponent(s)}/${encodeURIComponent(d)}`
     if (route.path === target) return
     navigate(target)
@@ -114,9 +150,111 @@ import CalendarClockIcon from 'lucide-svelte/icons/calendar-clock'
     commit()
   }
 
+  async function toggleAvailability(t) {
+    const num = String(t?.number ?? '').trim()
+    if (!num) return
+    if (expandedTrain === num) {
+      expandedTrain = null
+      inlineData = null
+      inlinePhase = 'idle'
+      inlineError = null
+      inlineKey = ''
+      return
+    }
+    expandedTrain = num
+    const s = norm(src)
+    const d = norm(dst)
+    const dt = DATE_RE.test(String(date ?? '')) ? String(date) : todayISO()
+    if (!s || !d || !DATE_RE.test(dt)) {
+      inlinePhase = 'error'
+      inlineError = 'Select source, destination and date first'
+      return
+    }
+    const k = `${s}|${d}|${dt}|${num}`
+    if (inlineKey === k && inlineData) {
+      inlinePhase = 'ok'
+      return
+    }
+    inlineKey = k
+    inlinePhase = 'loading'
+    inlineError = null
+    inlineData = null
+    const res = await api(
+      `/rail-api/availability?src=${encodeURIComponent(s)}&dst=${encodeURIComponent(d)}&date=${encodeURIComponent(dt)}&source=auto`
+    )
+    if (inlineKey !== k) return
+    if (res.ok) {
+      const list = Array.isArray(res.data?.trains) ? res.data.trains : []
+      const found = list.find((tr) => String(tr?.number ?? '').trim() === num)
+      if (found) {
+        inlineData = found
+        inlinePhase = 'ok'
+      } else {
+        inlineData = null
+        inlinePhase = 'empty'
+        inlineError = `No availability for ${num} on ${dt}. Try the Availability tab for all trains.`
+      }
+    } else if (res.status === 404) {
+      inlinePhase = 'empty'
+      inlineError = res.error || `No direct trains for ${s} → ${d} on ${dt}.`
+    } else {
+      inlinePhase = 'error'
+      inlineError = res.error || `HTTP ${res.status}`
+    }
+  }
+
+  // n2 super fan-out: single delegated handler for all per-train actions (no per-row closures)
+  function handleRowActionsClick(e) {
+    const btn = e.target.closest?.('[data-jt-action]')
+    if (!btn) return
+    const action = btn.getAttribute('data-jt-action')
+    const num = btn.getAttribute('data-train-number') ?? ''
+    if (!action || !num) {
+      // inline close is the only action without train number
+      if (action === 'close-inline') {
+        expandedTrain = null
+        inlineData = null
+        inlinePhase = 'idle'
+        inlineError = null
+        inlineKey = ''
+      }
+      return
+    }
+    if (action === 'availability') {
+      if (embedded) {
+        const t = trains.find((tr) => String(tr?.number ?? '').trim() === num)
+        toggleAvailability(t ?? { number: num })
+      } else {
+        const dt = DATE_RE.test(String(date ?? '')) ? String(date) : todayISO()
+        navigate(availabilityHref(src, dst, dt))
+      }
+    } else if (action === 'schedule') {
+      navigate(trainHref(num, 'schedule'))
+    } else if (action === 'close-inline') {
+      expandedTrain = null
+      inlineData = null
+      inlinePhase = 'idle'
+      inlineError = null
+      inlineKey = ''
+    }
+  }
+
   $effect(() => {
     const s = norm(src)
     const d = norm(dst)
+    // reset inline expansion when route changes
+    const dt = DATE_RE.test(String(date ?? '')) ? String(date) : ''
+    // collapse inline if route/date changed
+    if (expandedTrain) {
+      const expectedPrefix = `${s}|${d}|${dt}|`
+      if (!inlineKey.startsWith(expectedPrefix)) {
+        expandedTrain = null
+        inlineData = null
+        inlinePhase = 'idle'
+        inlineError = null
+        inlineKey = ''
+      }
+    }
     if (!s || !d) {
       key = ''
       phase = 'idle'
@@ -165,26 +303,62 @@ import CalendarClockIcon from 'lucide-svelte/icons/calendar-clock'
 {/snippet}
 
 {#snippet rowActions(t)}
+  {@const isExpanded = expandedTrain === String(t?.number ?? '').trim()}
   <Button
     type="button"
-    variant="outline"
+    variant={isExpanded ? 'default' : 'outline'}
     size="xs"
-    onclick={() => navigate(availabilityHref(src, dst))}
-    title={`Seat availability for ${norm(src)} → ${norm(dst)} (today)`}
+    data-jt-action="availability"
+    data-train-number={t.number}
+    title={embedded
+      ? `Show availability for ${t?.number ?? ''} on ${DATE_RE.test(String(date ?? '')) ? date : todayISO()} (inline)`
+      : `Seat availability for ${norm(src)} → ${norm(dst)}${DATE_RE.test(String(date ?? '')) ? ` on ${date}` : ' (today)'}`}
+    aria-pressed={isExpanded}
   >
     <CalendarDaysIcon class="size-3" />
-    Availability
+    {isExpanded ? 'Hide' : 'Availability'}
   </Button>
   <Button
     type="button"
     variant="ghost"
     size="xs"
-    onclick={() => navigate(trainHref(t.number, 'schedule'))}
+    data-jt-action="schedule"
+    data-train-number={t.number}
     title={`Timetable & stops of ${t.number}`}
   >
     <CalendarClockIcon class="size-3" />
     Schedule
   </Button>
+{/snippet}
+
+{#snippet inlineAvlChip(row)}
+  {@const kind = availabilityStatusKind(row?.status)}
+  {@const tone =
+    kind === 'available'
+      ? STATUS_TONES.success
+      : kind === 'rac'
+        ? STATUS_TONES.warning
+        : kind === 'waitlist' || kind === 'closed'
+          ? STATUS_TONES.danger
+          : STATUS_TONES.neutral}
+  {@const fare = numOrNull(row?.fare)}
+  <div class={`overflow-hidden rounded-md border px-2 py-1 ${tone}`}>
+    <div class="flex items-baseline justify-between gap-2">
+      <span class="flex min-w-0 items-baseline gap-1">
+        <span class="data-num text-[11px] max-lg:text-xs font-semibold">{fmtDash(classCode(row))}</span>
+        {#if quotaLabel(row)}
+          <span class="rounded border border-border bg-muted px-1 text-[9px] leading-tight font-medium tracking-wide uppercase text-muted-foreground" title={`${quotaLabel(row)} quota`}>
+            {quotaLabel(row)}
+          </span>
+        {/if}
+      </span>
+      <span class="data-num text-[11px] max-lg:text-xs">{fare != null ? `₹${fare.toLocaleString('en-IN')}` : ''}</span>
+    </div>
+    <div class="flex min-w-0 items-center gap-1 text-[10px] max-lg:text-sm max-lg:font-medium">
+      <span class="size-1.5 shrink-0 rounded-full bg-current opacity-80"></span>
+      <span class="min-w-0 truncate font-medium" title={asText(row?.status)}>{asText(row?.status) || '—'}</span>
+    </div>
+  </div>
 {/snippet}
 
 <div class="flex flex-col gap-4">
@@ -245,7 +419,7 @@ import CalendarClockIcon from 'lucide-svelte/icons/calendar-clock'
         <Card.Title>{norm(src)} → {norm(dst)}</Card.Title>
         <Card.Description>{trains.length} trains found</Card.Description>
       </Card.Header>
-      <Card.Content>
+      <Card.Content onclick={handleRowActionsClick}>
         {#if trains.length === 0}
           <EmptyState
             icon={RouteIcon}
@@ -262,6 +436,46 @@ import CalendarClockIcon from 'lucide-svelte/icons/calendar-clock'
             actions={rowActions}
             empty={`No trains found between ${norm(src)} and ${norm(dst)}.`}
           />
+          {#if embedded && expandedTrain}
+            <div class="mt-4 rounded-lg border bg-muted/20 p-3">
+              <div class="flex items-center justify-between gap-2 border-b pb-2">
+                <div class="flex min-w-0 items-center gap-2">
+                  <TrainNumberBadge number={inlineData?.number ?? expandedTrain} name={inlineData?.name ?? ''} />
+                  <span class="truncate text-sm font-medium">{inlineData?.name ?? 'Loading…'}</span>
+                  <span class="data-num text-xs text-muted-foreground">{norm(src)} → {norm(dst)} · {DATE_RE.test(String(date ?? '')) ? date : todayISO()}</span>
+                </div>
+                <Button type="button" variant="ghost" size="xs" data-jt-action="close-inline">
+                  Close
+                </Button>
+              </div>
+              {#if inlinePhase === 'loading'}
+                <div class="grid gap-2 py-3">
+                  <Skeleton class="h-4 w-48" />
+                  <div class="grid grid-cols-[repeat(auto-fill,minmax(9rem,1fr))] gap-1.5">
+                    {#each [0,1,2,3] as i (i)}<Skeleton class="h-16" />{/each}
+                  </div>
+                </div>
+              {:else if inlinePhase === 'error' || inlinePhase === 'empty'}
+                <Alert.Root variant={inlinePhase === 'empty' ? 'default' : 'destructive'} class="mt-3">
+                  <Alert.Title>{inlinePhase === 'empty' ? 'No availability' : 'Could not load availability'}</Alert.Title>
+                  <Alert.Description>{inlineError}</Alert.Description>
+                </Alert.Root>
+                <p class="mt-2 text-xs text-muted-foreground">Open the <span class="font-medium">Availability</span> tab to see all trains.</p>
+              {:else if inlineData}
+                {@const rows = Array.isArray(inlineData?.availability) ? inlineData.availability : []}
+                {#if rows.length === 0}
+                  <p class="py-6 text-center text-sm text-muted-foreground">No class-level availability returned for this train.</p>
+                {:else}
+                  <div class="grid grid-cols-[repeat(auto-fill,minmax(9.5rem,1fr))] max-lg:grid-cols-[repeat(auto-fill,minmax(8.25rem,1fr))] gap-1.5 pt-3">
+                    {#each rows as r (r.class + (r.quota ?? ''))}
+                      {@render inlineAvlChip(r)}
+                    {/each}
+                  </div>
+                  <p class="mt-2 text-xs text-muted-foreground">Showing only {expandedTrain} — switch to Availability tab for all {trains.length} trains.</p>
+                {/if}
+              {/if}
+            </div>
+          {/if}
         {/if}
       </Card.Content>
     </Card.Root>
