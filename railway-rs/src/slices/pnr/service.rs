@@ -4,6 +4,7 @@ use std::time::Instant;
 use reqwest::header::{COOKIE, REFERER, SET_COOKIE};
 use serde_json::Value;
 
+use crate::core::cache::keys;
 use crate::core::error::{AppError, CaptchaRequiredError};
 use crate::core::http::HttpClient;
 use crate::data::StationRecord;
@@ -51,7 +52,7 @@ impl Service {
         captcha: Option<CaptchaAnswer>,
     ) -> Result<PnrResponse, AppError> {
         if captcha.is_none() {
-            let key = format!("pnr:{pnr}");
+            let key = keys::pnr(pnr);
             if let Some(v) = state.cache.get(&key) {
                 if let Ok(r) = map_response(pnr, &v, &state.datasets.stations) {
                     return Ok(r);
@@ -251,7 +252,7 @@ impl Service {
             );
             state
                 .cache
-                .set(&format!("pnr:{pnr}"), serde_json::to_value(&resp)?);
+                .set(&keys::pnr(pnr), serde_json::to_value(&resp)?);
             Ok(resp)
         }
     }

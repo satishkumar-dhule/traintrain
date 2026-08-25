@@ -2,6 +2,7 @@ use std::time::Instant;
 
 use serde_json::Value;
 
+use crate::core::cache::keys;
 use crate::core::error::AppError;
 use crate::models::{LiveStationResponse, StationTrain};
 use crate::state::AppState;
@@ -20,13 +21,11 @@ impl Service {
         destination: Option<&str>,
     ) -> Result<LiveStationResponse, AppError> {
         let key = match destination {
-            Some(dest) => format!("live_station:{station}:{hours}:to-{dest}"),
-            None => format!("live_station:{station}:{hours}"),
+            Some(dest) => keys::live_station_to(station, &hours.to_string(), dest),
+            None => keys::live_station(station, &hours.to_string()),
         };
-        if let Some(cached) = state.cache.get(&key) {
-            if let Some(resp) = build_response(station, destination, hours, &cached) {
-                return Ok(resp);
-            }
+        if let Some(cached) = state.cache.get_json(&key) {
+            return Ok(cached);
         }
 
         let start = Instant::now();
@@ -37,17 +36,21 @@ impl Service {
             .to_string();
         // The form wants the destination as its `CODE - NAME` pair; resolve
         // the official name from the same dataset the browser list uses.
-        let dest_pair = destination.map(|dest| (dest, state.datasets.station_name(dest).unwrap_or(dest)));
+        let dest_pair =
+            destination.map(|dest| (dest, state.datasets.station_name(dest).unwrap_or(dest)));
         let data = state
             .ntes_web
             .live_station(station, &name, hours, dest_pair)
             .await;
-        state.metrics.record_source_latency("ntes", start.elapsed());
+        state
+            .metrics
+            .record_source_latency(crate::core::source::metric::NTES, start.elapsed());
         let data = data?;
 
-        state.cache.set(&key, data.clone());
-        build_response(station, destination, hours, &data)
-            .ok_or_else(|| AppError::internal("NTES: unexpected TrainsAtStationJson shape"))
+        let resp = build_response(station, destination, hours, &data)
+            .ok_or_else(|| AppError::internal("NTES: unexpected TrainsAtStationJson shape"))?;
+        state.cache.set_json(&key, &resp)?;
+        Ok(resp)
     }
 }
 
@@ -69,7 +72,7 @@ fn build_response(
         destination: destination.map(str::to_string),
         hours: Some(hours as u8),
         trains: Some(list.iter().map(station_train).collect()),
-        data_source: Some("NTES".to_string()),
+        data_source: Some(crate::core::source::labels::NTES.to_string()),
     })
 }
 

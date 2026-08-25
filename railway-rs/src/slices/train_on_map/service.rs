@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 
+use crate::core::cache::keys;
 use crate::core::error::AppError;
 use crate::models::{
     MapCurrentStation, MapJourneyStation, RouteStation, TrackStation, TrainOnMapResponse,
@@ -26,13 +27,11 @@ impl Service {
         // The spot view (`station` present) changes the response, so it gets
         // its own cache key; the route-only map is keyed by train alone.
         let cache_key = match station {
-            Some(code) => format!("train_on_map:{train}:{}", code.to_ascii_uppercase()),
-            None => format!("train_on_map:{train}"),
+            Some(code) => keys::train_on_map_station(train, code),
+            None => keys::train_on_map(train),
         };
-        if let Some(cached) = state.cache.get(&cache_key) {
-            if let Ok(resp) = serde_json::from_value(cached) {
-                return Ok(resp);
-            }
+        if let Some(cached) = state.cache.get_json(&cache_key) {
+            return Ok(cached);
         }
 
         let date = date.map(str::to_string).unwrap_or_else(today_ist);
@@ -59,7 +58,7 @@ impl Service {
             track: Some(track),
             current_station: None,
             journey_station: None,
-            data_source: Some("ntes".to_string()),
+            data_source: Some(crate::core::source::labels::NTES.to_string()),
         };
 
         if let Some(code) = station {
@@ -114,7 +113,7 @@ impl Service {
                 }
             }
         }
-        state.cache.set(&cache_key, serde_json::to_value(&resp)?);
+        state.cache.set_json(&cache_key, &resp)?;
         Ok(resp)
     }
 }

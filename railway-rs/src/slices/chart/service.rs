@@ -2,6 +2,7 @@ use std::time::Instant;
 
 use serde_json::Value;
 
+use crate::core::cache::keys;
 use crate::core::error::AppError;
 use crate::core::irctc;
 use crate::models::{ChartBerth, ChartCoach, ChartResponse};
@@ -18,21 +19,19 @@ impl Service {
         date: &str,
         station: &str,
     ) -> Result<ChartResponse, AppError> {
-        let cache_key = format!("irctc:chart:{train}:{date}:{station}");
-        if let Some(cached) = state.cache.get(&cache_key) {
-            if let Ok(resp) = serde_json::from_value(cached) {
-                return Ok(resp);
-            }
+        let cache_key = keys::chart(train, date, station);
+        if let Some(cached) = state.cache.get_json(&cache_key) {
+            return Ok(cached);
         }
 
         let start = Instant::now();
         let data = state.irctc.train_composition(train, date, station).await?;
         state
             .metrics
-            .record_source_latency("irctc", start.elapsed());
+            .record_source_latency(crate::core::source::metric::IRCTC, start.elapsed());
 
         let resp = map_response(data, train, date, station)?;
-        state.cache.set(&cache_key, serde_json::to_value(&resp)?);
+        state.cache.set_json(&cache_key, &resp)?;
         Ok(resp)
     }
 }

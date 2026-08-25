@@ -107,7 +107,11 @@ impl Cache {
     pub fn get_json<T: serde::de::DeserializeOwned>(&self, key: &str) -> Option<T> {
         self.get(key).and_then(|v| serde_json::from_value(v).ok())
     }
-    pub fn set_json<T: serde::Serialize>(&self, key: &str, value: &T) -> Result<(), serde_json::Error> {
+    pub fn set_json<T: serde::Serialize>(
+        &self,
+        key: &str,
+        value: &T,
+    ) -> Result<(), serde_json::Error> {
         let v = serde_json::to_value(value)?;
         self.set(key, v);
         Ok(())

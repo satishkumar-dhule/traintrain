@@ -2,6 +2,7 @@ use std::time::Instant;
 
 use serde_json::Value;
 
+use crate::core::cache::keys;
 use crate::core::corover::{self, SOURCE_API};
 use crate::core::error::AppError;
 use crate::core::railyatri;
@@ -25,7 +26,7 @@ impl Service {
     /// payload is treated as stale and the chain moves on; a final fallback
     /// that still conflicts is served with a caution notice.
     pub async fn get_schedule(state: &AppState, train: &str) -> Result<ScheduleResponse, AppError> {
-        let key = format!("schedule:{train}");
+        let key = keys::schedule(train);
 
         // The local timetable master list is the identity anchor. Aggregators
         // sometimes serve years-stale routes under a reused number (e.g.
@@ -37,10 +38,8 @@ impl Service {
         // The final DTO (not the raw upstream payload) is cached, so a hit
         // replays the winning source's full response shape verbatim,
         // including its honest `data_source`.
-        if let Some(cached) = state.cache.get(&key) {
-            if let Ok(resp) = serde_json::from_value(cached) {
-                return Ok(resp);
-            }
+        if let Some(cached) = state.cache.get_json(&key) {
+            return Ok(cached);
         }
 
         // Ask DISHA / CoRover primary (works worldwide): a disabled module or
@@ -59,7 +58,7 @@ impl Service {
                         source = "CoRover",
                         "schedule resolved from CoRover"
                     );
-                    state.cache.set(&key, serde_json::to_value(&resp)?);
+                    state.cache.set_json(&key, &resp)?;
                     return Ok(resp);
                 }
                 tracing::warn!(
@@ -77,9 +76,10 @@ impl Service {
         let ntes_started = Instant::now();
         let ntes_failure = match state.ntes.schedule(train, "").await {
             Ok(data) => {
-                state
-                    .metrics
-                    .record_source_latency("ntes", ntes_started.elapsed());
+                state.metrics.record_source_latency(
+                    crate::core::source::metric::NTES,
+                    ntes_started.elapsed(),
+                );
                 match ntes_schedule_response(train, &data, state.config.cache_ttl.as_secs()) {
                     Ok(resp) => {
                         let stop_codes: Vec<&str> = resp
@@ -96,7 +96,7 @@ impl Service {
                                 %corover_failure,
                                 "schedule resolved from NTES after CoRover failure"
                             );
-                            state.cache.set(&key, serde_json::to_value(&resp)?);
+                            state.cache.set_json(&key, &resp)?;
                             return Ok(resp);
                         }
                         tracing::warn!(
@@ -141,7 +141,7 @@ impl Service {
                     resp.notice = Some(notice);
                 }
                 tracing::info!(%train, source = "Railyatri", "schedule resolved");
-                state.cache.set(&key, serde_json::to_value(&resp)?);
+                state.cache.set_json(&key, &resp)?;
                 Ok(resp)
             }
             Err(AppError::NotFound(msg)) => Err(AppError::not_found(msg)),
@@ -285,13 +285,13 @@ fn ntes_schedule_response(
         route_description: None,
         running_days: None,
         stops: Some(stops),
-        source: Some("NTES".to_string()),
+        source: Some(crate::core::source::labels::NTES.to_string()),
         cache_ttl: Some(cache_ttl),
         notice: Some(
             "Live data from NTES, the official Indian Railways enquiry system (enquiry.indianrail.gov.in)."
                 .to_string(),
         ),
-        data_source: Some("NTES".to_string()),
+        data_source: Some(crate::core::source::labels::NTES.to_string()),
     })
 }
 
@@ -330,7 +330,7 @@ async fn railyatri_schedule(state: &AppState, train: &str) -> Result<ScheduleRes
         .map_err(|e| AppError::source_unavailable("Railyatri", e.message()))?;
     state
         .metrics
-        .record_source_latency("railyatri", started.elapsed());
+        .record_source_latency(crate::core::source::metric::RAILYATRI, started.elapsed());
 
     let stop_values = norm["stops"].as_array().cloned().unwrap_or_default();
     if stop_values.is_empty() {

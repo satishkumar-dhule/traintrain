@@ -28,7 +28,7 @@ impl Service {
         let data = state.ntes_web.parcel_special_trains().await?;
         state
             .metrics
-            .record_source_latency("ntes", ntes_started.elapsed());
+            .record_source_latency(crate::core::source::metric::NTES, ntes_started.elapsed());
 
         let resp = map_ntes(data)?;
 
@@ -53,7 +53,7 @@ fn map_ntes(data: Value) -> Result<ParcelResponse, AppError> {
     let trains = list.iter().map(map_train).collect();
     Ok(ParcelResponse {
         trains: Some(trains),
-        data_source: Some("NTES".to_string()),
+        data_source: Some(crate::core::source::labels::NTES.to_string()),
     })
 }
 

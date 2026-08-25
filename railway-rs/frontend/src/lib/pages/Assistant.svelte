@@ -587,7 +587,7 @@
                 {/if}
               </div>
               <span class="px-1 text-[11px] text-muted-foreground {t.role === 'user' ? 'text-right' : 'text-left'}">
-                {t.role === 'user' ? 'You' : 'Train Bro'} · just now
+                {t.role === 'user' ? 'You' : 'Train Bro'} · <span class="data-num">just now</span>
               </span>
             </div>
           </div>
@@ -655,7 +655,7 @@
       {/if}
 
       <div class="border-t bg-card p-3 sm:p-4 max-lg:p-3">
-        <div class="flex items-end gap-2 rounded-2xl border bg-background p-2 shadow-sm ring-offset-background transition-colors focus-within:ring-1 focus-within:ring-ring focus-within:border-ring max-lg:p-1.5">
+        <div class="flex items-end gap-2 rounded-2xl border border-input bg-card p-2 shadow-sm ring-offset-background transition-colors focus-within:ring-1 focus-within:ring-ring focus-within:border-ring max-lg:p-1.5">
           <Textarea
             bind:value={draft}
             placeholder="Ask about trains, PNR, seats, stations… e.g. “live status 12951”"

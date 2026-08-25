@@ -39,7 +39,7 @@ impl Service {
             .await?;
         state
             .metrics
-            .record_source_latency("ntes", ntes_started.elapsed());
+            .record_source_latency(crate::core::source::metric::NTES, ntes_started.elapsed());
 
         let date_label = date.as_deref().unwrap_or("any");
         let resp = map_ntes(data, station, date.as_deref())?;
@@ -79,7 +79,7 @@ fn map_ntes(
             .and_then(Value::as_u64)
             .map(|v| v as usize),
         trains: Some(list.iter().map(map_train).collect()),
-        data_source: Some("NTES".to_string()),
+        data_source: Some(crate::core::source::labels::NTES.to_string()),
     })
 }
 

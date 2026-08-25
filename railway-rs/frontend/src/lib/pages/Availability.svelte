@@ -310,7 +310,7 @@ import { asText, fmtDash, numOrNull, todayISO, DATE_RE } from '$lib/format.js'
         style={`width:${w}%`}
       ></div>
     </div>
-    <div class="data-num mt-0.5 text-right text-[9px] leading-none text-muted-foreground max-lg:text-[11px]">
+    <div class="data-num mt-0.5 text-right text-[10px] leading-none text-muted-foreground max-lg:text-[11px]">
       {Math.round(pct)}% confirm
     </div>
   {/if}
@@ -333,7 +333,7 @@ import { asText, fmtDash, numOrNull, todayISO, DATE_RE } from '$lib/format.js'
         <span class="data-num text-[11px] max-lg:text-xs font-semibold">{fmtDash(classCode(row))}</span>
         {#if quotaLabel(row)}
           <span
-            class="rounded border border-border bg-muted px-1 text-[9px] leading-tight font-medium tracking-wide uppercase text-muted-foreground"
+            class="rounded border border-border bg-muted px-1 text-[10px] leading-tight font-medium tracking-wide uppercase text-muted-foreground"
             title={`${quotaLabel(row)} quota`}
           >
             {quotaLabel(row)}

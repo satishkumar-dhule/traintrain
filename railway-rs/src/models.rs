@@ -166,7 +166,7 @@ pub struct LiveStop {
 }
 
 /// `GET /rail-api/ntes/live-station`
-#[derive(Debug, Serialize, Default)]
+#[derive(Debug, Serialize, Deserialize, Default)]
 pub struct LiveStationResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub station: Option<String>,
@@ -182,7 +182,7 @@ pub struct LiveStationResponse {
     pub data_source: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct StationTrain {
     pub number: String,
     pub name: String,

@@ -10,6 +10,7 @@
   import SearchIcon from 'lucide-svelte/icons/search'
   import RouteIcon from 'lucide-svelte/icons/route'
   import ClipboardCheck from 'lucide-svelte/icons/clipboard-check'
+  import Ticket from 'lucide-svelte/icons/ticket'
   import ArrowRight from 'lucide-svelte/icons/arrow-right'
   import { availabilityHref, journeysHref, trainHref } from '$lib/utils.js'
 
@@ -378,6 +379,58 @@
     {/if}
     {#if d.data_source}
       <p class="mt-2 text-[11px] text-muted-foreground">data source: {d.data_source}</p>
+    {/if}
+  </div>
+{:else if kind === 'pnr_status'}
+  <div class="rounded-xl border bg-card p-3 text-sm">
+    {@render header(Ticket, `PNR · ${txt(d.pnr)}`, d.data_source)}
+    <div class="grid gap-1.5">
+      <div class="flex flex-wrap items-center gap-1.5 text-xs max-lg:text-sm">
+        {#if d.train_number}
+          <Badge variant="outline" class="font-mono">{txt(d.train_number)}</Badge>
+        {/if}
+        {#if d.train_name}
+          <span class="truncate">{txt(d.train_name)}</span>
+        {/if}
+        {#if d.journey_date}
+          <span class="ml-auto tabular-nums text-muted-foreground">{txt(d.journey_date)}</span>
+        {/if}
+      </div>
+      {#if d.from || d.to}
+        <div class="flex items-center gap-2 rounded-lg bg-muted px-2 py-1.5 text-xs max-lg:text-sm">
+          {#if d.from}
+            <span class="flex-1 truncate"><span class="font-mono">{txt(d.from.code)}</span> {txt(d.from.name)} <span class="text-muted-foreground">{txt(d.from.time)}</span></span>
+            <ArrowRight class="size-3 shrink-0 text-muted-foreground" />
+          {/if}
+          {#if d.to}
+            <span class="flex-1 truncate text-right"><span class="font-mono">{txt(d.to.code)}</span> {txt(d.to.name)} <span class="text-muted-foreground">{txt(d.to.time)}</span></span>
+          {/if}
+        </div>
+      {/if}
+      {#if list(d.passengers).length}
+        <div class="space-y-1">
+          {#each list(d.passengers) as p, i (i)}
+            {@const cur = String(p?.current_status ?? '').toUpperCase()}
+            {@const tone = cur.includes('CONFIRMED') ? 'green' : cur.includes('RAC') ? 'blue' : cur.includes('WL') ? 'amber' : 'amber'}
+            <div class="flex items-center justify-between gap-2 rounded-md border px-2 py-1 text-xs max-lg:text-sm">
+              <span class="font-medium">P{ i + 1}</span>
+              <span class="truncate text-muted-foreground">{txt(p?.booking_status)}</span>
+              <span class={`shrink-0 rounded px-1.5 py-0.5 font-medium ${SEAT_TONE_CLS[tone]}`}>{txt(p?.current_status)}</span>
+              {#if p?.coach}<span class="font-mono text-[11px] text-muted-foreground">{txt(p.coach)} {txt(p.berth)}</span>{/if}
+            </div>
+          {/each}
+        </div>
+      {:else}
+        <p class="text-xs italic text-muted-foreground">No passenger details in response.</p>
+      {/if}
+      {#if d.notice}
+        <p class="text-xs italic text-muted-foreground">{d.notice}</p>
+      {/if}
+    </div>
+    {#if d.pnr}
+      <div class="mt-2">
+        {@render footer('Open PNR view', `/pnr/${d.pnr}`)}
+      </div>
     {/if}
   </div>
 {:else}

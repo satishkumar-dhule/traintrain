@@ -12,7 +12,8 @@
     trains_between: ['src', 'dst'],
     station_board: ['station'],
     seat_availability: ['src', 'dst'],
-    chart_status: ['train']
+    chart_status: ['train'],
+    pnr_status: ['pnr']
   };
 
   export const OPTIONAL_FIELDS = {
@@ -22,11 +23,13 @@
     live_status: [],
     average_delay: [],
     train_schedule: [],
-    station_board: []
+    station_board: [],
+    pnr_status: []
   };
 
   const FIELD_META = {
     train: { label: 'Train number', placeholder: 'e.g. 12951', hint: '5-digit number', required: true, type: 'text', inputMode: 'numeric', maxLength: 5, pattern: '\\d{5}' },
+    pnr: { label: 'PNR number', placeholder: 'e.g. 1234567890', hint: '10-digit PNR from ticket', required: true, type: 'text', inputMode: 'numeric', maxLength: 10, pattern: '\\d{10}' },
     src: { label: 'From station', placeholder: 'e.g. SC or Secunderabad', hint: 'Station code or name', required: true, type: 'text' },
     dst: { label: 'To station', placeholder: 'e.g. PUNE or Pune Jn', hint: 'Station code or name', required: true, type: 'text' },
     station: { label: 'Station', placeholder: 'e.g. PUNE or Pune Jn', hint: 'Station code or name', required: true, type: 'text' },
@@ -40,7 +43,8 @@
     { id: 'station_board', label: 'Station board' },
     { id: 'train_schedule', label: 'Train schedule' },
     { id: 'average_delay', label: 'Average delay' },
-    { id: 'chart_status', label: 'Chart status' }
+    { id: 'chart_status', label: 'Chart status' },
+    { id: 'pnr_status', label: 'PNR status' }
   ];
 
   const INTENT_LABEL_MAP = Object.fromEntries(INTENT_OPTIONS.map(o => [o.id, o.label]));
@@ -69,7 +73,7 @@
 
   // values holds all possible keys; prefilled immediately from form.collected and form.fields
   function buildInitialValues(f) {
-    const v = { train: '', src: '', dst: '', station: '', date: '' };
+    const v = { train: '', pnr: '', src: '', dst: '', station: '', date: '' };
     const c = f?.collected ?? {};
     for (const k of Object.keys(v)) {
       if (c[k] != null) v[k] = String(c[k]);
@@ -223,6 +227,9 @@
     if (key === 'train' && v) {
       if (!/^\d{5}$/.test(v)) return 'Enter 5 digits';
     }
+    if (key === 'pnr' && v) {
+      if (!/^\d{10}$/.test(v)) return 'Enter 10 digits';
+    }
     return '';
   }
 
@@ -269,6 +276,7 @@
     if (!isFormValid) return;
     const payloadValues = {
       train: String(values.train ?? '').trim() || undefined,
+      pnr: String(values.pnr ?? '').trim() || undefined,
       src: String(values.src ?? '').trim() || undefined,
       dst: String(values.dst ?? '').trim() || undefined,
       station: String(values.station ?? '').trim() || undefined,
@@ -379,6 +387,7 @@
             <li class="break-words [overflow-wrap:anywhere]">“trains from SC to PUNE” or “SC → PUNE”</li>
             <li class="break-words [overflow-wrap:anywhere]">“seat availability SC to PUNE tomorrow”</li>
             <li class="break-words [overflow-wrap:anywhere]">“station board PUNE”</li>
+            <li class="break-words [overflow-wrap:anywhere]">“pnr status 1234567890”</li>
           </ul>
         </div>
       </div>

@@ -115,22 +115,9 @@ fn search_url(base: &str, src: &str, dst: &str, date: &str) -> String {
         base.trim_end_matches('/'),
         SEARCH_PATH,
         super::normalize::date_compact(date),
-        urlencode(dst),
-        urlencode(src),
+        urlencoding::encode(dst),
+        urlencoding::encode(src),
     )
-}
-
-fn urlencode(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for b in s.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(b as char)
-            }
-            _ => out.push_str(&format!("%{b:02X}")),
-        }
-    }
-    out
 }
 
 #[cfg(test)]
@@ -139,9 +126,9 @@ mod tests {
 
     #[test]
     fn urlencode_leaves_station_codes_untouched() {
-        assert_eq!(urlencode("MAO"), "MAO");
-        assert_eq!(urlencode("ndls"), "ndls");
-        assert_eq!(urlencode("4 XYZ"), "4%20XYZ");
+        assert_eq!(urlencoding::encode("MAO"), "MAO");
+        assert_eq!(urlencoding::encode("ndls"), "ndls");
+        assert_eq!(urlencoding::encode("4 XYZ"), "4%20XYZ");
     }
 
     #[test]

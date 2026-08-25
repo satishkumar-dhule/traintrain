@@ -1,6 +1,7 @@
 use std::time::{Duration, Instant};
 
 use super::{StationRow, SuggestHit};
+use crate::core::cache::keys;
 use crate::core::corover::{self, SOURCE_API};
 use crate::core::error::AppError;
 use crate::models::TrainLite;
@@ -39,7 +40,7 @@ impl Service {
         if query.trim().is_empty() {
             return Vec::new();
         }
-        let key = format!("search:stations:{}", query.to_lowercase());
+        let key = keys::search_stations(&query.to_lowercase());
         if let Some(v) = state.cache.get(&key) {
             if let Ok(rows) = serde_json::from_value::<Vec<StationRow>>(v) {
                 return rows;

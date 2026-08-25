@@ -94,52 +94,56 @@ import BottomSpacer from '$lib/components/BottomSpacer.svelte'
   showRouteBar={hasRoute}
 />
 
-<!-- Search form card -->
-<Card.Root>
-  <Card.Content class="grid gap-2 p-2">
-    <StationPairInput bind:from bind:to onSwap={() => { if (canSearch) search() }} />
-    {#if !viewport.narrow || !hasRoute}
-      <DateStrip bind:value={journeyDate} />
-    {/if}
-    <Button onclick={search} disabled={!canSearch} class="w-full">Search</Button>
-  </Card.Content>
-</Card.Root>
+<section class="grid gap-4 md:gap-6">
+  <!-- Search form card -->
+  <Card.Root>
+    <Card.Content class="grid gap-2 p-2">
+      <StationPairInput bind:from bind:to onSwap={() => { if (canSearch) search() }} />
+      {#if !viewport.narrow || !hasRoute}
+        <DateStrip bind:value={journeyDate} />
+      {/if}
+      <Button onclick={search} disabled={!canSearch} class="w-full">Search</Button>
+    </Card.Content>
+  </Card.Root>
 
-<!-- Mobile: sticky date strip when route is active (above tabs) -->
-{#if viewport.narrow && hasRoute}
-  <div class="sticky top-12 z-30 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/85 lg:hidden">
-    <DateStrip bind:value={journeyDate} onchange={() => { if (canSearch) search() }} />
-  </div>
-{/if}
+  <!-- Mobile: sticky date strip when route is active (above tabs) -->
+  {#if viewport.narrow && hasRoute}
+    <div class="sticky top-12 z-30 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/85 lg:hidden">
+      <DateStrip bind:value={journeyDate} onchange={() => { if (canSearch) search() }} />
+    </div>
+  {/if}
 
-<!-- Tabs -->
-<Tabs.Root bind:value={activeTab} class="mt-3">
-  <TabBar cols={2}>
-    <Tabs.Trigger value="trains" class="max-lg:justify-center max-lg:text-xs max-lg:py-2.5">Trains</Tabs.Trigger>
-    <Tabs.Trigger value="availability" class="max-lg:justify-center max-lg:text-xs max-lg:py-2.5">Availability</Tabs.Trigger>
-  </TabBar>
+  <TrackRule />
 
-  <Tabs.Content value="trains">
-    <JourneysTable
-      src={cSrc}
-      dst={cDst}
-      date={cDate}
-      embedded
-      onSelectRoute={selectRoute}
-    />
-  </Tabs.Content>
-  <Tabs.Content value="availability">
-    <Availability
-      src={cSrc}
-      dst={cDst}
-      date={cDate}
-      embedded
-      filterQuery={filterQuery}
-      onSelectRoute={selectRoute}
-    />
-  </Tabs.Content>
-</Tabs.Root>
+  <!-- Tabs -->
+  <Tabs.Root bind:value={activeTab}>
+    <TabBar cols={2}>
+      <Tabs.Trigger value="trains" class="max-lg:justify-center max-lg:text-xs max-lg:py-2.5">Trains</Tabs.Trigger>
+      <Tabs.Trigger value="availability" class="max-lg:justify-center max-lg:text-xs max-lg:py-2.5">Availability</Tabs.Trigger>
+    </TabBar>
+
+    <Tabs.Content value="trains">
+      <JourneysTable
+        src={cSrc}
+        dst={cDst}
+        date={cDate}
+        embedded
+        onSelectRoute={selectRoute}
+      />
+    </Tabs.Content>
+    <Tabs.Content value="availability">
+      <Availability
+        src={cSrc}
+        dst={cDst}
+        date={cDate}
+        embedded
+        filterQuery={filterQuery}
+        onSelectRoute={selectRoute}
+      />
+    </Tabs.Content>
+  </Tabs.Root>
 
 <BottomSpacer />
+</section>
 
 

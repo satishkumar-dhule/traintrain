@@ -110,7 +110,7 @@ async fn unreserved_fallback(
         Ok(data) => {
             state
                 .metrics
-                .record_source_latency("ntes", started.elapsed());
+                .record_source_latency(crate::core::source::metric::NTES, started.elapsed());
             match map_ntes_unreserved(&data, src, &from_name, dst, &to_name, date) {
                 Some(resp) => {
                     tracing::info!(
@@ -158,7 +158,7 @@ fn map_ntes_unreserved(
         dst: Some(dst.to_string()),
         date: Some(date.to_string()),
         trains: Some(trains),
-        data_source: Some("NTES".to_string()),
+        data_source: Some(crate::core::source::labels::NTES.to_string()),
         notice: Some(format!(
             "No reserved-class trains run between {src} and {dst}; these unreserved Passenger/DEMU/DMU services operate on this route. They have no IRCTC reservation chart or bookable classes, so class-wise availability does not apply — general tickets are sold at station counters and via UTS."
         )),

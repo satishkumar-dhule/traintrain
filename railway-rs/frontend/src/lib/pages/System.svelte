@@ -177,28 +177,28 @@
     if (obs.phase !== 'ok' || !obs.data || typeof obs.data !== 'object') return []
     const d = obs.data
     const errTone =
-      errorRatePct === null ? 'slate' : errorRatePct > 5 ? 'rose' : errorRatePct > 0 ? 'amber' : 'emerald'
+      errorRatePct === null ? 'muted' : errorRatePct > 5 ? 'stop' : errorRatePct > 0 ? 'hold' : 'go'
     return [
       {
         icon: Clock,
         label: 'Uptime',
         value: fmtUptime(d.uptime_secs),
         sub: 'since process start',
-        tone: 'sky'
+        tone: 'primary'
       },
       {
         icon: Activity,
         label: 'Total requests',
         value: num(d.requests_total)?.toLocaleString() ?? '—',
         sub: 'counted by the metrics middleware',
-        tone: 'violet'
+        tone: 'chart'
       },
       {
         icon: Gauge,
         label: 'Avg req / sec',
         value: num(d.req_per_sec)?.toFixed(2) ?? '—',
         sub: 'averaged over uptime',
-        tone: 'emerald'
+        tone: 'go'
       },
       {
         icon: AlertTriangle,
@@ -299,17 +299,20 @@
     { key: 'event', label: 'Event', cellClass: 'max-w-md truncate data-num text-xs', value: (l) => logLine(l) }
   ]
 
+  /* Icon-chip tones keyed by identity tokens: primary, charts, signal lamps. */
   const toneChip = {
-    sky: 'bg-primary/10 text-primary',
-    violet: 'bg-chart-3/10 text-chart-3',
-    emerald: 'bg-signal-go/10 text-signal-go-ink',
-    amber: 'bg-signal-hold/10 text-signal-hold-ink',
-    rose: 'bg-signal-stop/10 text-signal-stop-ink',
-    slate: 'bg-muted text-muted-foreground'
+    primary: 'bg-primary/10 text-primary',
+    chart: 'bg-chart-3/10 text-chart-3',
+    go: 'bg-signal-go/10 text-signal-go-ink',
+    hold: 'bg-signal-hold/10 text-signal-hold-ink',
+    stop: 'bg-signal-stop/10 text-signal-stop-ink',
+    muted: 'bg-muted text-muted-foreground'
   }
 
   // reusable compact card pattern (establishes reusability, single source)
   const COMPACT_HERO_CARD = 'gap-1 py-2 lg:gap-2 lg:py-4'
+  // section band headers share one micro-label treatment
+  const MICRO_LABEL = 'text-xs font-semibold uppercase tracking-wider text-muted-foreground'
   const COMPACT_HERO_TITLE = 'text-[10px] font-medium uppercase tracking-wide text-muted-foreground lg:text-xs'
   const COMPACT_HERO_VALUE = 'data-num text-lg font-semibold tabular-nums lg:text-2xl'
 
@@ -438,7 +441,7 @@
   <TrackRule />
 
   <div class="grid gap-2">
-    <h2 class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Overview</h2>
+    <h2 class={MICRO_LABEL}>Overview</h2>
     {#if obs.phase === 'loading'}
       <div class="grid grid-cols-2 gap-3 lg:grid-cols-4" aria-busy="true">
         {#each Array.from({ length: 4 }, (_, i) => i) as i (i)}
@@ -503,7 +506,7 @@
   </div>
 
   <div class="grid gap-2">
-    <h2 class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Traffic</h2>
+    <h2 class={MICRO_LABEL}>Traffic</h2>
     {#if obs.phase === 'loading'}
       <div class="grid grid-cols-2 gap-2 lg:grid-cols-4 lg:gap-3" aria-busy="true">
         {#each Array.from({ length: 4 }, (_, i) => i) as i (i)}
@@ -532,9 +535,12 @@
                 </div>
                 <p class="mt-1 text-[9px] text-muted-foreground lg:mt-2 lg:text-[10px]">
                   {#if range}
-                    min {s.rangeFmt(range.min)} · max {s.rangeFmt(range.max)} · last {pts.length} samples
+                    min <span class="data-num">{s.rangeFmt(range.min)}</span> · max
+                    <span class="data-num">{s.rangeFmt(range.max)}</span> · last
+                    <span class="data-num">{pts.length}</span> samples
                   {:else}
-                    last {pts.length} samples · 2s interval
+                    last <span class="data-num">{pts.length}</span> samples ·
+                    <span class="data-num">2s</span> interval
                   {/if}
                 </p>
               {:else}
@@ -548,7 +554,7 @@
   </div>
 
   <div class="grid gap-2">
-    <h2 class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Upstream</h2>
+    <h2 class={MICRO_LABEL}>Upstream</h2>
     {#if origins.length}
       <Card.Root>
         <Card.Header class="max-lg:p-3">
@@ -572,7 +578,7 @@
 
   {#if obs.phase === 'ok'}
     <div class="grid gap-2">
-      <h2 class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Application</h2>
+      <h2 class={MICRO_LABEL}>Application</h2>
       <div class="grid gap-2 lg:grid-cols-2 lg:gap-3">
         <Card.Root>
           <Card.Header class="max-lg:p-3">
@@ -627,11 +633,11 @@
                     title="Filter logs for {s.code}"
                   >
                     <span class={`inline-block size-2 rounded-sm ${s.cls}`} aria-hidden="true"></span>
-                    <span class="data-num">{s.code}</span> × {s.count.toLocaleString()}
+                    <span class="data-num">{s.code}</span> × <span class="data-num">{s.count.toLocaleString()}</span>
                   </button>
                 {/each}
               </div>
-              <p class="text-xs text-muted-foreground">{codeAgg.total.toLocaleString()} responses recorded</p>
+              <p class="text-xs text-muted-foreground"><span class="data-num">{codeAgg.total.toLocaleString()}</span> responses recorded</p>
             {:else}
               <p class="text-sm text-muted-foreground">No responses recorded yet.</p>
             {/if}
@@ -664,7 +670,7 @@
 
   <div class="grid gap-2" id="system-logs">
     <div class="flex flex-wrap items-center justify-between gap-2">
-      <h2 class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Logs</h2>
+      <h2 class={MICRO_LABEL}>Logs</h2>
       <!-- super fan-out: reusable FilterChipGroup owns its own n2 delegation internally; System fans out to it -->
       <FilterChipGroup options={LOG_FILTER_OPTS} active={logFilter} onToggle={(v) => (logFilter = v)} />
     </div>

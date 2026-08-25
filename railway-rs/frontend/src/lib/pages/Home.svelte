@@ -310,56 +310,58 @@ import { norm, todayISO, DATE_RE } from '$lib/format.js'
 </script>
 
 <section class="grid gap-4 max-lg:gap-3">
-  <div class="grid gap-1 max-lg:gap-0.5">
+  <div class="grid gap-2.5 max-lg:gap-2">
     <p class="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
       <span class="rounded-sm bg-saffron px-1.5 py-px text-[10px] font-bold tracking-[0.12em] text-saffron-ink">
         Indian Railways
       </span>
+      <span class="lamp-pulse size-1.5 shrink-0 rounded-full bg-signal-go text-signal-go" aria-hidden="true"></span>
       Live &amp; free
     </p>
-    <h1 class="signage text-xl sm:text-2xl max-lg:text-2xl">Train Bro</h1>
-    <p class="max-lg:hidden text-xs text-muted-foreground">
+    <h1 class="signage text-4xl leading-[0.95] sm:text-5xl lg:text-6xl">Train Bro</h1>
+    <p class="max-lg:hidden text-sm text-muted-foreground">
       Live status, PNR, journeys & station boards — free, no accounts.
     </p>
 
-    <div class="flex items-center gap-1 pt-0.5 max-lg:flex-nowrap max-lg:overflow-x-auto max-lg:snap-x">
-      <span class="max-lg:hidden text-[0.75em] text-muted-foreground">Popular trains</span>
+    <div class="flex items-center gap-2 pt-1 max-lg:flex-nowrap max-lg:overflow-x-auto max-lg:snap-x">
+      <span class="max-lg:hidden shrink-0 text-[0.7rem] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+        Popular trains
+      </span>
       {#each popularTrains as n (n)}
         <button
           type="button"
-          class="inline-flex h-5 items-center rounded-full border px-1.5 text-[0.75px] transition-colors hover:bg-muted hover:text-foreground max-lg:h-7 max-lg:px-1.5 max-lg:shrink-0 max-lg:snap-start"
+          class="inline-flex h-8 shrink-0 snap-start items-center gap-1.5 rounded-full border bg-card px-3 transition-colors hover:border-primary/50 hover:bg-muted"
           onclick={() => navigate(`/train/${n}`)}
         >
-          {n}
+          <TrainFront class="size-3.5 text-primary" aria-hidden="true" />
+          <span class="data-num text-xs font-semibold">{n}</span>
         </button>
       {/each}
     </div>
   </div>
 
-  <TrackRule />
-
-  <Card.Root class="transition-colors hover:border-primary/50">
-    <form class="grid grid-cols-[minmax(0,1fr)] gap-3 max-lg:gap-2 p-4 max-lg:p-3" onsubmit={submitPlan}>
-      <div class="flex items-start gap-1.5 max-lg:gap-1">
-        <span class="flex size-8 max-lg:size-6 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-          <MapPinIcon class="size-4 max-lg:size-3" />
+  <Card.Root class="border-primary/30 shadow-md transition-colors hover:border-primary/60">
+    <form class="grid grid-cols-[minmax(0,1fr)] gap-4 max-lg:gap-2.5 p-5 max-lg:p-3.5" onsubmit={submitPlan}>
+      <div class="flex items-start gap-2 max-lg:gap-1.5">
+        <span class="flex size-9 max-lg:size-7 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+          <MapPinIcon class="size-5 max-lg:size-3.5" />
         </span>
         <div class="grid gap-0.5">
-          <h2 class="text-[0.85em] sm:text-base font-semibold">Plan from where you are</h2>
-          <p class="max-lg:hidden text-[0.75em] text-muted-foreground">
+          <h2 class="signage text-base leading-none sm:text-lg">Plan from where you are</h2>
+          <p class="max-lg:hidden pt-1 text-xs text-muted-foreground">
             Pick a start station, then choose a destination and journey date.
           </p>
         </div>
       </div>
 
       <div class="flex flex-wrap items-center gap-0.5 max-lg:gap-0.5">
-        <Button type="button" variant="outline" onclick={pickOrigin} class="max-lg:h-8 max-lg:text-[0.65em]">
+        <Button type="button" variant="outline" onclick={pickOrigin} class="max-lg:h-8 max-lg:text-xs">
           <MapPinIcon class="max-lg:size-3" />
           {originCode ? 'Change start' : 'Stations near me'}
         </Button>
         {#if originCode}
           <span
-            class="inline-flex items-center gap-0.5 rounded-full border border-primary/40 bg-primary/10 px-1.5 py-0.5 text-[0.65em] font-medium"
+            class="inline-flex items-center gap-0.5 rounded-full border border-primary/40 bg-primary/10 px-1.5 py-0.5 text-xs font-medium"
           >
             From
             <StationCodeBadge code={originCode} name={originName} link={false} size="xs" />
@@ -375,14 +377,14 @@ import { norm, todayISO, DATE_RE } from '$lib/format.js'
           </span>
         {/if}
         {#if canPlan}
-          <Button type="button" variant="outline" onclick={swapPlan} class="max-lg:h-8 max-lg:text-[0.65em]">
+          <Button type="button" variant="outline" onclick={swapPlan} class="max-lg:h-8 max-lg:text-xs">
             <ArrowLeftRight class="max-lg:size-3" />
             Swap
           </Button>
         {/if}
       </div>
 
-        <div class="flex flex-wrap items-end gap-2 max-lg:gap-1.5">
+        <div class="flex flex-wrap items-end gap-2.5 max-lg:gap-2">
           <div class="grid min-w-32 sm:min-w-44 flex-1">
             <AutoCompleteInput
               id="home-plan-to"
@@ -391,10 +393,15 @@ import { norm, todayISO, DATE_RE } from '$lib/format.js'
               aria-label="Destination"
               bind:value={destQuery}
               onpick={onDestPick}
+              inputClass="h-12 max-lg:h-12"
             />
           </div>
-          <Button type="submit" disabled={!canPlan} class="max-lg:min-h-10 max-lg:text-xs shrink-0 max-lg:w-full sm:w-auto">
-            <SearchIcon data-icon="inline-start" class="max-lg:size-3.5" />
+          <Button
+            type="submit"
+            disabled={!canPlan}
+            class="min-h-12 shrink-0 px-5 max-lg:min-h-11 max-lg:w-full sm:w-auto"
+          >
+            <SearchIcon data-icon="inline-start" class="size-4" />
             Find trains &amp; availability
           </Button>
         </div>
@@ -405,40 +412,45 @@ import { norm, todayISO, DATE_RE } from '$lib/format.js'
     </form>
   </Card.Root>
 
-  <div class="grid grid-cols-2 gap-2 max-lg:gap-1.5 sm:grid-cols-4">
-    <button
-      type="button"
-      class="rounded-xl border bg-card p-3 max-lg:p-2 text-center transition-all hover:-translate-y-0.5 hover:border-primary/50 hover:bg-muted/50 hover:shadow-md"
-      onclick={() => navigate('/train')}
-    >
-      <TrainFront class="mx-auto mb-1.5 max-lg:mb-1 size-6 text-primary" />
-      <span class="signage max-lg:text-xs text-sm leading-none">Live Train</span>
-    </button>
-    <button
-      type="button"
-      class="rounded-xl border bg-card p-3 max-lg:p-2 text-center transition-all hover:-translate-y-0.5 hover:border-primary/50 hover:bg-muted/50 hover:shadow-md"
-      onclick={() => navigate('/pnr')}
-    >
-      <Ticket class="mx-auto mb-1.5 max-lg:mb-1 size-6 text-primary" />
-      <span class="signage max-lg:text-xs text-sm leading-none">PNR Status</span>
-    </button>
-    <button
-      type="button"
-      class="rounded-xl border bg-card p-3 max-lg:p-2 text-center transition-all hover:-translate-y-0.5 hover:border-primary/50 hover:bg-muted/50 hover:shadow-md"
-      onclick={() => navigate('/station')}
-    >
-      <Building2 class="mx-auto mb-1.5 max-lg:mb-1 size-6 text-primary" />
-      <span class="signage max-lg:text-xs text-sm leading-none">Station Board</span>
-    </button>
-    <button
-      type="button"
-      class="rounded-xl border bg-card p-3 max-lg:p-2 text-center transition-all hover:-translate-y-0.5 hover:border-primary/50 hover:bg-muted/50 hover:shadow-md"
-      onclick={() => navigate('/exceptions')}
-    >
-      <TriangleAlert class="mx-auto mb-1.5 max-lg:mb-1 size-6 text-primary" />
-      <span class="signage max-lg:text-xs text-sm leading-none">Service Alerts</span>
-    </button>
-  </div>
+  <TrackRule />
+
+  <section class="grid gap-2 max-lg:gap-1.5" aria-label="Quick access">
+    <p class="text-[11px] uppercase tracking-widest text-muted-foreground">Quick access</p>
+    <div class="flex flex-wrap items-center gap-2 max-lg:gap-1.5">
+      <button
+        type="button"
+        class="inline-flex h-10 items-center gap-2 rounded-full border bg-card px-4 transition-all hover:-translate-y-0.5 hover:border-primary/50 hover:bg-muted/60 hover:shadow-md"
+        onclick={() => navigate('/train')}
+      >
+        <TrainFront class="size-4 shrink-0 text-primary" />
+        <span class="signage text-xs leading-none">Live Train</span>
+      </button>
+      <button
+        type="button"
+        class="inline-flex h-10 items-center gap-2 rounded-full border bg-card px-4 transition-all hover:-translate-y-0.5 hover:border-primary/50 hover:bg-muted/60 hover:shadow-md"
+        onclick={() => navigate('/pnr')}
+      >
+        <Ticket class="size-4 shrink-0 text-primary" />
+        <span class="signage text-xs leading-none">PNR Status</span>
+      </button>
+      <button
+        type="button"
+        class="inline-flex h-10 items-center gap-2 rounded-full border bg-card px-4 transition-all hover:-translate-y-0.5 hover:border-primary/50 hover:bg-muted/60 hover:shadow-md"
+        onclick={() => navigate('/station')}
+      >
+        <Building2 class="size-4 shrink-0 text-primary" />
+        <span class="signage text-xs leading-none">Station Board</span>
+      </button>
+      <button
+        type="button"
+        class="inline-flex h-10 items-center gap-2 rounded-full border bg-card px-4 transition-all hover:-translate-y-0.5 hover:border-primary/50 hover:bg-muted/60 hover:shadow-md"
+        onclick={() => navigate('/exceptions')}
+      >
+        <TriangleAlert class="size-4 shrink-0 text-primary" />
+        <span class="signage text-xs leading-none">Service Alerts</span>
+      </button>
+    </div>
+  </section>
 
   <Separator />
 
@@ -518,7 +530,7 @@ import { norm, todayISO, DATE_RE } from '$lib/format.js'
         {#each stationView.rows as st (st.code)}
           <button
             type="button"
-            class="flex min-h-11 min-w-0 items-center justify-between gap-2 rounded-lg border px-3 py-2 text-left transition-colors hover:border-primary/50 hover:bg-muted/50"
+            class="flex min-h-11 min-w-0 items-center justify-between gap-2 rounded-lg border bg-card px-3 py-2 text-left transition-colors hover:border-primary/50 hover:bg-muted/50"
             onclick={() => navigate(`/station/${encodeURIComponent(st.code)}`)}
           >
             <span class="min-w-0 flex-1 truncate text-sm">{st.name}</span>
@@ -527,7 +539,7 @@ import { norm, todayISO, DATE_RE } from '$lib/format.js'
         {/each}
       </div>
       {#if stationView.hidden > 0}
-        <p class="text-xs text-muted-foreground">+{stationView.hidden} more</p>
+        <p class="text-xs text-muted-foreground"><span class="data-num">+{stationView.hidden}</span> more</p>
       {/if}
     {/if}
     {/if}

@@ -29,7 +29,7 @@ impl Service {
         let data = state.ntes_web.heritage_trains(selection).await?;
         state
             .metrics
-            .record_source_latency("ntes", ntes_started.elapsed());
+            .record_source_latency(crate::core::source::metric::NTES, ntes_started.elapsed());
         let resp = map_ntes(data)?;
 
         tracing::info!(
@@ -58,7 +58,7 @@ fn map_ntes(data: Value) -> Result<HeritageResponse, AppError> {
             .and_then(Value::as_u64)
             .map(|n| n as usize),
         trains: Some(trains),
-        data_source: Some("NTES".to_string()),
+        data_source: Some(crate::core::source::labels::NTES.to_string()),
     })
 }
 

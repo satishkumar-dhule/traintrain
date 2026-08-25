@@ -105,14 +105,15 @@ test('normalize applies punctuation strip, suffix strip and the exported HINGLIS
 });
 
 test('extractEntities pulls train numbers and normalizes dates', () => {
-  assert.deepEqual(gate.extractEntities('liv staus of 12951'), { train: '12951', date: null });
-  assert.deepEqual(gate.extractEntities('aaj 12951'), { train: '12951', date: 'today' });
+  assert.deepEqual(gate.extractEntities('liv staus of 12951'), { train: '12951', pnr: null, date: null });
+  assert.deepEqual(gate.extractEntities('aaj 12951'), { train: '12951', pnr: null, date: 'today' });
   const kal = gate.extractEntities('kal 12951');
   assert.equal(kal.train, '12951');
   assert.match(kal.date, /^\d{4}-\d{2}-\d{2}$/); // tomorrow materialized as ISO
-  assert.deepEqual(gate.extractEntities('seat SC PUNE 20-10-2026'), { train: null, date: '20-10-2026' });
-  assert.deepEqual(gate.extractEntities('chart 12951 2026-10-20'), { train: '12951', date: '2026-10-20' });
-  assert.deepEqual(gate.extractEntities('hello'), { train: null, date: null });
+  assert.deepEqual(gate.extractEntities('seat SC PUNE 20-10-2026'), { train: null, pnr: null, date: '20-10-2026' });
+  assert.deepEqual(gate.extractEntities('chart 12951 2026-10-20'), { train: '12951', pnr: null, date: '2026-10-20' });
+  assert.deepEqual(gate.extractEntities('hello'), { train: null, pnr: null, date: null });
+  assert.deepEqual(gate.extractEntities('pnr 1234567890'), { train: null, pnr: '1234567890', date: null });
 });
 
 test('route/schedule and average-delay intents map to their endpoints', () => {
@@ -235,7 +236,8 @@ test('buildPlanFor emits the stable plan shape for every intent', () => {
   assert.deepEqual(seat.params, { src: '$src', dst: '$dst', date: 'today' });
   const chart = gate.buildPlanFor('chart_status', { train: '12951', date: '2026-10-20' });
   assert.deepEqual(chart, { cardKind: 'chart_status', url: '/rail-api/irctc/chart', params: { train: '12951', date: '2026-10-20' } });
-  assert.equal(gate.INTENTS.length, 7);
+  assert.deepEqual(gate.buildPlanFor('pnr_status', { pnr: '1234567890' }), { cardKind: 'pnr_status', url: '/rail-api/pnr', params: { pnr: '1234567890' } });
+  assert.equal(gate.INTENTS.length, 8);
   for (const i of gate.INTENTS) {
     assert.ok(i.id && i.phrases.length >= 10, `${i.id} has >=10 phrases`);
     for (const p of i.phrases) assert.doesNotMatch(p, /\d/, `${i.id} phrase digit-free`);
@@ -630,7 +632,8 @@ test('buildFormSpec is exported and returns fields array with correct required f
       trains_between: 'trains between sc and pune',
       station_board: 'station board pune',
       seat_availability: 'seat availability from sc to pune',
-      chart_status: 'chart status 12951'
+      chart_status: 'chart status 12951',
+      pnr_status: 'pnr status 1234567890'
     }[intentId];
     const spec = gate.buildFormSpec(sample);
     assert.equal(spec.intentId, intentId, `sample for ${intentId} should resolve to ${intentId}`);

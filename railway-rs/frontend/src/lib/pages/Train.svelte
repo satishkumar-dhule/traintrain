@@ -27,15 +27,12 @@ import {
 } from '$lib/components/badges/index.js'
 import { primeTrainDelay } from '$lib/trainDelay.svelte.js'
 import RouteMap from '$lib/components/RouteMap.svelte'
-import PageHeader from '$lib/components/PageHeader.svelte'
+import PageShell from '$lib/components/PageShell.svelte'
 import SignalDot from '$lib/components/SignalDot.svelte'
-import Breadcrumbs from '$lib/components/Breadcrumbs.svelte'
-import RouteContextBar from '$lib/components/RouteContextBar.svelte'
 import EntityChip from '$lib/components/EntityChip.svelte'
 import ResultMeta from '$lib/components/ResultMeta.svelte'
 import StatPill from '$lib/components/StatPill.svelte'
 import TabBar from '$lib/components/TabBar.svelte'
-import TrackRule from '$lib/components/TrackRule.svelte'
 import BottomSpacer from '$lib/components/BottomSpacer.svelte'
 import { asText, fmtDash, numOrNull, fmtExcDate, normDay } from '$lib/format.js'
 import ActivityIcon from 'lucide-svelte/icons/activity'
@@ -616,21 +613,15 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
 {/snippet}
 
 <section class="grid gap-4 overflow-hidden md:gap-6" class:idle-center={!committed}>
-  {#if committed && viewport.narrow}
-    <RouteContextBar
-      from={committed}
-      to={data?.train_name ?? ''}
-      onEdit={() => { query = ''; searchOpen = true }}
-    />
-  {:else}
-    <PageHeader title="Live train status" description="Spot any train by number or name. Data refreshes honestly from the live API.">
-      {#snippet children()}
-        <Breadcrumbs items={[{ label: 'Home', href: '/' }, { label: 'Live Train', href: '/train' }, { label: 'Train ' + (committed || number) }]} />
-      {/snippet}
-    </PageHeader>
-  {/if}
-
-  <TrackRule />
+  <PageShell
+    title="Live train status"
+    description="Spot any train by number or name. Data refreshes honestly from the live API."
+    breadcrumbs={[{ label: 'Home', href: '/' }, { label: 'Live Train', href: '/train' }, { label: 'Train ' + (committed || number) }]}
+    routeFrom={committed}
+    routeTo={data?.train_name ?? ''}
+    onEdit={() => { query = ''; searchOpen = true }}
+    showRouteBar={!!committed}
+  />
 
   {#if committed && viewport.narrow && !searchOpen}
     <button
@@ -674,7 +665,7 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
             onchange={(e) => setAuto(e.currentTarget.checked)}
             class="size-4 accent-primary"
           />
-          Auto 30s
+          Auto <span class="data-num">30s</span>
           {#if auto}<span class="data-num text-xs">next {nextIn}s</span>{/if}
         </label>
       </Card.Content>
@@ -724,7 +715,7 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
                 <TrainDelayBadge number={data.train_number} name={data.train_name} />
               </Card.Title>
               <Card.Description>
-                {#if runPosition}{runPosition}{:else}{statusRows.length} stations on this run{/if}
+                {#if runPosition}{runPosition}{:else}<span class="data-num">{statusRows.length}</span> stations on this run{/if}
               </Card.Description>
               <ResultMeta source={data?.data_source}>
                 <StatPill label="Stations" value={statusRows.length} />
@@ -741,7 +732,7 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
               >
                 <SparklesIcon class="size-4 max-lg:mr-0" /><span class="max-lg:hidden">Ask Train Bro</span>
               </Button>
-              <StatusBadge tone={auto ? 'info' : 'outline'} dot={auto} class="max-lg:hidden">{auto ? 'auto 30s' : 'manual'}</StatusBadge>
+              <StatusBadge tone={auto ? 'info' : 'outline'} dot={auto} class="max-lg:hidden">{#if auto}auto <span class="data-num">30s</span>{:else}manual{/if}</StatusBadge>
             </div>
           </Card.Header>
           <Card.Content class="grid gap-3">
@@ -808,7 +799,7 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
               <span>{schData.train_name ?? ''}</span>
               <TrainDelayBadge number={schData.train_number} name={schData.train_name} />
             </Card.Title>
-            <Card.Description>{schData.stops?.length ?? 0} scheduled stops</Card.Description>
+            <Card.Description><span class="data-num">{schData.stops?.length ?? 0}</span> scheduled stops</Card.Description>
             <ResultMeta source={schData?.data_source}>
               <StatPill label="Stops" value={schData.stops?.length ?? 0} />
             </ResultMeta>
@@ -866,7 +857,7 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
               />
             </Card.Title>
             <Card.Description>
-              Average arrival / departure delays{avgData.days_of_run ? ` · runs: ${avgData.days_of_run}` : ''}
+              Average arrival / departure delays{#if avgData.days_of_run} · runs: <span class="data-num">{avgData.days_of_run}</span>{/if}
             </Card.Description>
             <ResultMeta source={avgData?.data_source}>
               <StatPill label="Stations" value={avgData.stations?.length ?? 0} />
@@ -1042,7 +1033,7 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
               {#if train.name}<span class="break-words">{train.name}</span>{/if}
             </Card.Title>
             <Card.Description class="break-words [overflow-wrap:anywhere]">
-              {entries.length} exception{entries.length === 1 ? '' : 's'}{excRoute ? ` · ${excRoute}` : ''}
+              <span class="data-num">{entries.length}</span> exception{entries.length === 1 ? '' : 's'}{excRoute ? ` · ${excRoute}` : ''}
             </Card.Description>
             <ResultMeta source={excData?.data_source}>
               <StatPill label="Records" value={entries.length} />

@@ -30,9 +30,7 @@ use serde_json::{json, Value};
 
 use super::super::error::AppError;
 use super::super::http::HttpClient;
-
-/// Desktop Chrome UA the NTES web app expects; non-browser UAs are challenged.
-const BROWSER_UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
+use crate::core::source::BROWSER_UA;
 
 /// Characters of a body to keep when reporting a decode failure.
 const SNIPPET_CHARS: usize = 120;

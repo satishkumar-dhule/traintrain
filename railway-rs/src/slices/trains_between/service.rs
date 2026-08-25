@@ -2,6 +2,7 @@ use std::time::Instant;
 
 use serde_json::Value;
 
+use crate::core::cache::keys;
 use crate::core::error::AppError;
 use crate::core::irctc;
 use crate::models::{BetweenTrain, TrainsBetweenResponse};
@@ -22,11 +23,9 @@ impl Service {
         src: &str,
         dst: &str,
     ) -> Result<TrainsBetweenResponse, AppError> {
-        let cache_key = format!("trains_between:{src}:{dst}");
-        if let Some(cached) = state.cache.get(&cache_key) {
-            if let Ok(resp) = serde_json::from_value(cached) {
-                return Ok(resp);
-            }
+        let cache_key = keys::trains_between(src, dst);
+        if let Some(cached) = state.cache.get_json(&cache_key) {
+            return Ok(cached);
         }
 
         let ntes_started = Instant::now();
@@ -38,9 +37,10 @@ impl Service {
             .await
         {
             Ok(data) => {
-                state
-                    .metrics
-                    .record_source_latency("ntes", ntes_started.elapsed());
+                state.metrics.record_source_latency(
+                    crate::core::source::metric::NTES,
+                    ntes_started.elapsed(),
+                );
                 match map_ntes(data, src, dst) {
                     Ok(resp) => {
                         tracing::info!(
@@ -50,7 +50,7 @@ impl Service {
                             latency_ms = ntes_started.elapsed().as_millis(),
                             "trains-between resolved from NTES"
                         );
-                        state.cache.set(&cache_key, serde_json::to_value(&resp)?);
+                        state.cache.set_json(&cache_key, &resp)?;
                         return Ok(resp);
                     }
                     Err(e) => e.message(),
@@ -61,7 +61,7 @@ impl Service {
 
         match irctc_fallback(state, src, dst, &ntes_failure).await {
             Ok(resp) => {
-                state.cache.set(&cache_key, serde_json::to_value(&resp)?);
+                state.cache.set_json(&cache_key, &resp)?;
                 Ok(resp)
             }
             Err(e) => Err(AppError::source_unavailable(
@@ -89,7 +89,7 @@ async fn irctc_fallback(
     let data = state.irctc.availability(src, dst, &today).await?;
     state
         .metrics
-        .record_source_latency("irctc", start.elapsed());
+        .record_source_latency(crate::core::source::metric::IRCTC, start.elapsed());
 
     let norm = irctc::normalize::availability_trains(&data)?;
     let trains: Vec<BetweenTrain> = norm["trains"]
@@ -156,7 +156,7 @@ fn map_ntes(data: Value, src: &str, dst: &str) -> Result<TrainsBetweenResponse, 
         src: Some(src.to_string()),
         dst: Some(dst.to_string()),
         trains: Some(trains),
-        data_source: Some("NTES".to_string()),
+        data_source: Some(crate::core::source::labels::NTES.to_string()),
     })
 }
 

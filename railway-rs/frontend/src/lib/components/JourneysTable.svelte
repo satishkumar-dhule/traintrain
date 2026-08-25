@@ -347,7 +347,7 @@ import CalendarClockIcon from 'lucide-svelte/icons/calendar-clock'
       <span class="flex min-w-0 items-baseline gap-1">
         <span class="data-num text-[11px] max-lg:text-xs font-semibold">{fmtDash(classCode(row))}</span>
         {#if quotaLabel(row)}
-          <span class="rounded border border-border bg-muted px-1 text-[9px] leading-tight font-medium tracking-wide uppercase text-muted-foreground" title={`${quotaLabel(row)} quota`}>
+          <span class="rounded border border-border bg-muted px-1 text-[10px] leading-tight font-medium tracking-wide uppercase text-muted-foreground" title={`${quotaLabel(row)} quota`}>
             {quotaLabel(row)}
           </span>
         {/if}
@@ -417,7 +417,7 @@ import CalendarClockIcon from 'lucide-svelte/icons/calendar-clock'
     <Card.Root>
       <Card.Header>
         <Card.Title>{norm(src)} → {norm(dst)}</Card.Title>
-        <Card.Description>{trains.length} trains found</Card.Description>
+        <Card.Description><span class="data-num">{trains.length}</span> trains found</Card.Description>
       </Card.Header>
       <Card.Content onclick={handleRowActionsClick}>
         {#if trains.length === 0}
@@ -471,7 +471,7 @@ import CalendarClockIcon from 'lucide-svelte/icons/calendar-clock'
                       {@render inlineAvlChip(r)}
                     {/each}
                   </div>
-                  <p class="mt-2 text-xs text-muted-foreground">Showing only {expandedTrain} — switch to Availability tab for all {trains.length} trains.</p>
+                  <p class="mt-2 text-xs text-muted-foreground">Showing only <span class="data-num">{expandedTrain}</span> — switch to Availability tab for all <span class="data-num">{trains.length}</span> trains.</p>
                 {/if}
               {/if}
             </div>

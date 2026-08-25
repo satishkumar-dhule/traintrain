@@ -29,7 +29,8 @@ test('REQUIRED_FIELDS exported and matches spec expectations', () => {
   assert.deepEqual(gate.REQUIRED_FIELDS.station_board, ['station']);
   assert.deepEqual(gate.REQUIRED_FIELDS.seat_availability, ['src', 'dst']);
   assert.deepEqual(gate.REQUIRED_FIELDS.chart_status, ['train']);
-  assert.equal(Object.keys(gate.REQUIRED_FIELDS).length, 7);
+  assert.deepEqual(gate.REQUIRED_FIELDS.pnr_status, ['pnr']);
+  assert.equal(Object.keys(gate.REQUIRED_FIELDS).length, 8);
 });
 
 test('buildFormSpec returns fields array with correct required flags per intent', () => {

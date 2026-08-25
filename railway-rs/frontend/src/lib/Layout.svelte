@@ -5,7 +5,6 @@
   import PowerSearch from '$lib/components/PowerSearch.svelte'
   import NearbyStationDialog from '$lib/components/NearbyStationDialog.svelte'
   import DisplaySettings from '$lib/components/DisplaySettings.svelte'
-  import VisitTrail from '$lib/components/VisitTrail.svelte'
   import House from 'lucide-svelte/icons/house'
   import TrainFront from 'lucide-svelte/icons/train-front'
   import Building2 from 'lucide-svelte/icons/building-2'
@@ -18,8 +17,9 @@
   import Info from 'lucide-svelte/icons/info'
   import Search from 'lucide-svelte/icons/search'
   import XIcon from 'lucide-svelte/icons/x'
-  import EllipsisIcon from 'lucide-svelte/icons/ellipsis'
-  import SourceTrustChip from '$lib/components/SourceTrustChip.svelte'
+import EllipsisIcon from 'lucide-svelte/icons/ellipsis'
+import SignalDot from '$lib/components/SignalDot.svelte'
+import SourceTrustChip from '$lib/components/SourceTrustChip.svelte'
 
   let { children } = $props()
 
@@ -166,27 +166,35 @@
       <a
         href={homeItem.href}
         onclick={(e) => go(e, homeItem.href)}
-        class={`flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
+        aria-current={isActive(homeItem) ? 'page' : undefined}
+        class={`relative flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
           isActive(homeItem)
-            ? 'bg-primary text-primary-foreground'
+            ? 'bg-primary/10 font-medium text-primary'
             : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
         }`}
       >
+        {#if isActive(homeItem)}
+          <span aria-hidden="true" class="absolute inset-y-1.5 left-0 w-0.5 rounded-full bg-primary"></span>
+        {/if}
         <homeItem.icon class="size-4" />
         {homeItem.label}
       </a>
       {#each groups as group (group.label)}
-        <div class="px-3 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">{group.label}</div>
+        <div class="px-3 pb-1 pt-3 text-[11px] uppercase tracking-widest text-muted-foreground">{group.label}</div>
         {#each group.items as item (item.href)}
           <a
             href={item.href}
             onclick={(e) => go(e, item.href)}
-            class={`flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
+            aria-current={isActive(item) ? 'page' : undefined}
+            class={`relative flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
               isActive(item)
-                ? 'bg-primary text-primary-foreground'
+                ? 'bg-primary/10 font-medium text-primary'
                 : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
             }`}
           >
+            {#if isActive(item)}
+              <span aria-hidden="true" class="absolute inset-y-1.5 left-0 w-0.5 rounded-full bg-primary"></span>
+            {/if}
             <item.icon class="size-4" />
             {item.label}
           </a>
@@ -202,7 +210,7 @@
       >
         <Search class="size-4" />
         <span>Search everything</span>
-        <kbd class="ml-auto rounded border bg-muted px-1.5 font-mono text-[10px]">⌘K</kbd>
+        <kbd class="data-num ml-auto rounded border bg-muted px-1.5 text-[10px]">⌘K</kbd>
       </button>
       <DisplaySettings />
     </div>
@@ -263,28 +271,34 @@
             href={homeItem.href}
             onclick={(e) => go(e, homeItem.href)}
             aria-current={isActive(homeItem) ? 'page' : undefined}
-            class={`mt-1 flex min-h-12 items-center gap-3.5 rounded-lg px-3.5 text-base transition-colors ${
+            class={`relative mt-1 flex min-h-12 items-center gap-3.5 rounded-lg px-3.5 text-base transition-colors ${
               isActive(homeItem)
                 ? 'bg-primary/10 font-medium text-primary'
                 : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
             }`}
           >
+            {#if isActive(homeItem)}
+              <span aria-hidden="true" class="absolute inset-y-2 left-0 w-0.5 rounded-full bg-primary"></span>
+            {/if}
             <homeItem.icon class="size-[22px] shrink-0" />
             {homeItem.label}
           </a>
           {#each sheetGroups as group (group.label)}
-            <div class="px-3.5 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">{group.label}</div>
+            <div class="px-3.5 pb-1 pt-3 text-[11px] uppercase tracking-widest text-muted-foreground">{group.label}</div>
             {#each group.items as item (item.href)}
               <a
                 href={item.href}
                 onclick={(e) => go(e, item.href)}
                 aria-current={isActive(item) ? 'page' : undefined}
-                class={`mt-1 flex min-h-12 items-center gap-3.5 rounded-lg px-3.5 text-base transition-colors ${
+                class={`relative mt-1 flex min-h-12 items-center gap-3.5 rounded-lg px-3.5 text-base transition-colors ${
                   isActive(item)
                     ? 'bg-primary/10 font-medium text-primary'
                     : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
                 }`}
               >
+                {#if isActive(item)}
+                  <span aria-hidden="true" class="absolute inset-y-2 left-0 w-0.5 rounded-full bg-primary"></span>
+                {/if}
                 <item.icon class="size-[22px] shrink-0" />
                 {item.label}
               </a>
@@ -307,7 +321,6 @@
   {/if}
 
   <div class="lg:pl-60">
-    <VisitTrail />
     <main
       class="mx-auto w-full max-w-5xl px-3 pt-3 max-lg:px-4 max-lg:pt-4 md:px-8 md:pt-10 max-lg:pb-[calc(6rem+env(safe-area-inset-bottom))] lg:pb-[calc(2rem+env(safe-area-inset-bottom))]"
     >
@@ -334,7 +347,7 @@
           }`}
         >
           {#if isActive(item)}
-            <span aria-hidden="true" class="absolute inset-x-4 top-0 h-0.5 rounded-full bg-primary"></span>
+            <SignalDot pulse class="absolute left-1/2 top-0 size-1.5 -translate-x-1/2 bg-primary text-primary" />
           {/if}
           <item.icon class="size-5" />
           {item.short ?? item.label}

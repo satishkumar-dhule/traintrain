@@ -2,6 +2,7 @@ use std::time::Instant;
 
 use serde_json::Value;
 
+use crate::core::cache::keys;
 use crate::core::error::AppError;
 use crate::models::LiveStatusResponse;
 use crate::slices::live_status::mapping::{map_response, str_at};
@@ -28,7 +29,7 @@ impl Service {
         train: &str,
         date: &str,
     ) -> Result<LiveStatusResponse, AppError> {
-        let key = format!("live_status:{train}:{date}");
+        let key = keys::live_status(train, date);
         if let Some(cached) = state.cache.get(&key) {
             if let Ok(resp) = map_response(&cached) {
                 return Ok(resp);
@@ -42,9 +43,10 @@ impl Service {
         let ntes_started = Instant::now();
         let ntes_failure = match ntes_web_run(state, train).await {
             Ok(norm) => {
-                state
-                    .metrics
-                    .record_source_latency("ntes", ntes_started.elapsed());
+                state.metrics.record_source_latency(
+                    crate::core::source::metric::NTES,
+                    ntes_started.elapsed(),
+                );
                 match select_run_for_date(&norm, date) {
                     Err(msg) => return Err(AppError::not_found(msg)),
                     Ok(selected) => match map_response(&selected) {
@@ -192,7 +194,7 @@ async fn railyatri_norm(state: &AppState, train: &str) -> Result<Value, AppError
     })?;
     state
         .metrics
-        .record_source_latency("railyatri", started.elapsed());
+        .record_source_latency(crate::core::source::metric::RAILYATRI, started.elapsed());
     Ok(norm)
 }
 

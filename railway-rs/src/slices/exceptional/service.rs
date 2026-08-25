@@ -2,6 +2,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
+use crate::core::cache::keys;
 use crate::core::error::AppError;
 use crate::models::{ExceptionEntry, ExceptionalResponse, ExceptionalTrainDetail};
 use crate::state::AppState;
@@ -23,7 +24,7 @@ impl Service {
         train: &str,
         kind: Option<&str>,
     ) -> Result<ExceptionalResponse, AppError> {
-        let key = format!("exceptional:{train}");
+        let key = keys::exceptional(train);
         if let Some(cached) = state.cache.get(&key) {
             if let Some(response) = map_response(&cached, train, kind, state) {
                 return Ok(response);
@@ -32,7 +33,9 @@ impl Service {
 
         let start = Instant::now();
         let data = state.ntes_web.train_exceptions(train).await;
-        state.metrics.record_source_latency("ntes", start.elapsed());
+        state
+            .metrics
+            .record_source_latency(crate::core::source::metric::NTES, start.elapsed());
         let data = data?;
 
         let response = map_response(&data, train, kind, state).ok_or_else(|| {
@@ -55,7 +58,7 @@ fn build_response(
         train: train_detail(&train),
         exceptions,
         message,
-        data_source: Some("NTES".to_string()),
+        data_source: Some(crate::core::source::labels::NTES.to_string()),
         cache_ttl: Some(EXCEPTIONAL_CACHE_TTL.as_secs()),
     }
 }

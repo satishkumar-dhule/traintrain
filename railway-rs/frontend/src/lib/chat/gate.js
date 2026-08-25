@@ -21,6 +21,7 @@ import { distance as levenshtein } from 'fastest-levenshtein'
 import { findReplay } from './memory.js'
 
 const TRAIN_RE = /\b([1-9]\d{4})\b/
+const PNR_RE = /\b(\d{10})\b/
 const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 const MAX_BETWEEN_TRAINS = 12
 const MAX_UPCOMING_STOPS = 4
@@ -131,13 +132,14 @@ function isoTomorrow() {
   return new Date(Date.now() + 86400000).toISOString().slice(0, 10)
 }
 
-/** {train: '12951'|null, date: string|null}. Date is a server-compatible
+/** {train: '12951'|null, pnr: '1234567890'|null, date: string|null}. Date is a server-compatible
  * string: 'today', ISO YYYY-MM-DD or DD-MM-YYYY. Relative words map:
  * aaj/today -> 'today', kal/tomorrow -> ISO of tomorrow (the server only
  * understands 'today' + absolute formats, so tomorrow is materialized). */
 export function extractEntities(raw) {
   const s = String(raw ?? '')
   const train = (s.match(TRAIN_RE) || [])[1] ?? null
+  const pnr = (s.match(PNR_RE) || [])[1] ?? null
   let date = null
   const iso = s.match(/\b(\d{4})-(\d{2})-(\d{2})\b/)
   const dmy = s.match(/\b(\d{2})-(\d{2})-(\d{4})\b/)
@@ -145,7 +147,7 @@ export function extractEntities(raw) {
   if (iso) date = iso[0]
   else if (dmy) date = dmy[0]
   else if (rel) date = /^(today|aaj)$/i.test(rel[1]) ? 'today' : isoTomorrow()
-  return { train, date }
+  return { train, pnr, date }
 }
 
 const BETWEEN_RES = [
@@ -159,6 +161,112 @@ const BOARD_RES = [
   /^trains?\s+(?:at|from)\s+([a-z][a-z .'-]{1,30})\s*$/i
 ]
 
+const STOPWORDS_FOR_SLOT = new Set([
+  'check','show','find','get','tell','give','please','kindly','seat','availability','available','berth','ticket','reservation','booking','trains','train','between','from','to','and','for','of','at','the','a','an','is','are','am','was','were','be','been','being','do','does','did','done','i','me','my','mine','you','your','yours','we','our','ours','us','it','its','they','them','their','this','that','these','those','there','here','what','which','when','who','whom','how','much','many','get','got','give','show','has','have','had','now','yet','still','already','just','actually','kya','batao','nahin','nahi','haan','jaldi','station','stations','board','live','arrivals','departures','pnr','status','where','which','running','route','schedule','timetable','delay','chart','prepared','today','tomorrow','kal','aaj','next','now','upcoming','platform','halting','announcement','display','departures','arrival'
+])
+
+function isPlausibleStationToken(tok) {
+  const t = String(tok ?? '').toLowerCase().trim()
+  if (!t || t.length < 2) return false
+  if (STOPWORDS.has(t)) return false
+  if (STOPWORDS_FOR_SLOT.has(t)) return false
+  if (/^\d+$/.test(t)) return false
+  return /^[a-z][a-z0-9 .'-]*$/.test(t)
+}
+
+function cleanStationQuery(s) {
+  if (!s) return s
+  let out = String(s).trim()
+  out = out.replace(/\s+(?:board|station|stations|please|tak|today|tomorrow|next|now)\s*$/i, '').trim()
+  out = out.replace(/\s+tak$/i, '').trim()
+  out = out.replace(/^(?:board|station)\s+/i, '').trim()
+  return out
+}
+
+/** Fallback for bare "X to Y" without from/between — last " to " wins */
+function fallbackBareTo(s, alreadySrc, alreadyDst) {
+  if (alreadySrc && alreadyDst) return { srcQuery: alreadySrc, dstQuery: alreadyDst }
+  // Find all occurrences of " to " with word boundaries
+  const pattern = /\b to \b/g
+  let lastIdx = -1
+  let m
+  while ((m = pattern.exec(s)) !== null) lastIdx = m.index
+  if (lastIdx === -1) return { srcQuery: alreadySrc, dstQuery: alreadyDst }
+  // extract left and right windows up to 40 chars or string boundaries, but prefer token boundaries
+  const leftWindow = s.slice(Math.max(0, lastIdx - 40), lastIdx).trim()
+  const rightWindow = s.slice(lastIdx + 4, lastIdx + 44).trim()
+  if (!leftWindow || !rightWindow) return { srcQuery: alreadySrc, dstQuery: alreadyDst }
+
+  // left: take last 1-3 plausible tokens
+  const leftTokens = leftWindow.split(/\s+/).filter(Boolean)
+  const rightTokens = rightWindow.split(/\s+/).filter(Boolean)
+  // filter out filler from left tail: walk from end, collect plausible tokens up to 3 words
+  const leftCollected = []
+  for (let i = leftTokens.length - 1; i >= 0 && leftCollected.length < 3; i--) {
+    const tok = leftTokens[i].replace(/[^a-z'-]/g, '')
+    if (!tok) continue
+    if (STOPWORDS_FOR_SLOT.has(tok)) {
+      if (leftCollected.length === 0) continue // skip leading filler like "availability"
+      else break // stop at filler that separates station from earlier intent words
+    }
+    if (!isPlausibleStationToken(tok)) continue
+    leftCollected.unshift(tok)
+  }
+  // right: take first 1-3 plausible tokens
+  const rightCollected = []
+  for (let i = 0; i < rightTokens.length && rightCollected.length < 3; i++) {
+    const tok = rightTokens[i].replace(/[^a-z'-]/g, '')
+    if (!tok) continue
+    if (STOPWORDS_FOR_SLOT.has(tok)) {
+      if (rightCollected.length === 0) continue
+      else break
+    }
+    if (!isPlausibleStationToken(tok)) break
+    rightCollected.push(tok)
+    // stop after we have 2 tokens, if next token would be filler like "trains"
+    if (rightCollected.length >= 2) {
+      // peek next token if it's "trains" -> stop
+      const nxt = rightTokens[i + 1]
+      if (nxt && STOPWORDS_FOR_SLOT.has(nxt)) break
+    }
+  }
+
+  const src = leftCollected.join(' ').trim()
+  const dst = rightCollected.join(' ').trim()
+  // Validate lengths and not generic
+  const isGeneric = (t) => /^(these|those|this|that|station|stations)$/i.test(String(t ?? '').trim())
+  let outSrc = alreadySrc
+  let outDst = alreadyDst
+  if (!outSrc && src && src.length >= 2 && !isGeneric(src) && dst && dst.length >= 2 && !isGeneric(dst)) {
+    outSrc = src
+    outDst = dst
+  } else if (!outSrc && src && src.length >= 2 && !isGeneric(src) && !outDst) {
+    // single side? handled by enrich later
+  }
+  return { srcQuery: outSrc, dstQuery: outDst }
+}
+
+function fallbackBoard(s, already) {
+  if (already) return already
+  // Try "board <station>" already handled, but also "station <name> board" or isolated station after keywords
+  // Look for last mention of plausible station near board keywords
+  if (!/\b(board|arrivals?|departures?|live station|platform)\b/i.test(s)) return null
+  // Try pattern like "station <name>"
+  let m = s.match(/\bstation\s+([a-z][a-z .'-]{1,30})\b/i)
+  if (m) {
+    let cand = cleanStationQuery(m[1])
+    if (cand && cand.length >= 2 && !/^(board|announcement|display)$/i.test(cand) && isPlausibleStationToken(cand.split(/\s+/)[0])) return cand
+  }
+  // Try last plausible token after "at/for/of" near board
+  // Find all plausible tokens in string
+  const tokens = s.split(/\s+/).map((t) => t.replace(/[^a-z]/g, '')).filter((t) => t && t.length >= 2 && /^[a-z]{2,10}$/.test(t) && isPlausibleStationToken(t) && !['board','station','live','at','for','of','in','arrivals','departures','announcement','display','next','upcoming','platform','trains','train'].includes(t))
+  if (tokens.length) {
+    // Prefer last token that is not at the very start if multiple
+    return tokens[tokens.length - 1]
+  }
+  return null
+}
+
 /** Free-text station references: {srcQuery, dstQuery, stationQuery}. Run on
  * text that has already had entity literals stripped (see entityLiterals),
  * otherwise relative dates glom onto the destination span. */
@@ -169,18 +277,37 @@ export function extractSlots(mappedText) {
   for (const re of BETWEEN_RES) {
     const m = s.match(re)
     if (m) {
-      out.srcQuery = m[1].trim()
-      out.dstQuery = m[2].trim().replace(/\s+tak$/i, '').trim()
+      out.srcQuery = cleanStationQuery(m[1].trim())
+      out.dstQuery = cleanStationQuery(m[2].trim().replace(/\s+tak$/i, '').trim())
       break
     }
+  }
+  // Fallback bare "X to Y" if strict patterns missed
+  if (!out.srcQuery || !out.dstQuery) {
+    const fb = fallbackBareTo(s, out.srcQuery, out.dstQuery)
+    if (fb.srcQuery) out.srcQuery = fb.srcQuery
+    if (fb.dstQuery) out.dstQuery = fb.dstQuery
   }
   for (const re of BOARD_RES) {
     const m = s.match(re)
     if (m) {
-      out.stationQuery = m[1].trim()
+      out.stationQuery = cleanStationQuery(m[1].trim())
       break
     }
   }
+  if (!out.stationQuery) {
+    const fb = fallbackBoard(s, null)
+    if (fb) out.stationQuery = cleanStationQuery(fb)
+  }
+  // Final clean
+  if (out.srcQuery) out.srcQuery = cleanStationQuery(out.srcQuery)
+  if (out.dstQuery) out.dstQuery = cleanStationQuery(out.dstQuery)
+  if (out.stationQuery) out.stationQuery = cleanStationQuery(out.stationQuery)
+  // Guard generic words
+  const isGeneric = (t) => /^(these|those|this|that|station|stations|these station|these stations|this station)$/i.test(String(t ?? '').trim())
+  if (out.srcQuery && isGeneric(out.srcQuery)) out.srcQuery = null
+  if (out.dstQuery && isGeneric(out.dstQuery)) out.dstQuery = null
+  if (out.stationQuery && isGeneric(out.stationQuery)) out.stationQuery = null
   return out
 }
 
@@ -323,6 +450,24 @@ export const INTENTS = [
       'chart made or not',
       'when will chart prepare'
     ]
+  },
+  {
+    id: 'pnr_status',
+    needsPnr: true,
+    phrases: [
+      'pnr status',
+      'check my pnr',
+      'pnr enquiry',
+      'booking status of pnr',
+      'is my ticket confirmed pnr',
+      'current reservation status of pnr',
+      'pnr number status',
+      'has my pnr been confirmed',
+      'pnr current status',
+      'check pnr number',
+      'pnr berth status',
+      'my pnr status'
+    ]
   }
 ]
 
@@ -333,7 +478,8 @@ export const REQUIRED_FIELDS = {
   trains_between: ['src', 'dst'],
   station_board: ['station'],
   seat_availability: ['src', 'dst'],
-  chart_status: ['train']
+  chart_status: ['train'],
+  pnr_status: ['pnr']
 }
 
 export const INTENT_LABELS = {
@@ -343,7 +489,8 @@ export const INTENT_LABELS = {
   trains_between: 'Trains between stations',
   station_board: 'Station board',
   seat_availability: 'Seat availability',
-  chart_status: 'Chart status'
+  chart_status: 'Chart status',
+  pnr_status: 'PNR status'
 }
 
 const PHRASES = INTENTS.flatMap((intent) =>
@@ -365,7 +512,7 @@ function enrichSlotsForHelp(mapped, slots) {
     let m =
       mapped.match(/\bfrom\s+([a-z][a-z .'-]{1,29}?)(?=\s+to\b|\s+tak\b|\s*$)/i) ||
       mapped.match(/\bfrom\s+([a-z][a-z .'-]{1,29}?)\s*$/i)
-    if (m && !isGeneric(m[1])) out.srcQuery = m[1].trim().toLowerCase()
+    if (m && !isGeneric(m[1])) out.srcQuery = cleanStationQuery(m[1].trim().toLowerCase())
     else {
       const simple = mapped.match(/\bfrom\s+([a-z]{2,30})\b/i)
       if (simple && !isGeneric(simple[1])) out.srcQuery = simple[1].trim().toLowerCase()
@@ -375,11 +522,16 @@ function enrichSlotsForHelp(mapped, slots) {
     const mTo =
       mapped.match(/\bto\s+([a-z][a-z .'-]{1,29}?)\s*$/i) ||
       mapped.match(/\bto\s+([a-z][a-z .'-]{1,29}?)(?:\s+tak)?\s*$/i)
-    if (mTo && !isGeneric(mTo[1])) out.dstQuery = mTo[1].trim().toLowerCase()
+    if (mTo && !isGeneric(mTo[1])) out.dstQuery = cleanStationQuery(mTo[1].trim().toLowerCase())
   }
   if (!out.stationQuery) {
     const mBoard = mapped.match(/\bboard\s+([a-z][a-z .'-]{1,30})\s*$/i)
-    if (mBoard && !isGeneric(mBoard[1])) out.stationQuery = mBoard[1].trim().toLowerCase()
+    if (mBoard && !isGeneric(mBoard[1])) out.stationQuery = cleanStationQuery(mBoard[1].trim().toLowerCase())
+    else {
+      // try generic board fallback
+      const fb = fallbackBoard(mapped, null)
+      if (fb && !isGeneric(fb)) out.stationQuery = fb
+    }
   }
   return out
 }
@@ -395,6 +547,15 @@ function buildCandidates(mapped) {
   }
   const body0 = stripEntities(base)
   const slots = extractSlots(body0)
+  const enrichedSlots = enrichSlotsForHelp(base, slots)
+  // slot-aware boost: detect seat words early
+  const hasSeatWords = /\b(seat|berth|availabilit|tiket|ticket|reservation|waitlist|booking|tatkal)\b/.test(base)
+  const hasPnrWords = /\b(pnr)\b/.test(base)
+  const hasRouteWords = /\b(route|schedule|timetable|time table|halts?|stops? at)\b/.test(base)
+  const hasChartWords = /\b(chart|prepared|ready)\b/.test(base)
+  const hasDelayWords = /\b(average|avg)\s+(delay|late)\b|\bhow much delay\b/.test(base)
+  const hasBoardWords = /\b(board|arrivals?|departures?|live station)\b/.test(base)
+
   const body = stripStrings(body0, [slots.srcQuery, slots.dstQuery, slots.stationQuery])
   let qTokens = contentTokens(body)
   if (!qTokens.length) qTokens = contentTokens(base)
@@ -437,6 +598,40 @@ function buildCandidates(mapped) {
       (a, b) => b.score - a.score
     )
   }
+
+  // ---- slot-aware boost before distinct selection ----
+  // Apply additive boost to intents that have required slots present in the query.
+  // This fixes cases where token stripping leaves single "train" token causing wrong winner.
+  const boostMap = new Map()
+  if (enrichedSlots.srcQuery && enrichedSlots.dstQuery) {
+    if (hasSeatWords) {
+      boostMap.set('seat_availability', 0.25)
+      // also keep trains_between as runner-up but slightly less
+      if (!boostMap.has('trains_between')) boostMap.set('trains_between', 0.05)
+    } else {
+      boostMap.set('trains_between', 0.3)
+      // seat without seat words shouldn't outrank trains_between
+    }
+  } else if (enrichedSlots.stationQuery || hasBoardWords) {
+    boostMap.set('station_board', 0.28)
+  } else if (hasPnrWords) {
+    boostMap.set('pnr_status', 0.35)
+  }
+
+  // Also boost based on explicit verb cues even without slots
+  if (hasDelayWords) boostMap.set('average_delay', (boostMap.get('average_delay') || 0) + 0.28)
+  if (hasRouteWords) boostMap.set('train_schedule', (boostMap.get('train_schedule') || 0) + 0.28)
+  if (hasChartWords) boostMap.set('chart_status', (boostMap.get('chart_status') || 0) + 0.25)
+  if (hasPnrWords) boostMap.set('pnr_status', (boostMap.get('pnr_status') || 0) + 0.2)
+
+  if (boostMap.size) {
+    for (const entry of scored) {
+      const b = boostMap.get(entry.p.intent.id)
+      if (b) entry.score = Math.min(1, entry.score + b)
+    }
+    scored.sort((a, b) => b.score - a.score)
+  }
+
   const seen = new Set()
   const distinct = []
   for (const c of scored) {
@@ -469,6 +664,7 @@ function collectForForm(rawText, mapped) {
   slots = enrichSlotsForHelp(mapped, slots)
   const collected = {}
   if (ent.train) collected.train = ent.train
+  if (ent.pnr) collected.pnr = ent.pnr
   if (ent.date) collected.date = ent.date
   if (slots.srcQuery) collected.src = slots.srcQuery
   if (slots.dstQuery) collected.dst = slots.dstQuery
@@ -501,6 +697,16 @@ function makeForm({ intentId, confidence, collected, candidates }) {
         required: true,
         type: 'text',
         pattern: '\\d{5}'
+      }
+    } else if (name === 'pnr') {
+      spec = {
+        name,
+        label: 'PNR number',
+        placeholder: 'e.g. 1234567890',
+        value: collected.pnr || '',
+        required: true,
+        type: 'text',
+        pattern: '\\d{10}'
       }
     } else if (name === 'src') {
       spec = {
@@ -540,14 +746,19 @@ function makeForm({ intentId, confidence, collected, candidates }) {
       if (dmy) dateVal = `${dmy[3]}-${dmy[2]}-${dmy[1]}`
     }
     if (!dateVal) dateVal = todayISO()
-    fields.push({
-      name: 'date',
-      label: 'Date',
-      type: 'date',
-      value: dateVal,
-      required: false,
-      placeholder: ''
-    })
+    // pnr & seat_availability respect date differently; pnr doesn't use date, but keep optional date for chart/trains
+    if (intentId === 'pnr_status') {
+      // pnr has no date field
+    } else {
+      fields.push({
+        name: 'date',
+        label: 'Date',
+        type: 'date',
+        value: dateVal,
+        required: false,
+        placeholder: ''
+      })
+    }
   }
   const form = {
     intentId,
@@ -567,8 +778,48 @@ export function buildFormSpec(text) {
   const collected = collectForForm(raw, mapped)
   const candidates = buildCandidates(mapped)
   const best = candidates[0] || null
-  const intentId = best && best.score >= 0.3 ? best.intentId : null
-  const confidence = best ? best.score : 0
+  // Slot-aware override: if form has clear src/dst but candidate is not trains_between/seat_availability, prefer slot-consistent intent
+  let intentId = best && best.score >= 0.3 ? best.intentId : null
+  let confidence = best ? best.score : 0
+  // Heuristic override when slots strongly indicate between but fuzzy picked wrong
+  if (collected.src && collected.dst) {
+    const hasSeatWords = /\b(seat|berth|availabilit|tiket|ticket|reservation|waitlist|booking|tatkal)\b/i.test(mapped)
+    const preferred = hasSeatWords ? 'seat_availability' : 'trains_between'
+    if (intentId !== preferred) {
+      const prefCandidate = candidates.find((c) => c.intentId === preferred)
+      if (prefCandidate && prefCandidate.score >= 0.18) {
+        intentId = preferred
+        confidence = prefCandidate.score
+      } else if (!intentId) {
+        intentId = preferred
+        confidence = 0.35
+      }
+    }
+  } else if (collected.pnr) {
+    intentId = 'pnr_status'
+    confidence = Math.max(confidence, 0.6)
+  } else if (collected.station && !collected.train && !collected.src) {
+    // likely station board if only station collected
+    const hasBoardHint = /\b(board|arrivals?|departures?|live station)\b/i.test(mapped)
+    if (hasBoardHint && intentId !== 'station_board') {
+      const boardCand = candidates.find((c) => c.intentId === 'station_board')
+      if (boardCand && boardCand.score >= 0.18) {
+        intentId = 'station_board'
+        confidence = boardCand.score
+      }
+    }
+  }
+  // If pnr present, force pnr_status regardless of fuzzy
+  if (collected.pnr && intentId !== 'pnr_status') {
+    const p = candidates.find((c) => c.intentId === 'pnr_status')
+    if (p) {
+      intentId = 'pnr_status'
+      confidence = Math.max(confidence, p.score, 0.55)
+    } else {
+      intentId = 'pnr_status'
+      confidence = 0.6
+    }
+  }
   return makeForm({ intentId, confidence, collected, candidates })
 }
 
@@ -601,8 +852,8 @@ export function buildPlanFor(id, entities = {}, slots = {}) {
         url: '/rail-api/ntes/trains-between',
         params: { src: '$src', dst: '$dst' },
         resolve: [
-          { slot: 'src', query: slots.srcQuery ?? '' },
-          { slot: 'dst', query: slots.dstQuery ?? '' }
+          { slot: 'src', query: slots.srcQuery ?? slots.src ?? '' },
+          { slot: 'dst', query: slots.dstQuery ?? slots.dst ?? '' }
         ]
       }
     case 'station_board':
@@ -610,7 +861,7 @@ export function buildPlanFor(id, entities = {}, slots = {}) {
         cardKind: id,
         url: '/rail-api/ntes/live-station',
         params: { station: '$station' },
-        resolve: [{ slot: 'station', query: slots.stationQuery ?? '', preferCode: true }]
+        resolve: [{ slot: 'station', query: slots.stationQuery ?? slots.station ?? '', preferCode: true }]
       }
     case 'seat_availability': {
       const params = { src: '$src', dst: '$dst' }
@@ -620,8 +871,8 @@ export function buildPlanFor(id, entities = {}, slots = {}) {
         url: '/rail-api/availability',
         params,
         resolve: [
-          { slot: 'src', query: slots.srcQuery ?? '' },
-          { slot: 'dst', query: slots.dstQuery ?? '' }
+          { slot: 'src', query: slots.srcQuery ?? slots.src ?? '' },
+          { slot: 'dst', query: slots.dstQuery ?? slots.dst ?? '' }
         ]
       }
     }
@@ -629,6 +880,13 @@ export function buildPlanFor(id, entities = {}, slots = {}) {
       const params = entities.train ? { train: entities.train } : {}
       if (entities.date) params.date = entities.date
       return { cardKind: id, url: '/rail-api/irctc/chart', params }
+    }
+    case 'pnr_status': {
+      return {
+        cardKind: id,
+        url: '/rail-api/pnr',
+        params: entities.pnr ? { pnr: entities.pnr } : {}
+      }
     }
     default:
       throw new Error(`unknown intent: ${id}`)
@@ -723,6 +981,7 @@ function entityLiterals(text) {
   const s = String(text ?? '')
   return [
     (s.match(TRAIN_RE) || [])[1] ?? null,
+    (s.match(PNR_RE) || [])[1] ?? null,
     s.match(/\b(today|tomorrow|kal|aaj)\b/i)?.[0] ?? null,
     s.match(/\b(\d{2})-(\d{2})-(\d{4})\b/)?.[0] ?? null,
     s.match(/\b(\d{4})-(\d{2})-(\d{2})\b/)?.[0] ?? null
@@ -772,6 +1031,34 @@ export function matchIntent(text) {
     })
     .sort((a, b) => b.score - a.score)
 
+  // slot-aware boost for matchIntent as well (mirror buildCandidates)
+  const hasSeatWords = /\b(seat|berth|availabilit|tiket|ticket|reservation|waitlist|booking|tatkal)\b/.test(base)
+  const hasPnrWords = /\b(pnr)\b/.test(base)
+  const hasDelayWords = /\b(average|avg)\s+(delay|late)\b|\bhow much delay\b/.test(base)
+  const hasRouteWords = /\b(route|schedule|timetable|time table|halts?|stops? at)\b/.test(base)
+  const hasChartWords = /\b(chart|prepared|ready)\b/.test(base)
+  const hasBoardWords = /\b(board|arrivals?|departures?|live station)\b/.test(base)
+  const boostMap = new Map()
+  if (slots.srcQuery && slots.dstQuery) {
+    if (hasSeatWords) boostMap.set('seat_availability', 0.25)
+    else boostMap.set('trains_between', 0.3)
+  } else if (slots.stationQuery || hasBoardWords) {
+    boostMap.set('station_board', 0.28)
+  } else if (hasPnrWords) {
+    boostMap.set('pnr_status', 0.35)
+  }
+  if (hasDelayWords) boostMap.set('average_delay', (boostMap.get('average_delay') || 0) + 0.28)
+  if (hasRouteWords) boostMap.set('train_schedule', (boostMap.get('train_schedule') || 0) + 0.28)
+  if (hasChartWords) boostMap.set('chart_status', (boostMap.get('chart_status') || 0) + 0.25)
+  if (hasPnrWords) boostMap.set('pnr_status', (boostMap.get('pnr_status') || 0) + 0.2)
+  if (boostMap.size) {
+    for (const e of scored) {
+      const b = boostMap.get(e.p.intent.id)
+      if (b) e.score = Math.min(1, e.score + b)
+    }
+    scored.sort((a, b) => b.score - a.score)
+  }
+
   const best = scored[0]
   // MARGIN separates INTENTS: near-duplicate phrases of the best intent
   // don't compete; the runner-up is the strongest other-intent candidate.
@@ -799,13 +1086,13 @@ export function matchIntent(text) {
 // ---------- help surfaces ----------
 
 export const HELP_REPLY =
-  "I'm Train Bro — I check **live data**: train running status, routes & timetables, average delays, trains between stations, seat availability, station boards and chart status. Try: \"live status of 12951\"."
+  "I'm Train Bro — I check **live data**: train running status, routes & timetables, average delays, trains between stations, seat availability, station boards, chart and PNR status. Try: \"live status of 12951\" or \"PNR 1234567890\"."
 
 export const HELP_CHIPS = [
   { label: 'Live status', prompt: 'live status of 12951' },
   { label: 'Trains SC→PUNE', prompt: 'trains from SC to PUNE' },
   { label: 'Seats SC→PUNE', prompt: 'seat availability from SC to PUNE' },
-  { label: 'Avg delay', prompt: 'average delay of 12626' }
+  { label: 'PNR status', prompt: 'pnr status 1234567890' }
 ]
 
 function helpVerdictWithForm(text, fallback) {
@@ -826,7 +1113,8 @@ const TRAIN_EXAMPLE_PROMPTS = {
   live_status: 'live status of 12951',
   average_delay: 'average delay of 12626',
   train_schedule: 'route of 12951',
-  chart_status: 'chart status of 12951'
+  chart_status: 'chart status of 12951',
+  pnr_status: 'pnr status 1234567890'
 }
 
 function missingSlotHelp(intentId, missing, text) {
@@ -837,6 +1125,12 @@ function missingSlotHelp(intentId, missing, text) {
       kind: 'help',
       reply: `Which train? Give me the 5-digit number — e.g. "${prompt}".`,
       actions: [{ label: 'Try 12951', prompt }]
+    }
+  } else if (missing === 'pnr') {
+    base = {
+      kind: 'help',
+      reply: 'Which PNR? Give me the 10-digit number — e.g. "pnr status 1234567890".',
+      actions: [{ label: 'Try 1234567890', prompt: 'pnr status 1234567890' }]
     }
   } else if (missing === 'stations' && intentId === 'seat_availability') {
     base = {
@@ -871,6 +1165,7 @@ function missingSlotHelp(intentId, missing, text) {
 
 function requiredSlotMissing(intent, ent, slots) {
   if (intent.needsTrain && !ent.train) return 'train'
+  if (intent.needsPnr && !ent.pnr) return 'pnr'
   if (intent.needsSrcDst && (!slots.srcQuery || !slots.dstQuery)) return 'stations'
   if (intent.needsStation && !slots.stationQuery) return 'station'
   return null
@@ -881,15 +1176,26 @@ function requiredSlotMissing(intent, ent, slots) {
 // to fuzzy matching. Runs on the normalized + Hinglish-mapped text.
 
 const SEAT_DEFER_RE =
-  /\b(seat|berth|availabilit|tiket|ticket|reservation|waitlist|booking)\b/
+  /\b(seat|berth|availabilit|tiket|ticket|reservation|waitlist|booking|tatkal)\b/
 const AVG_DELAY_RE = /\b(average|avg)\s+(delay|late)\b|\bhow much delay\b/
 const CHART_RE = /\b(chart|prepared|ready)\b/
 const SCHEDULE_RE = /\b(route|schedule|timetable|time table|stops? at|halts?)\b/
 const LIVE_VERBS_RE =
   /\b(live|status|running|position|where|reached|late|delayed|track)\b/
+const PNR_RE_TIER = /\b(pnr|booking status)\b/i
 
 function tierZero(mapped) {
   const num = (mapped.match(TRAIN_RE) || [])[1] ?? null
+  const pnr = (mapped.match(PNR_RE) || [])[1] ?? null
+
+  // PNR: strongest signal — if 10-digit + pnr word, route directly
+  if (pnr && PNR_RE_TIER.test(mapped)) {
+    return { kind: 'tool', plan: buildPlanFor('pnr_status', { pnr }), confidence: 1 }
+  }
+  // bare 10-digit with pnr word context even without explicit pnr word? if string is just 10 digits and recent context suggests pnr, but tierZero sees only text; handle pure 10-digit as pnr only when pnr word present
+  if (pnr && /\b(pnr|booking)\b/.test(mapped)) {
+    return { kind: 'tool', plan: buildPlanFor('pnr_status', { pnr }), confidence: 1 }
+  }
 
   // Seat family keeps date/class nuance -> always routed through the
   // heavy-intent confirm flow, never a silent tool call.
@@ -908,16 +1214,34 @@ function tierZero(mapped) {
     return { kind: 'tool', plan: buildPlanFor('live_status', { train: num }), confidence: 1 }
   }
 
+  // Bare 10-digit PNR without explicit word? treat as pnr if looks like pnr and no train ambience
+  if (pnr && !num && mapped.trim().split(/\s+/).length <= 4) {
+    // e.g. user typed just "1234567890"
+    if (/^\d{10}$/.test(mapped.trim())) {
+      return { kind: 'tool', plan: buildPlanFor('pnr_status', { pnr }), confidence: 1 }
+    }
+  }
+
   const bare = stripEntities(mapped)
-  if (/\btrain/.test(bare)) {
+  // trains_between via tierZero should handle any "X to Y" when train word present or route-like phrasing
+  const hasRouteSignal = /\b(train|trains|between|direct|available|route|services)\b/.test(bare)
+  if (hasRouteSignal || /\btrain/.test(bare)) {
     for (const re of BETWEEN_RES) {
       const m = bare.match(re)
       if (m) {
         const slots = {
-          srcQuery: m[1].trim(),
-          dstQuery: m[2].trim().replace(/\s+tak$/i, '').trim()
+          srcQuery: cleanStationQuery(m[1].trim()),
+          dstQuery: cleanStationQuery(m[2].trim().replace(/\s+tak$/i, '').trim())
         }
         return { kind: 'tool', plan: buildPlanFor('trains_between', {}, slots), confidence: 1 }
+      }
+    }
+    // fallback bare "X to Y" when explicit from/between not found but we have route signal
+    const fb = fallbackBareTo(bare, null, null)
+    if (fb.srcQuery && fb.dstQuery) {
+      // only trigger if bare contains route-like cue or at least one token looks like station code (2-4 letters)
+      if (hasRouteSignal || /^[a-z]{2,4}$/.test(fb.srcQuery) || /^[a-z]{2,4}$/.test(fb.dstQuery)) {
+        return { kind: 'tool', plan: buildPlanFor('trains_between', {}, { srcQuery: fb.srcQuery, dstQuery: fb.dstQuery }), confidence: 1 }
       }
     }
   }
@@ -925,9 +1249,14 @@ function tierZero(mapped) {
   for (const re of BOARD_RES) {
     const m = mapped.match(re)
     if (m) {
-      const slots = { stationQuery: m[1].trim() }
+      const slots = { stationQuery: cleanStationQuery(m[1].trim()) }
       return { kind: 'tool', plan: buildPlanFor('station_board', {}, slots), confidence: 1 }
     }
+  }
+  // fallback board detection
+  const fbBoard = fallbackBoard(mapped, null)
+  if (fbBoard) {
+    return { kind: 'tool', plan: buildPlanFor('station_board', {}, { stationQuery: fbBoard }), confidence: 1 }
   }
 
   return null
@@ -938,13 +1267,13 @@ function tierZero(mapped) {
 const TRIVIALS = [
   [
     /^(hi+|hey+|hello+|yo|hii+|namaste|namaskar|good\s*(morning|afternoon|evening)|vanakkam)[\s!.,]*$/i,
-    "Hey! I'm Train Bro — ask me about live trains, routes, delays or seats."
+    "Hey! I'm Train Bro — ask me about live trains, routes, delays, seats or PNR."
   ],
   [/^(thanks?|thank\s*you|thx|ty|dhanyavad)[\s!.,]*$/i, 'Anytime. Where to next?'],
   [/^(bye|bye bye|see ya|alvida|good ?night)[\s!.,]*$/i, 'Safe travels! Come back before you board.'],
   [
     /(what can you do|^help$|who are you|how do you work|capabilities)/i,
-    'I check **live data** for you: train status, routes, station boards, avg delays and seat availability. Try: "live status of 12951" or "trains from Secunderabad to Pune".'
+    'I check **live data** for you: train status, routes, station boards, avg delays, seat availability, chart and PNR status. Try: "live status of 12951", "trains from Secunderabad to Pune" or "pnr 1234567890".'
   ]
 ]
 
@@ -986,6 +1315,11 @@ export function classify(text, memory) {
       ],
       confidence: m.score
     }
+  }
+
+  // PNR: if intent is pnr but pnr missing, help
+  if (m.intent.id === 'pnr_status' && !ent.pnr) {
+    return missingSlotHelp('pnr_status', 'pnr', q)
   }
 
   // Missing a hard requirement -> targeted help beats confirming a plan
@@ -1232,6 +1566,26 @@ export function projectChartStatus(dto = {}) {
   }
 }
 
+export function projectPnrStatus(dto = {}) {
+  const pax = Array.isArray(dto.passengers) ? dto.passengers.slice(0, 6).map((p) => ({
+    booking_status: p.booking_status ?? '',
+    current_status: p.current_status ?? '',
+    coach: p.coach ?? '',
+    berth: p.berth ?? ''
+  })) : []
+  return {
+    pnr: dto.pnr ?? null,
+    train_number: dto.train_number ?? null,
+    train_name: dto.train_name ?? null,
+    journey_date: dto.journey_date ?? null,
+    from: dto.from ? { code: dto.from.code, name: dto.from.name, time: dto.from.time } : null,
+    to: dto.to ? { code: dto.to.code, name: dto.to.name, time: dto.to.time } : null,
+    passengers: pax,
+    data_source: dto.data_source ?? null,
+    notice: dto.notice ?? null
+  }
+}
+
 export const PROJECTORS = {
   live_status: projectLiveStatus,
   trains_between: projectTrainsBetween,
@@ -1239,7 +1593,8 @@ export const PROJECTORS = {
   train_schedule: projectSchedule,
   station_board: projectStationBoard,
   seat_availability: projectSeatAvailability,
-  chart_status: projectChartStatus
+  chart_status: projectChartStatus,
+  pnr_status: projectPnrStatus
 }
 
 // ---------- next-action chips (mirror tools::next_actions, subset) ----------
@@ -1253,6 +1608,7 @@ export function nextActionsFor(kind, d = {}) {
     const n = d.trains?.[0]?.number
     if (n) push(`Track ${n}`, `live status of ${n}`)
     if (d.src_code && d.dst_code) push(`Availability ${d.src_code}→${d.dst_code}`, `seat availability from ${d.src_code} to ${d.dst_code}`)
+    if (d.src_code && d.dst_code) push(`PNR check`, `pnr status 1234567890`)
   } else if (kind === 'live_status') {
     const n = d.train_number
     if (n) {
@@ -1274,6 +1630,10 @@ export function nextActionsFor(kind, d = {}) {
   } else if (kind === 'chart_status') {
     const n = d.train_number
     if (n) push(`Track ${n}`, `live status of ${n}`)
+  } else if (kind === 'pnr_status') {
+    const n = d.train_number
+    if (n) push(`Track ${n}`, `live status of ${n}`)
+    else push(`Live status`, `live status of 12951`)
   }
   return out.slice(0, 4)
 }
