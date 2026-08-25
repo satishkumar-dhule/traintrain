@@ -4,7 +4,6 @@
   import { navigate, route } from '$lib/router.svelte.js'
   import * as Card from '$lib/components/ui/card/index.js'
   import { Button } from '$lib/components/ui/button/index.js'
-  import { Label } from '$lib/components/ui/label/index.js'
   import { Skeleton } from '$lib/components/ui/skeleton/index.js'
   import * as Alert from '$lib/components/ui/alert/index.js'
 import AutoCompleteInput from '$lib/components/AutoCompleteInput.svelte'
@@ -197,16 +196,14 @@ import CalendarClockIcon from 'lucide-svelte/icons/calendar-clock'
       </Card.Header>
       <Card.Content>
         <form class="flex flex-wrap items-end gap-2" onsubmit={onSubmit}>
-          <div class="grid min-w-32 sm:min-w-44 flex-1 gap-1.5">
-            <Label for="journeys-from">From</Label>
-            <AutoCompleteInput id="journeys-from" kind="station" placeholder="NDLS" bind:value={from} onpick={commit} />
+          <div class="grid min-w-32 sm:min-w-44 flex-1">
+            <AutoCompleteInput id="journeys-from" kind="station" placeholder="From station" aria-label="From station" bind:value={from} onpick={commit} />
           </div>
           <Button type="button" variant="outline" size="icon" aria-label="Swap stations" onclick={swap} disabled={loading} class="shrink-0">
             <ArrowDownUpIcon />
           </Button>
-          <div class="grid min-w-32 sm:min-w-44 flex-1 gap-1.5">
-            <Label for="journeys-to">To</Label>
-            <AutoCompleteInput id="journeys-to" kind="station" placeholder="DLI" bind:value={to} onpick={commit} />
+          <div class="grid min-w-32 sm:min-w-44 flex-1">
+            <AutoCompleteInput id="journeys-to" kind="station" placeholder="To station" aria-label="To station" bind:value={to} onpick={commit} />
           </div>
           <Button type="submit" disabled={loading || !canSearch} class="shrink-0 max-lg:min-h-11 max-lg:w-full sm:w-auto">Search</Button>
         </form>

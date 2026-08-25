@@ -5,7 +5,6 @@
   import { viewport } from '$lib/media.svelte.js'
   import * as Card from '$lib/components/ui/card/index.js'
   import { Button } from '$lib/components/ui/button/index.js'
-  import { Label } from '$lib/components/ui/label/index.js'
   import * as Tabs from '$lib/components/ui/tabs/index.js'
   import * as Select from '$lib/components/ui/select/index.js'
   import { Skeleton } from '$lib/components/ui/skeleton/index.js'
@@ -317,43 +316,40 @@ import { norm, fmtDash, numOrNull, ntesDate } from '$lib/format.js'
 
   <Card.Root>
     <Card.Content class="flex flex-wrap items-end gap-3 max-lg:gap-2">
-      <div class="grid min-w-0 sm:min-w-56 flex-1 gap-2 max-lg:w-full">
-        <Label for="stn-code" class="max-lg:hidden">Station</Label>
+      <div class="grid min-w-0 sm:min-w-56 flex-1 max-lg:w-full">
         <AutoCompleteInput
           id="stn-code"
           kind="station"
           placeholder="Station name or code, e.g. NDLS"
+          aria-label="Station"
           bind:value={query}
           onpick={onPickStation}
         />
       </div>
       {#if tab === 'live'}
-        <div class="grid min-w-0 sm:min-w-44 flex-1 gap-2 max-lg:w-full">
-          <Label for="stn-dest" class="max-lg:hidden">Going to (optional)</Label>
+        <div class="grid min-w-0 sm:min-w-44 flex-1 max-lg:w-full">
           <AutoCompleteInput
             id="stn-dest"
             kind="station"
             nearby={false}
             placeholder="Filter board, e.g. BCT"
+            aria-label="Filter by destination"
             bind:value={destInput}
             onpick={onPickDest}
           />
         </div>
       {/if}
       <div class="flex items-end gap-2 max-lg:w-full">
-        <div class="grid gap-2">
-          <Label class="max-lg:hidden">Window</Label>
-          <Select.Root type="single" bind:value={hours}>
-            <Select.Trigger class="w-28 sm:w-32 max-lg:h-10" aria-label="Time window">
-              {hours} hour{hours === '1' ? '' : 's'}
-            </Select.Trigger>
-            <Select.Content>
-              {#each ['1', '2', '3', '4'] as h (h)}
-                <Select.Item value={h} label="{h} hour{h === '1' ? '' : 's'}" />
-              {/each}
-            </Select.Content>
-          </Select.Root>
-        </div>
+        <Select.Root type="single" bind:value={hours}>
+          <Select.Trigger class="w-28 sm:w-32 max-lg:h-10" aria-label="Time window">
+            {hours} hour{hours === '1' ? '' : 's'}
+          </Select.Trigger>
+          <Select.Content>
+            {#each ['1', '2', '3', '4'] as h (h)}
+              <Select.Item value={h} label="{h} hour{h === '1' ? '' : 's'}" />
+            {/each}
+          </Select.Content>
+        </Select.Root>
         <Button
           class="shrink-0 max-lg:h-10 max-lg:px-4 sm:w-auto"
           onclick={showBoard}
@@ -365,8 +361,7 @@ import { norm, fmtDash, numOrNull, ntesDate } from '$lib/format.js'
             : 'Show board'}
         </Button>
       </div>
-      <div class="grid gap-2 max-lg:w-full">
-        <Label class="max-lg:hidden">Nearby</Label>
+      <div class="grid max-lg:w-full">
         <Button variant="outline" onclick={pickNearbyBoard} class="max-lg:h-10 max-lg:w-full">
           <MapPinIcon />
           Nearby

@@ -1,6 +1,5 @@
 <script>
   import { cn } from '$lib/utils.js';
-  import { Label } from '$lib/components/ui/label/index.js';
   import { Button } from '$lib/components/ui/button/index.js';
   import AutoCompleteInput from '$lib/components/AutoCompleteInput.svelte';
   import ArrowDownUpIcon from 'lucide-svelte/icons/arrow-down-up';
@@ -38,16 +37,14 @@
   }
 </script>
 
-<div class={cn('grid gap-2 lg:flex lg:flex-wrap lg:items-end', className)}>
-  <div class="grid gap-1.5 lg:min-w-44 lg:flex-1">
-    <Label for={fromId}>{fromLabel}</Label>
-    <AutoCompleteInput id={fromId} kind="station" placeholder="Station code…" bind:value={from} onpick={pickFrom} {disabled} inputClass={inputClass} class="min-w-0" />
+<div class={cn('grid gap-1.5 lg:flex lg:flex-wrap lg:items-end', className)}>
+  <div class="grid lg:min-w-44 lg:flex-1">
+    <AutoCompleteInput id={fromId} kind="station" placeholder={fromLabel} aria-label={fromLabel} bind:value={from} onpick={pickFrom} {disabled} inputClass={inputClass} class="min-w-0" />
   </div>
   <Button type="button" variant="outline" size="icon" onclick={swap} disabled={disabled} aria-label="Swap stations" title="Swap stations" class="max-lg:justify-self-center">
     <ArrowDownUpIcon />
   </Button>
-  <div class="grid gap-1.5 lg:min-w-44 lg:flex-1">
-    <Label for={toId}>{toLabel}</Label>
-    <AutoCompleteInput id={toId} kind="station" placeholder="Station code…" bind:value={to} onpick={pickTo} {disabled} inputClass={inputClass} class="min-w-0" />
+  <div class="grid lg:min-w-44 lg:flex-1">
+    <AutoCompleteInput id={toId} kind="station" placeholder={toLabel} aria-label={toLabel} bind:value={to} onpick={pickTo} {disabled} inputClass={inputClass} class="min-w-0" />
   </div>
 </div>

@@ -343,11 +343,13 @@ import { asText, fmtDash, numOrNull, todayISO, DATE_RE } from '$lib/format.js'
 {/snippet}
 
 <section class="grid grid-cols-[minmax(0,1fr)] gap-3">
-  <PageHeader
-    size="sm"
-    title="Availability"
-    description="Class-wise availability, fares and confirm chances across every train."
-  />
+  {#if !embedded}
+    <PageHeader
+      size="sm"
+      title="Availability"
+      description="Class-wise availability, fares and confirm chances across every train."
+    />
+  {/if}
 
   {#if !embedded}
     <form

@@ -5,7 +5,6 @@
   import * as Card from '$lib/components/ui/card/index.js'
   import { Button } from '$lib/components/ui/button/index.js'
   import { Input } from '$lib/components/ui/input/index.js'
-  import { Label } from '$lib/components/ui/label/index.js'
   import { Badge } from '$lib/components/ui/badge/index.js'
   import * as Tabs from '$lib/components/ui/tabs/index.js'
   import { Skeleton } from '$lib/components/ui/skeleton/index.js'
@@ -266,12 +265,12 @@ import { asText, fmtDash } from '$lib/format.js'
     <Tabs.Content value="heritage" class="mt-4 grid gap-4">
       <Card.Root>
         <Card.Content class="flex flex-wrap items-end gap-3">
-          <div class="grid min-w-0 sm:min-w-56 flex-1 gap-2">
-            <Label for="heritage-kw">Keyword</Label>
+          <div class="grid min-w-0 sm:min-w-56 flex-1">
             <Input
               id="heritage-kw"
               bind:value={selInput}
-              placeholder="Selection keyword, blank = all"
+              placeholder="Keyword, blank = all"
+              aria-label="Filter keyword"
               onkeydown={(e) => {
                 if (e.key === 'Enter') applyFilter()
               }}

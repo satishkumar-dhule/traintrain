@@ -5,7 +5,6 @@
   import * as Card from '$lib/components/ui/card/index.js'
   import { Button } from '$lib/components/ui/button/index.js'
   import { Input } from '$lib/components/ui/input/index.js'
-  import { Label } from '$lib/components/ui/label/index.js'
   import { Skeleton } from '$lib/components/ui/skeleton/index.js'
   import * as Alert from '$lib/components/ui/alert/index.js'
   import ArrowRight from 'lucide-svelte/icons/arrow-right'
@@ -201,12 +200,12 @@ import { asText, fmtDash } from '$lib/format.js'
 
   <Card.Root>
     <Card.Content class="flex flex-wrap items-end gap-3 max-lg:p-3">
-      <div class="grid min-w-0 sm:min-w-48 flex-1 gap-2">
-        <Label for="pnr-no" class="max-lg:hidden">PNR number</Label>
+      <div class="grid min-w-0 sm:min-w-48 flex-1">
         <Input
           id="pnr-no"
           bind:value={query}
-          placeholder="e.g. 1234567890"
+          placeholder="PNR e.g. 1234567890"
+          aria-label="PNR number"
           inputmode="numeric"
           maxlength={10}
           class="data-num"
@@ -251,12 +250,12 @@ import { asText, fmtDash } from '$lib/format.js'
           </Alert.Root>
         {/if}
         <div class="flex flex-wrap items-end gap-3">
-          <div class="grid flex-1 gap-2 sm:max-w-56">
-            <Label for="cap-text">Captcha text</Label>
+          <div class="grid flex-1 sm:max-w-56">
             <Input
               id="cap-text"
               bind:value={captchaText}
-              placeholder="5 characters"
+              placeholder="Captcha e.g. 5 characters"
+              aria-label="Captcha text"
               onkeydown={(e) => e.key === 'Enter' && !e.defaultPrevented && lookup()}
             />
           </div>

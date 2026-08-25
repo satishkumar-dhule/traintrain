@@ -5,7 +5,6 @@
   import * as Card from '$lib/components/ui/card/index.js'
   import * as Tabs from '$lib/components/ui/tabs/index.js'
   import AutoCompleteInput from '$lib/components/AutoCompleteInput.svelte'
-  import { Label } from '$lib/components/ui/label/index.js'
   import { Button } from '$lib/components/ui/button/index.js'
   import { Skeleton } from '$lib/components/ui/skeleton/index.js'
   import * as Alert from '$lib/components/ui/alert/index.js'
@@ -648,17 +647,17 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
     <Card.Root>
       <Card.Content class="flex flex-wrap items-end gap-3 max-lg:p-3">
         <div
-          class="grid min-w-0 sm:min-w-48 flex-1 gap-2"
+          class="grid min-w-0 sm:min-w-48 flex-1"
           onkeydown={(e) => {
             if (e.key === 'Enter' && !e.defaultPrevented) track()
           }}
         >
-          <Label for="train-no" class="max-lg:hidden">Train</Label>
           <AutoCompleteInput
             id="train-no"
             bind:value={query}
             kind="train"
             placeholder="Train number or name…"
+            aria-label="Train number or name"
             onpick={(item) => {
               query = String(item.number)
               track(item.number)
@@ -903,17 +902,17 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
       {:else}
         <Card.Root>
           <Card.Content class="flex flex-wrap items-end gap-3 max-lg:gap-2">
-            <div class="grid min-w-0 sm:min-w-48 flex-1 gap-2"
+            <div class="grid min-w-0 sm:min-w-48 flex-1"
               onkeydown={(e) => {
                 if (e.key === 'Enter' && !e.defaultPrevented) applyMapStation()
               }}
             >
-              <Label for="map-station">Your boarding stop (optional)</Label>
               <AutoCompleteInput
                 id="map-station"
                 kind="station"
                 bind:value={mapStation}
-                placeholder="Station code, e.g. NDLS"
+                placeholder="Boarding stop (optional) e.g. NDLS"
+                aria-label="Boarding stop"
               />
             </div>
             <Button type="button" variant="outline" onclick={applyMapStation} disabled={mapPhase === 'loading'} class="shrink-0 max-lg:min-h-11 max-lg:w-full sm:w-auto">

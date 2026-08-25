@@ -4,7 +4,6 @@
   import * as Card from '$lib/components/ui/card/index.js'
   import { Skeleton } from '$lib/components/ui/skeleton/index.js'
   import { Input } from '$lib/components/ui/input/index.js'
-  import { Label } from '$lib/components/ui/label/index.js'
   import { Separator } from '$lib/components/ui/separator/index.js'
   import { Button } from '$lib/components/ui/button/index.js'
   import AutoCompleteInput from '$lib/components/AutoCompleteInput.svelte'
@@ -384,12 +383,12 @@ import { norm, todayISO, DATE_RE } from '$lib/format.js'
       </div>
 
         <div class="flex flex-wrap items-end gap-2 max-lg:gap-1.5">
-          <div class="grid min-w-32 sm:min-w-44 flex-1 gap-1">
-            <Label for="home-plan-to" class="max-lg:text-xs">Destination</Label>
+          <div class="grid min-w-32 sm:min-w-44 flex-1">
             <AutoCompleteInput
               id="home-plan-to"
               kind="station"
               placeholder="Where to? e.g. PUNE"
+              aria-label="Destination"
               bind:value={destQuery}
               onpick={onDestPick}
             />

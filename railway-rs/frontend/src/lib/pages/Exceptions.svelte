@@ -4,7 +4,6 @@
   import { viewport } from '$lib/media.svelte.js'
   import * as Card from '$lib/components/ui/card/index.js'
   import AutoCompleteInput from '$lib/components/AutoCompleteInput.svelte'
-  import { Label } from '$lib/components/ui/label/index.js'
   import { Button } from '$lib/components/ui/button/index.js'
   import { Skeleton } from '$lib/components/ui/skeleton/index.js'
   import * as Alert from '$lib/components/ui/alert/index.js'
@@ -110,17 +109,17 @@
   <Card.Root>
     <Card.Content class="flex flex-wrap items-end gap-3 max-lg:p-3">
       <div
-        class="grid min-w-0 sm:min-w-48 flex-1 gap-2"
+        class="grid min-w-0 sm:min-w-48 flex-1"
         onkeydown={(e) => {
           if (e.key === 'Enter' && !e.defaultPrevented) search()
         }}
       >
-        <Label for="train-filter" class="max-lg:hidden">Train</Label>
         <AutoCompleteInput
           id="train-filter"
           bind:value={trainFilter}
           kind="train"
           placeholder="Train number or name…"
+          aria-label="Train number or name"
           onpick={(item) => {
             trainFilter = String(item.number)
             search()
