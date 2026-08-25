@@ -27,6 +27,9 @@ import {
   StatusBadge,
   TrainDelayBadge
 } from '$lib/components/badges/index.js'
+import TrackRule from '$lib/components/TrackRule.svelte'
+import BottomSpacer from '$lib/components/BottomSpacer.svelte'
+import { asText, fmtDash } from '$lib/format.js'
 
   /* Chart-lamp tone for a passenger row: confirmed→go, RAC/waitlist→hold,
      cancelled/flushed→stop, anything else stays dark (idle). */
@@ -92,10 +95,6 @@ import {
     }
   }
 
-  function asText(v) {
-    return String(v ?? '').trim()
-  }
-
   const valid = $derived(/^\d{10}$/.test(asText(query)))
   const busy = $derived(phase === 'loading' || phase === 'refreshing')
 
@@ -139,10 +138,6 @@ import {
     }
   })
 
-  function fmt(v) {
-    return v && v !== '-' && v !== '--' ? v : '—'
-  }
-
   function fmtUpdated(v) {
     const d = new Date(v)
     if (Number.isNaN(d.getTime())) return v
@@ -169,10 +164,10 @@ import {
       sortable: false,
       value: (p) => String(passengers.indexOf(p) + 1),
     },
-    { key: 'booking_status', label: 'Booking status', class: 'uppercase tracking-wide text-muted-foreground', value: (p) => fmt(p.booking_status) },
-    { key: 'coach', label: 'Coach', class: 'uppercase tracking-wide text-muted-foreground', cellClass: 'data-num', value: (p) => fmt(p.coach) },
-    { key: 'berth', label: 'Berth', class: 'uppercase tracking-wide text-muted-foreground', cellClass: 'data-num', value: (p) => fmt(p.berth) },
-    { key: 'current_status', label: 'Current', class: 'uppercase tracking-wide text-muted-foreground', cellClass: 'data-num', value: (p) => fmt(p.current_status) },
+    { key: 'booking_status', label: 'Booking status', class: 'uppercase tracking-wide text-muted-foreground', value: (p) => fmtDash(p.booking_status) },
+    { key: 'coach', label: 'Coach', class: 'uppercase tracking-wide text-muted-foreground', cellClass: 'data-num', value: (p) => fmtDash(p.coach) },
+    { key: 'berth', label: 'Berth', class: 'uppercase tracking-wide text-muted-foreground', cellClass: 'data-num', value: (p) => fmtDash(p.berth) },
+    { key: 'current_status', label: 'Current', class: 'uppercase tracking-wide text-muted-foreground', cellClass: 'data-num', value: (p) => fmtDash(p.current_status) },
   ]
 </script>
 
@@ -300,20 +295,20 @@ import {
         <div class="flex flex-wrap items-center gap-x-6 gap-y-3 rounded-lg border bg-muted/40 px-5 py-3.5 max-lg:gap-x-4 max-lg:px-3 max-lg:py-2.5 min-w-0">
           <div class="grid min-w-24 sm:min-w-28 gap-0.5 min-w-0">
             <EntityChip type="station" code={data.from?.code} name={data.from?.name} size="sm" />
-            <span class="truncate text-xs text-muted-foreground [overflow-wrap:anywhere]">{fmt(data.from?.name)}</span>
+            <span class="truncate text-xs text-muted-foreground [overflow-wrap:anywhere]">{fmtDash(data.from?.name)}</span>
             <span class="data-num text-xs text-muted-foreground">
-              {fmt(data.from?.time)}{#if data.from?.day}&nbsp;· day {data.from.day}{/if}
+              {fmtDash(data.from?.time)}{#if data.from?.day}&nbsp;· day {data.from.day}{/if}
             </span>
           </div>
           <ArrowRight class="size-4 shrink-0 text-muted-foreground" />
           <div class="grid min-w-24 sm:min-w-28 gap-0.5 min-w-0">
             <EntityChip type="station" code={data.to?.code} name={data.to?.name} size="sm" />
-            <span class="truncate text-xs text-muted-foreground [overflow-wrap:anywhere]">{fmt(data.to?.name)}</span>
+            <span class="truncate text-xs text-muted-foreground [overflow-wrap:anywhere]">{fmtDash(data.to?.name)}</span>
             <span class="data-num text-xs text-muted-foreground">
-              {fmt(data.to?.time)}{#if data.to?.day}&nbsp;· day {data.to.day}{/if}
+              {fmtDash(data.to?.time)}{#if data.to?.day}&nbsp;· day {data.to.day}{/if}
             </span>
           </div>
-          <StatusBadge tone="info" class="data-num ml-auto shrink-0 max-lg:w-full max-lg:justify-center">journey {fmt(data.journey_date)}</StatusBadge>
+          <StatusBadge tone="info" class="data-num ml-auto shrink-0 max-lg:w-full max-lg:justify-center">journey {fmtDash(data.journey_date)}</StatusBadge>
         </div>
       </Card.Header>
       <Card.Content class="border-t border-dashed pt-3">
@@ -329,7 +324,7 @@ import {
       </Card.Content>
     </Card.Root>
     {#if notice || lastUpdated}
-      <div class="track-rule" aria-hidden="true"></div>
+      <TrackRule />
       <div class="flex flex-wrap items-center gap-x-3 gap-y-1 px-1 text-xs text-muted-foreground">
         {#if notice}
           <span class="max-w-full truncate" title={notice}>{notice}</span>
@@ -346,5 +341,5 @@ import {
       hint="Enter a 10-digit PNR above or pick a recent lookup to see status."
     />
   {/if}
-  <div class="h-20 lg:hidden"></div>
+  <BottomSpacer />
 </section>

@@ -1,6 +1,6 @@
 <script>
   import { navigate } from '$lib/router.svelte.js'
-  import { DATE_RE, todayISO } from '$lib/utils.js'
+  import { DATE_RE, todayISO, norm } from '$lib/format.js'
   import { viewport } from '$lib/media.svelte.js'
   import * as Tabs from '$lib/components/ui/tabs/index.js'
   import * as Card from '$lib/components/ui/card/index.js'
@@ -10,14 +10,13 @@
   import DateStrip from '$lib/components/DateStrip.svelte'
   import Breadcrumbs from '$lib/components/Breadcrumbs.svelte'
   import RouteContextBar from '$lib/components/RouteContextBar.svelte'
-  import JourneysTable from '$lib/pages/JourneysTable.svelte'
+  import JourneysTable from '$lib/components/JourneysTable.svelte'
   import Availability from '$lib/pages/Availability.svelte'
+  import TabBar from '$lib/components/TabBar.svelte'
+  import TrackRule from '$lib/components/TrackRule.svelte'
+  import BottomSpacer from '$lib/components/BottomSpacer.svelte'
 
   let { src = '', dst = '', date = '', tab = 'trains' } = $props()
-
-  function norm(v) {
-    return String(v ?? '').trim().toUpperCase()
-  }
 
   let from = $state(norm(src))
   let to = $state(norm(dst))
@@ -84,6 +83,10 @@
   </div>
 {/if}
 
+{#if !viewport.narrow}
+  <TrackRule />
+{/if}
+
 <!-- Search form card -->
 <Card.Root>
   <Card.Content class="grid gap-2 p-2">
@@ -102,10 +105,10 @@
 
 <!-- Tabs -->
 <Tabs.Root bind:value={activeTab} class="mt-3">
-  <Tabs.List class="max-lg:grid max-lg:grid-cols-2 max-lg:gap-1 max-lg:h-auto max-lg:p-1 max-lg:bg-muted max-lg:rounded-lg max-lg:border max-lg:overflow-visible max-lg:overflow-x-visible">
+  <TabBar cols={2}>
     <Tabs.Trigger value="trains" class="max-lg:justify-center max-lg:text-xs max-lg:py-2.5">Trains</Tabs.Trigger>
     <Tabs.Trigger value="availability" class="max-lg:justify-center max-lg:text-xs max-lg:py-2.5">Availability</Tabs.Trigger>
-  </Tabs.List>
+  </TabBar>
 
   <Tabs.Content value="trains">
     <JourneysTable src={cSrc} dst={cDst} embedded />
@@ -114,5 +117,7 @@
     <Availability src={cSrc} dst={cDst} date={cDate} embedded filterQuery={filterQuery} />
   </Tabs.Content>
 </Tabs.Root>
+
+<BottomSpacer />
 
 

@@ -6,6 +6,9 @@
   import { Skeleton } from '$lib/components/ui/skeleton/index.js'
   import { StatusBadge } from '$lib/components/badges/index.js'
   import SignalDot from '$lib/components/SignalDot.svelte'
+  import TrackRule from '$lib/components/TrackRule.svelte'
+  import BottomSpacer from '$lib/components/BottomSpacer.svelte'
+  import { fmtUptime, fmtCompact as fmtInt } from '$lib/format.js'
 
   import TrainFront from 'lucide-svelte/icons/train-front'
   import Clock from 'lucide-svelte/icons/clock'
@@ -43,24 +46,6 @@
   function num(v) {
     const n = Number(v)
     return Number.isFinite(n) ? n : null
-  }
-
-  const compact = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 })
-
-  function fmtInt(v) {
-    const n = num(v)
-    return n === null ? '—' : compact.format(n)
-  }
-
-  function fmtUptime(s) {
-    const t = num(s)
-    if (t === null || t < 0) return '—'
-    const d = Math.floor(t / 86400)
-    const h = Math.floor((t % 86400) / 3600)
-    const m = Math.floor((t % 3600) / 60)
-    if (d >= 1) return `${d}d ${h % 24}h`
-    if (h >= 1) return `${h}h ${m}m`
-    return `${m}m`
   }
 
   function hitRate(d) {
@@ -138,6 +123,13 @@
     e.preventDefault()
     navigate(href)
   }
+
+  // reusable compact card pattern - single source for gap/py, title/value styling
+  const ABOUT_CARD_SIMPLE = 'gap-1 py-4'
+  const ABOUT_CARD_SPARK = 'gap-0 py-4'
+  const ABOUT_CARD_GAUGE = 'gap-2 py-4'
+  const ABOUT_TITLE_CLS = 'flex items-center gap-1.5 px-4 text-[11px] font-medium uppercase tracking-wide text-muted-foreground'
+  const ABOUT_VALUE_CLS = 'px-4 data-num text-2xl font-semibold'
 </script>
 
 <section class="grid gap-6">
@@ -174,7 +166,7 @@
     </div>
   </header>
 
-  <div class="track-rule" aria-hidden="true"></div>
+  <TrackRule />
 
   <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
     {#if obs.data === null}
@@ -182,35 +174,29 @@
         <Skeleton class="h-[104px] rounded-xl" />
       {/each}
     {:else}
-      <Card.Root class="gap-1 py-4">
-        <Card.Title
-          class="flex items-center gap-1.5 px-4 text-[11px] font-medium uppercase tracking-wide text-muted-foreground"
-        >
+      <Card.Root class={ABOUT_CARD_SIMPLE}>
+        <Card.Title class={ABOUT_TITLE_CLS}>
           <Clock class="size-3.5" /> Uptime
         </Card.Title>
-        <Card.Description class="px-4 data-num text-2xl font-semibold">
+        <Card.Description class={ABOUT_VALUE_CLS}>
           {fmtUptime(d?.uptime_secs)}
         </Card.Description>
       </Card.Root>
 
-      <Card.Root class="gap-1 py-4">
-        <Card.Title
-          class="flex items-center gap-1.5 px-4 text-[11px] font-medium uppercase tracking-wide text-muted-foreground"
-        >
+      <Card.Root class={ABOUT_CARD_SIMPLE}>
+        <Card.Title class={ABOUT_TITLE_CLS}>
           <Activity class="size-3.5" /> Requests
         </Card.Title>
-        <Card.Description class="px-4 data-num text-2xl font-semibold">
+        <Card.Description class={ABOUT_VALUE_CLS}>
           {fmtInt(d?.requests_total)}
         </Card.Description>
       </Card.Root>
 
-      <Card.Root class="gap-0 py-4">
-        <Card.Title
-          class="flex items-center gap-1.5 px-4 text-[11px] font-medium uppercase tracking-wide text-muted-foreground"
-        >
+      <Card.Root class={ABOUT_CARD_SPARK}>
+        <Card.Title class={ABOUT_TITLE_CLS}>
           <Zap class="size-3.5" /> Req / sec
         </Card.Title>
-        <Card.Description class="px-4 data-num text-2xl font-semibold">
+        <Card.Description class={ABOUT_VALUE_CLS}>
           {fmtInt(d?.req_per_sec)}
         </Card.Description>
         {#if rpsSpark}
@@ -230,13 +216,11 @@
         {/if}
       </Card.Root>
 
-      <Card.Root class="gap-0 py-4">
-        <Card.Title
-          class="flex items-center gap-1.5 px-4 text-[11px] font-medium uppercase tracking-wide text-muted-foreground"
-        >
+      <Card.Root class={ABOUT_CARD_SPARK}>
+        <Card.Title class={ABOUT_TITLE_CLS}>
           <Gauge class="size-3.5" /> Avg latency
         </Card.Title>
-        <Card.Description class="px-4 data-num text-2xl font-semibold">
+        <Card.Description class={ABOUT_VALUE_CLS}>
           {fmtInt(d?.latency_ms)}<span class="text-sm font-normal text-muted-foreground">ms</span>
         </Card.Description>
         {#if latencySpark}
@@ -256,10 +240,8 @@
         {/if}
       </Card.Root>
 
-      <Card.Root class="gap-2 py-4">
-        <Card.Title
-          class="flex items-center gap-1.5 px-4 text-[11px] font-medium uppercase tracking-wide text-muted-foreground"
-        >
+      <Card.Root class={ABOUT_CARD_GAUGE}>
+        <Card.Title class={ABOUT_TITLE_CLS}>
           <Database class="size-3.5" /> Cache hit
         </Card.Title>
         <div class="flex items-center justify-between gap-2 px-4">
@@ -285,13 +267,11 @@
         </div>
       </Card.Root>
 
-      <Card.Root class="gap-2 py-4">
-        <Card.Title
-          class="flex items-center gap-1.5 px-4 text-[11px] font-medium uppercase tracking-wide text-muted-foreground"
-        >
+      <Card.Root class={ABOUT_CARD_GAUGE}>
+        <Card.Title class={ABOUT_TITLE_CLS}>
           <Radio class="size-3.5" /> Sources live <SignalDot tone="go" pulse />
         </Card.Title>
-        <Card.Description class="px-4 data-num text-2xl font-semibold">
+        <Card.Description class={ABOUT_VALUE_CLS}>
           {fmtInt(d?.origins?.length)}
         </Card.Description>
         <div class="flex flex-wrap gap-1 px-4">
@@ -356,4 +336,5 @@
       Made for the Indian railway community
     </StatusBadge>
   </footer>
+  <BottomSpacer />
 </section>

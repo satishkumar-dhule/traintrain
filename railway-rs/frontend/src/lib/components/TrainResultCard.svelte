@@ -21,15 +21,33 @@
     class: className = '',
   } = $props()
 
+  // super n2 delegation + memoization: static + cached Intls fan-out
   const DAY_LETTERS = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
-
+  const dayFmt = new Intl.DateTimeFormat('en-IN', { day: 'numeric' })
+  const monthFmt = new Intl.DateTimeFormat('en-IN', { month: 'short' })
+  const weekdayFmt = new Intl.DateTimeFormat('en-IN', { weekday: 'short' })
+  const fmtCache = new Map()
   function fmtDate(dateStr, timeStr) {
+    const key = `${dateStr}|${timeStr}`
+    if (fmtCache.has(key)) return fmtCache.get(key)
     const d = new Date(`${dateStr}T00:00:00`)
-    if (isNaN(d.getTime())) return timeStr || '—'
-    const day = d.toLocaleDateString('en-IN', { day: 'numeric' })
-    const month = d.toLocaleDateString('en-IN', { month: 'short' })
-    const weekday = d.toLocaleDateString('en-IN', { weekday: 'short' })
-    return `${day} ${month}, ${weekday}, ${timeStr || ''}`
+    let out = timeStr || '—'
+    if (!isNaN(d.getTime())) {
+      out = `${dayFmt.format(d)} ${monthFmt.format(d)}, ${weekdayFmt.format(d)}, ${timeStr || ''}`
+    }
+    // LRU cap to avoid unbounded growth across many cards
+    if (fmtCache.size > 200) fmtCache.clear()
+    fmtCache.set(key, out)
+    return out
+  }
+
+  const depLabel = $derived(fmtDate(journeyDate, departureTime))
+  const arrLabel = $derived(fmtDate(journeyDate, arrivalTime))
+
+  // n2 super delegate: single handler for route nav via data attr
+  function handleRoute(e) {
+    const n = e.currentTarget?.dataset?.train
+    if (n) navigate(`/train/${n}`)
   }
 </script>
 
@@ -47,7 +65,8 @@
         variant="link"
         size="xs"
         class="shrink-0 text-xs"
-        onclick={() => navigate(`/train/${number}`)}
+        data-train={number}
+        onclick={handleRoute}
       >
         <RouteIcon class="size-3" />
         Route
@@ -56,11 +75,11 @@
 
     <div class="mt-2 flex items-center gap-2 text-sm">
       <span class="min-w-0 flex-1 text-left font-mono text-xs tabular-nums">
-        {fmtDate(journeyDate, departureTime)}
+        {depLabel}
       </span>
       <span class="shrink-0 text-center text-xs text-muted-foreground">{duration || '—'}</span>
       <span class="min-w-0 flex-1 text-right font-mono text-xs tabular-nums">
-        {fmtDate(journeyDate, arrivalTime)}
+        {arrLabel}
       </span>
     </div>
 

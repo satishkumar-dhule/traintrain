@@ -12,6 +12,7 @@
 import DataTable from '$lib/components/DataTable.svelte'
 import ChevronDownIcon from 'lucide-svelte/icons/chevron-down'
 import EmptyState from '$lib/components/EmptyState.svelte'
+import AsyncState from '$lib/components/AsyncState.svelte'
 import RecentSearches from '$lib/components/RecentSearches.svelte'
 import { loadRecent, rememberRecent, clearStored } from '$lib/recent.js'
 import {
@@ -34,6 +35,10 @@ import RouteContextBar from '$lib/components/RouteContextBar.svelte'
 import EntityChip from '$lib/components/EntityChip.svelte'
 import ResultMeta from '$lib/components/ResultMeta.svelte'
 import StatPill from '$lib/components/StatPill.svelte'
+import TabBar from '$lib/components/TabBar.svelte'
+import TrackRule from '$lib/components/TrackRule.svelte'
+import BottomSpacer from '$lib/components/BottomSpacer.svelte'
+import { asText, fmtDash, numOrNull, fmtExcDate, normDay } from '$lib/format.js'
 import ActivityIcon from 'lucide-svelte/icons/activity'
 
   import CalendarClockIcon from 'lucide-svelte/icons/calendar-clock'
@@ -129,10 +134,6 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
   const VIEW_TO_TAB = { status: 'status', schedule: 'schedule', delay: 'avg', map: 'map', exceptions: 'exceptions' }
   const TAB_TO_VIEW = Object.fromEntries(Object.entries(VIEW_TO_TAB).map(([v, t]) => [t, v]))
   const RUN_MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
-
-  function asText(v) {
-    return String(v ?? '').trim()
-  }
 
   async function loadStatus(t) {
     const fresh = `${data?.train_number}` !== `${t}`
@@ -298,27 +299,7 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
     return 'on time'
   }
 
-  function fmtTime(v) {
-    return v && v !== '-' && v !== '--' ? v : '—'
-  }
-
-  function numOrNull(v) {
-    const s = String(v ?? '').trim()
-    if (!s) return null
-    const n = Number(s)
-    return Number.isFinite(n) ? n : null
-  }
-
-  /* Normalize NTES "DD-MMM-YYYY" (and ISO) dates to YYYY-MM-DD. */
-  function normDay(s) {
-    const str = String(s ?? '').trim()
-    const m = /^(\d{1,2})-([A-Za-z]{3})-(\d{4})$/.exec(str)
-    if (m) {
-      const mo = RUN_MONTHS.indexOf(m[2].toLowerCase())
-      return mo >= 0 ? `${m[3]}-${String(mo + 1).padStart(2, '0')}-${m[1].padStart(2, '0')}` : ''
-    }
-    return str.slice(0, 10)
-  }
+  const fmtTime = fmtDash
 
   function parseRunDate(s) {
     const iso = normDay(s)
@@ -557,15 +538,6 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
     return `${Math.round(n)}m`
   }
 
-  /* ISO exception dates → NTES-style DD-MMM-YYYY for display. */
-  function fmtExcDate(iso) {
-    const raw = String(iso ?? '').trim()
-    if (!raw) return '—'
-    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw)
-    if (!m) return raw
-    const mo = (RUN_MONTHS[Number(m[2]) - 1] ?? '').toUpperCase()
-    return mo ? `${m[3]}-${mo}-${m[1]}` : raw
-  }
 </script>
 
 {#snippet statusStationCell(s)}
@@ -659,7 +631,7 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
     </PageHeader>
   {/if}
 
-  <div class="track-rule" aria-hidden="true"></div>
+  <TrackRule />
 
   {#if committed && viewport.narrow && !searchOpen}
     <button
@@ -725,30 +697,26 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
   {/if}
 
   <Tabs.Root class="min-w-0" bind:value={activeTab} onValueChange={onTabChange}>
-    <Tabs.List
-      class="w-full justify-start overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden max-lg:grid max-lg:grid-cols-5 max-lg:gap-1 max-lg:overflow-visible max-lg:h-auto max-lg:p-1 max-lg:bg-muted max-lg:rounded-lg max-lg:border"
-    >
+    <TabBar cols={5}>
       <Tabs.Trigger value="status" title="Status" aria-label="Live status" class="max-lg:justify-center max-lg:px-1 max-lg:py-2.5 max-lg:h-9"><ActivityIcon class="size-4 max-lg:size-5 shrink-0" /><span class="max-lg:hidden">Status</span></Tabs.Trigger>
       <Tabs.Trigger value="schedule" title="Schedule" aria-label="Schedule" class="max-lg:justify-center max-lg:px-1 max-lg:py-2.5 max-lg:h-9"><CalendarClockIcon class="size-4 max-lg:size-5 shrink-0" /><span class="max-lg:hidden">Schedule</span></Tabs.Trigger>
       <Tabs.Trigger value="avg" title="Avg delay" aria-label="Avg delay" class="max-lg:justify-center max-lg:px-1 max-lg:py-2.5 max-lg:h-9"><ChartColumnIcon class="size-4 max-lg:size-5 shrink-0" /><span class="max-lg:hidden">Avg delay</span></Tabs.Trigger>
       <Tabs.Trigger value="map" title="Map" aria-label="Map" class="max-lg:justify-center max-lg:px-1 max-lg:py-2.5 max-lg:h-9"><MapIcon class="size-4 max-lg:size-5 shrink-0" /><span class="max-lg:hidden">Map</span></Tabs.Trigger>
       <Tabs.Trigger value="exceptions" title="Exceptions" aria-label="Exceptions" class="max-lg:justify-center max-lg:px-1 max-lg:py-2.5 max-lg:h-9"><CalendarX2Icon class="size-4 max-lg:size-5 shrink-0" /><span class="max-lg:hidden">Exceptions</span></Tabs.Trigger>
-    </Tabs.List>
+    </TabBar>
 
     <Tabs.Content value="status" class="mt-3 grid gap-4">
-      {#if phase === 'loading'}
-        <div class="grid gap-2" aria-busy="true">
-          {#each [0, 1, 2, 3] as i (i)}
-            <Skeleton class="h-10 w-full" />
-          {/each}
-        </div>
-      {:else if phase === 'error'}
-        <Alert.Root variant="destructive" role="alert">
-          <Alert.Title>Could not load live status</Alert.Title>
-          <Alert.Description>{errorMsg}</Alert.Description>
-        </Alert.Root>
-      {:else if data}
-        <Card.Root>
+      <AsyncState
+        phase={phase}
+        error={errorMsg}
+        empty={!data}
+        skeletonCount={4}
+        emptyIcon={ActivityIcon}
+        emptyTitle="No train tracked yet"
+        emptyHint="Enter a train number or name above and press Track to see live status."
+      >
+        {#if data}
+          <Card.Root>
           <Card.Header class="flex flex-col items-start justify-between gap-3 space-y-0 sm:flex-row sm:items-center">
             <div class="grid gap-1">
               <Card.Title class="flex flex-wrap items-center gap-2">
@@ -811,14 +779,9 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
               empty="No station data returned."
             />
           </Card.Content>
-        </Card.Root>
-      {:else}
-        <EmptyState
-          icon={ActivityIcon}
-          title="No train tracked yet"
-          hint="Enter a train number or name above and press Track to see live status."
-        />
-      {/if}
+          </Card.Root>
+        {/if}
+      </AsyncState>
     </Tabs.Content>
 
     <Tabs.Content value="schedule" class="mt-3 grid gap-4">
@@ -828,19 +791,18 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
           title="No schedule loaded"
           hint="Enter a train number above to load its schedule."
         />
-      {:else if schPhase === 'loading'}
-        <div class="grid gap-2" aria-busy="true">
-          {#each [0, 1, 2, 3, 4] as i (i)}
-            <Skeleton class="h-10 w-full" />
-          {/each}
-        </div>
-      {:else if schPhase === 'error'}
-        <Alert.Root variant="destructive" role="alert">
-          <Alert.Title>Could not load schedule</Alert.Title>
-          <Alert.Description>{schErr}</Alert.Description>
-        </Alert.Root>
-      {:else if schData}
-        <Card.Root>
+      {:else}
+        <AsyncState
+          phase={schPhase}
+          error={schErr}
+          empty={!schData}
+          skeletonCount={5}
+          emptyIcon={CalendarClockIcon}
+          emptyTitle="No schedule loaded"
+          emptyHint="Track a train first, then its scheduled stops appear here."
+        >
+          {#if schData}
+            <Card.Root>
           <Card.Header>
             <Card.Title class="flex flex-wrap items-center gap-2">
               <EntityChip type="train" code={schData.train_number} name={schData.train_name} />
@@ -867,13 +829,9 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
               empty="No stops returned."
             />
           </Card.Content>
-        </Card.Root>
-      {:else}
-        <EmptyState
-          icon={CalendarClockIcon}
-          title="No schedule loaded"
-          hint="Track a train first, then its scheduled stops appear here."
-        />
+            </Card.Root>
+          {/if}
+        </AsyncState>
       {/if}
     </Tabs.Content>
 
@@ -884,20 +842,19 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
           title="No delay data loaded"
           hint="Enter a train number above to load average delays."
         />
-      {:else if avgPhase === 'loading'}
-        <div class="grid gap-2" aria-busy="true">
-          {#each [0, 1, 2, 3, 4] as i (i)}
-            <Skeleton class="h-10 w-full" />
-          {/each}
-        </div>
-      {:else if avgPhase === 'error'}
-        <Alert.Root variant="destructive" role="alert">
-          <Alert.Title>Could not load average delay</Alert.Title>
-          <Alert.Description>{avgErr}</Alert.Description>
-        </Alert.Root>
-      {:else if avgData}
-        {@const maxD = maxDelay(avgData.stations)}
-        <Card.Root>
+      {:else}
+        <AsyncState
+          phase={avgPhase}
+          error={avgErr}
+          empty={!avgData}
+          skeletonCount={5}
+          emptyIcon={ChartColumnIcon}
+          emptyTitle="No delay data loaded"
+          emptyHint="Track a train first, then its average delays appear here."
+        >
+          {#if avgData}
+            {@const maxD = maxDelay(avgData.stations)}
+            <Card.Root>
           <Card.Header>
             <Card.Title class="flex flex-wrap items-center gap-2">
               <EntityChip type="train" code={avgData.train_no} name={avgData.train_name} />
@@ -930,13 +887,9 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
               empty="No station data returned."
             />
           </Card.Content>
-        </Card.Root>
-      {:else}
-        <EmptyState
-          icon={ChartColumnIcon}
-          title="No delay data loaded"
-          hint="Track a train first, then its average delays appear here."
-        />
+            </Card.Root>
+          {/if}
+        </AsyncState>
       {/if}
     </Tabs.Content>
 
@@ -1129,5 +1082,5 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
     </Tabs.Content>
   </Tabs.Root>
 
-  <div class="h-20 lg:hidden"></div>
+  <BottomSpacer />
 </section>

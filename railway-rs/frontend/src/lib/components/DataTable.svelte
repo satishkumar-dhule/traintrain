@@ -33,12 +33,55 @@
   let sortDir = $state(0) // 1 asc · -1 desc · 0 none
   let mobileQuery = $state('')
 
+  /* --- memoized text / sort caches (WeakMap per row -> Map<colKey,text>) --- */
+  const _textCache = new WeakMap()
+  const _sortCache = new WeakMap()
+
   function textOf(row, col) {
+    if (row && typeof row === 'object') {
+      let m = _textCache.get(row)
+      if (m?.has(col.key)) return m.get(col.key)
+      const v = col.value ? col.value(row) : row?.[col.key]
+      const s = v == null ? '' : String(v).trim()
+      if (!m) {
+        m = new Map()
+        _textCache.set(row, m)
+      }
+      m.set(col.key, s)
+      return s
+    }
     const v = col.value ? col.value(row) : row?.[col.key]
     return v == null ? '' : String(v).trim()
   }
 
   function sortVal(row, col) {
+    if (row && typeof row === 'object') {
+      let m = _sortCache.get(row)
+      if (m?.has(col.key)) return m.get(col.key)
+      let out
+      if (col.sortValue) out = col.sortValue(row)
+      else {
+        const s = textOf(row, col)
+        if (!s || s === '-' || s === '--' || s === '—') out = null
+        else {
+          const t = /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/.exec(s)
+          if (t) out = +t[1] * 3600 + +t[2] * 60 + (+t[3] || 0)
+          else {
+            const cleaned = s
+              .replace(/[,\s₹$]/g, '')
+              .replace(/(min(?:ute)?s?|sec(?:ond)?s?|hrs?|hours?|kms?|ms|%)$/i, '')
+            if (/^-?\d+(\.\d+)?$/.test(cleaned)) out = Number(cleaned)
+            else out = s.toLowerCase()
+          }
+        }
+      }
+      if (!m) {
+        m = new Map()
+        _sortCache.set(row, m)
+      }
+      m.set(col.key, out)
+      return out
+    }
     if (col.sortValue) return col.sortValue(row)
     const s = textOf(row, col)
     if (!s || s === '-' || s === '--' || s === '—') return null
@@ -97,6 +140,15 @@
       sortKey = null
       sortDir = 0
     }
+  }
+
+  /* super n2 delegation: single handler reading data-col-key */
+  function handleSortClick(e) {
+    const key = e.currentTarget?.dataset?.colKey
+    if (!key) return
+    const col = columns.find((c) => c.key === key)
+    if (!col) return
+    toggleSort(col)
   }
 
   function clearAll() {
@@ -175,7 +227,8 @@
             <button
               type="button"
               aria-pressed={activeSort}
-              onclick={() => toggleSort(col)}
+              data-col-key={col.key}
+              onclick={handleSortClick}
               title={col.label}
               class={`flex min-h-8 shrink-0 items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors max-lg:min-h-8 max-lg:px-2.5 max-lg:text-xs ${
                 activeSort
@@ -305,8 +358,9 @@
               {:else}
                 <button
                   type="button"
+                  data-col-key={col.key}
                   class="inline-flex cursor-pointer items-center gap-1 rounded-sm outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-                  onclick={() => toggleSort(col)}
+                  onclick={handleSortClick}
                   title="Sort by {col.label}"
                 >
                   <span>{col.label}</span>

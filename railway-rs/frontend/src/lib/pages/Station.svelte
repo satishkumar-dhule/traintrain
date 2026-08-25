@@ -14,6 +14,7 @@ import AutoCompleteInput from '$lib/components/AutoCompleteInput.svelte'
 import DateStrip from '$lib/components/DateStrip.svelte'
 import DataTable from '$lib/components/DataTable.svelte'
 import EmptyState from '$lib/components/EmptyState.svelte'
+import AsyncState from '$lib/components/AsyncState.svelte'
 import RecentSearches from '$lib/components/RecentSearches.svelte'
 import { loadRecent, rememberRecent, clearStored } from '$lib/recent.js'
 import PageHeader from '$lib/components/PageHeader.svelte'
@@ -30,8 +31,13 @@ import {
   TrainDelayBadge,
   RunsOnBadges,
   StatusBadge,
-  CountBadge
+  CountBadge,
+  DAY_LETTERS
 } from '$lib/components/badges/index.js'
+import TabBar from '$lib/components/TabBar.svelte'
+import TrackRule from '$lib/components/TrackRule.svelte'
+import BottomSpacer from '$lib/components/BottomSpacer.svelte'
+import { norm, fmtDash, numOrNull, ntesDate } from '$lib/format.js'
   import ActivityIcon from 'lucide-svelte/icons/activity'
   import CalendarClockIcon from 'lucide-svelte/icons/calendar-clock'
   import MapPinIcon from 'lucide-svelte/icons/map-pin'
@@ -80,38 +86,6 @@ import {
     )
   }
 
-  const MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
-  const DAY_LETTERS = ['M', 'T', 'W', 'T', 'F', 'S', 'S']
-
-  function norm(s) {
-    return String(s ?? '').trim().toUpperCase()
-  }
-
-  function ntesDate(iso) {
-    if (!iso) return null
-    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso).trim())
-    if (!m) return null
-    const mi = Number(m[2]) - 1
-    if (mi < 0 || mi > 11) return null
-    return `${m[3]}-${MONTHS[mi]}-${m[1]}`
-  }
-
-  function fmt(v) {
-    return v && v !== '-' && v !== '--' ? v : '—'
-  }
-
-  function numOrNull(v) {
-    const s = String(v ?? '').trim()
-    if (!s) return null
-    const n = Number(s)
-    return Number.isFinite(n) ? n : null
-  }
-
-  function daysText(flags) {
-    if (!Array.isArray(flags)) return ''
-    return flags.map((on, i) => (on ? DAY_LETTERS[i] ?? '' : '-')).join('')
-  }
-
   const infoNames = $derived(
     stationInfo
       ? [stationInfo.name_hi, stationInfo.name_gu]
@@ -144,13 +118,13 @@ import {
 
   const liveCols = [
     { key: 'train', label: 'Train', value: (t) => `${t.number ?? ''} ${t.name ?? ''}` },
-    { key: 'sta', label: 'Sched', cellClass: 'data-num text-xs max-lg:text-sm', value: (t) => fmt(t.sta) },
-    { key: 'eta', label: 'ETA', cellClass: 'data-num text-xs max-lg:text-sm', value: (t) => fmt(t.eta) },
+    { key: 'sta', label: 'Sched', cellClass: 'data-num text-xs max-lg:text-sm', value: (t) => fmtDash(t.sta) },
+    { key: 'eta', label: 'ETA', cellClass: 'data-num text-xs max-lg:text-sm', value: (t) => fmtDash(t.eta) },
     {
       key: 'delay',
       label: 'Delay',
       class: 'w-24',
-      value: (t) => fmt(t.delay_arr),
+      value: (t) => fmtDash(t.delay_arr),
       sortValue: (t) => numOrNull(String(t.delay_arr ?? '').replace(/m$/, '')),
     },
     {
@@ -158,7 +132,7 @@ import {
       label: 'Platform',
       class: 'w-24',
       cellClass: 'data-num text-xs max-lg:text-sm',
-      value: (t) => fmt(t.platform),
+      value: (t) => fmtDash(t.platform),
       sortValue: (t) => numOrNull(t.platform),
     },
   ]
@@ -167,12 +141,15 @@ import {
     { key: 'train', label: 'Train', value: (t) => `${t.number ?? ''} ${t.name ?? ''}` },
     { key: 'type', label: 'Type', class: 'w-20 lg:w-28', value: (t) => t.train_type || '' },
     { key: 'classes', label: 'Cls', class: 'w-16 lg:w-28', value: (t) => t.classes || '' },
-    { key: 'arrival', label: 'Arr', cellClass: 'data-num text-xs max-lg:text-sm', value: (t) => fmt(t.arrival) },
-    { key: 'departure', label: 'Dep', cellClass: 'data-num text-xs max-lg:text-sm', value: (t) => fmt(t.departure) },
+    { key: 'arrival', label: 'Arr', cellClass: 'data-num text-xs max-lg:text-sm', value: (t) => fmtDash(t.arrival) },
+    { key: 'departure', label: 'Dep', cellClass: 'data-num text-xs max-lg:text-sm', value: (t) => fmtDash(t.departure) },
     {
       key: 'days',
       label: 'Days',
-      value: (t) => daysText(Array.isArray(t.days) ? t.days : []),
+      value: (t) => {
+        const f = Array.isArray(t.days) ? t.days : []
+        return f.map((on, i) => (on ? DAY_LETTERS[i] ?? '' : '-')).join('')
+      },
       sortValue: (t) => (Array.isArray(t.days) ? t.days.filter(Boolean).length : null),
     },
   ]
@@ -419,28 +396,26 @@ import {
     />
   {/if}
 
-  <div class="track-rule" aria-hidden="true"></div>
+  <TrackRule />
 
   <Tabs.Root class="min-w-0" bind:value={tab} onValueChange={onTabChange}>
-    <Tabs.List class="w-full justify-start overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden max-lg:grid max-lg:grid-cols-2 max-lg:gap-1 max-lg:overflow-visible max-lg:overflow-x-visible max-lg:h-auto max-lg:p-1 max-lg:bg-muted max-lg:rounded-lg max-lg:border">
-      <Tabs.Trigger value="live" class="max-lg:justify-center max-lg:px-1 max-lg:py-2 max-lg:h-auto max-lg:text-[10px]"><ActivityIcon class="size-4 max-lg:size-[18px] shrink-0" /><span class="max-lg:hidden ml-1.5">Live</span><span class="hidden max-lg:inline ml-1 text-[10px] font-medium">Live</span></Tabs.Trigger>
-      <Tabs.Trigger value="timetable" class="max-lg:justify-center max-lg:px-1 max-lg:py-2 max-lg:h-auto max-lg:text-[10px]"><CalendarClockIcon class="size-4 max-lg:size-[18px] shrink-0" /><span class="max-lg:hidden ml-1.5">Timetable</span><span class="hidden max-lg:inline ml-1 text-[10px] font-medium">Time</span></Tabs.Trigger>
-    </Tabs.List>
+    <TabBar cols={2}>
+      <Tabs.Trigger value="live"><ActivityIcon class="size-4 max-lg:size-[18px] shrink-0" />Live</Tabs.Trigger>
+      <Tabs.Trigger value="timetable"><CalendarClockIcon class="size-4 max-lg:size-[18px] shrink-0" />Timetable</Tabs.Trigger>
+    </TabBar>
 
     <Tabs.Content value="live" class="mt-3 grid gap-4">
-      {#if livePhase === 'loading'}
-        <div class="grid gap-2" aria-busy="true">
-          {#each [0, 1, 2, 3] as i (i)}
-            <Skeleton class="h-10 w-full" />
-          {/each}
-        </div>
-      {:else if livePhase === 'error'}
-        <Alert.Root variant="destructive" role="alert">
-          <Alert.Title>Could not load board</Alert.Title>
-          <Alert.Description>{liveError}</Alert.Description>
-        </Alert.Root>
-      {:else if live}
-        <Card.Root>
+      <AsyncState
+        phase={livePhase}
+        error={liveError}
+        empty={!live}
+        skeletonCount={4}
+        emptyIcon={ActivityIcon}
+        emptyTitle="No board loaded"
+        emptyHint="Enter a station and show the board to see live arrivals & departures."
+      >
+        {#if live}
+          <Card.Root>
           <Card.Header class="flex flex-col items-start justify-between gap-3 space-y-0 sm:flex-row sm:items-center">
             <Card.Title class="flex flex-wrap items-center gap-2">
               <SignalDot tone="go" pulse />
@@ -470,30 +445,23 @@ import {
                 : 'No trains in this window.'}
             />
           </Card.Content>
-        </Card.Root>
-      {:else}
-        <EmptyState
-          icon={ActivityIcon}
-          title="No board loaded"
-          hint="Enter a station and show the board to see live arrivals &amp; departures."
-        />
-      {/if}
+          </Card.Root>
+        {/if}
+      </AsyncState>
     </Tabs.Content>
 
     <Tabs.Content value="timetable" class="mt-3 grid gap-4">
-      {#if ttPhase === 'loading'}
-        <div class="grid gap-2" aria-busy="true">
-          {#each [0, 1, 2, 3] as i (i)}
-            <Skeleton class="h-10 w-full" />
-          {/each}
-        </div>
-      {:else if ttPhase === 'error'}
-        <Alert.Root variant="destructive" role="alert">
-          <Alert.Title>Could not load timetable</Alert.Title>
-          <Alert.Description>{ttError}</Alert.Description>
-        </Alert.Root>
-      {:else if timetable}
-        <Card.Root>
+      <AsyncState
+        phase={ttPhase}
+        error={ttError}
+        empty={!timetable}
+        skeletonCount={4}
+        emptyIcon={CalendarClockIcon}
+        emptyTitle="No timetable loaded"
+        emptyHint="Enter a station (and optionally a date) to load the full-day timetable."
+      >
+        {#if timetable}
+          <Card.Root>
           <Card.Header class="flex flex-col items-start justify-between gap-3 space-y-0 sm:flex-row sm:items-center">
             <Card.Title>
               {#if timetable.station_name}{timetable.station_name}{:else}<span class="data-num tracking-[0.14em] uppercase">{timetable.station ?? '—'}</span>{/if}
@@ -522,15 +490,10 @@ import {
               empty="No scheduled trains found."
             />
           </Card.Content>
-        </Card.Root>
-      {:else}
-        <EmptyState
-          icon={CalendarClockIcon}
-          title="No timetable loaded"
-          hint="Enter a station (and optionally a date) to load the full-day timetable."
-        />
-      {/if}
+          </Card.Root>
+        {/if}
+      </AsyncState>
     </Tabs.Content>
   </Tabs.Root>
-  <div class="h-40 lg:hidden"></div>
+  <BottomSpacer />
 </section>

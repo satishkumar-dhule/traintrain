@@ -19,13 +19,16 @@ import {
   TrainNumberBadge,
   StationCodeBadge,
   RunsOnBadges,
-  DataSourceBadge
+  DataSourceBadge,
+  DAY_LETTERS
 } from '$lib/components/badges/index.js'
 import SignalDot from '$lib/components/SignalDot.svelte'
+import TabBar from '$lib/components/TabBar.svelte'
+import TrackRule from '$lib/components/TrackRule.svelte'
+import BottomSpacer from '$lib/components/BottomSpacer.svelte'
+import { asText, fmtDash } from '$lib/format.js'
 
   let { view = '', selection = '' } = $props()
-
-  const DAY_LETTERS = ['M', 'T', 'W', 'T', 'F', 'S', 'S']
 
   let tab = $state('heritage')
   let selInput = $state('')
@@ -44,20 +47,11 @@ import SignalDot from '$lib/components/SignalDot.svelte'
 
   const hTrains = $derived(listOf(hData))
   const hTotal = $derived(totalOf(hData))
-  const hCaption = $derived(str(hData?.selection).trim())
-  const hSource = $derived(str(hData?.data_source).trim())
+  const hCaption = $derived(asText(hData?.selection).trim())
+  const hSource = $derived(asText(hData?.data_source).trim())
   const pTrains = $derived(listOf(pData))
   const pTotal = $derived(totalOf(pData))
-  const pSource = $derived(str(pData?.data_source).trim())
-
-  function str(v) {
-    return v == null ? '' : String(v)
-  }
-
-  function fmt(v) {
-    const s = str(v).trim()
-    return s && s !== '-' && s !== '--' ? s : '—'
-  }
+  const pSource = $derived(asText(pData?.data_source).trim())
 
   function listOf(d) {
     if (Array.isArray(d?.trains)) return d.trains
@@ -74,17 +68,17 @@ import SignalDot from '$lib/components/SignalDot.svelte'
   function stopOf(t, nestedKey, flatPrefix) {
     const nested = t?.[nestedKey]
     const o = nested && typeof nested === 'object' ? nested : {}
-    const flat = (suffix) => str(t?.[`${flatPrefix}_${suffix}`]).trim()
+    const flat = (suffix) => asText(t?.[`${flatPrefix}_${suffix}`]).trim()
     return {
-      code: str(o.code ?? flat('code')).trim(),
-      name: str(o.name ?? o.station ?? flat('station')).trim(),
-      time: str(o.time ?? flat('time')).trim()
+      code: asText(o.code ?? flat('code')).trim(),
+      name: asText(o.name ?? o.station ?? flat('station')).trim(),
+      time: asText(o.time ?? flat('time')).trim()
     }
   }
 
   function validityOf(t) {
-    const from = fmt(t?.validity_from)
-    const to = fmt(t?.validity_to)
+    const from = fmtDash(t?.validity_from)
+    const to = fmtDash(t?.validity_to)
     if (from === '—' && to === '—') return '—'
     if (from === '—') return to
     if (to === '—') return from
@@ -92,7 +86,7 @@ import SignalDot from '$lib/components/SignalDot.svelte'
   }
 
   function dayFlags(raw) {
-    const s = str(raw).trim().toLowerCase()
+    const s = asText(raw).trim().toLowerCase()
     const flags = [false, false, false, false, false, false, false]
     if (!s || s === '-' || s === '--') return { flags, any: false }
     let any = false
@@ -149,7 +143,7 @@ import SignalDot from '$lib/components/SignalDot.svelte'
   }
 
   function applyFilter() {
-    const kw = str(selInput).trim()
+    const kw = asText(selInput).trim()
     navigate(kw ? `/extras/heritage/${encodeURIComponent(kw)}` : '/extras/heritage')
   }
 
@@ -168,15 +162,15 @@ import SignalDot from '$lib/components/SignalDot.svelte'
 
   function daysText(raw) {
     const { flags, any } = dayFlags(raw)
-    if (!any) return str(raw).trim()
+    if (!any) return asText(raw).trim()
     return DAY_LETTERS.filter((_, i) => flags[i]).join('')
   }
 
   const heritageCols = [
-    { key: 'number', label: 'Number', class: 'w-24', value: (t) => fmt(t.number) },
-    { key: 'name', label: 'Name', value: (t) => fmt(t.name), cellClass: 'font-medium' },
-    { key: 'runs', label: 'Runs', cellClass: 'text-muted-foreground', value: (t) => fmt(t.runs) },
-    { key: 'duration', label: 'Duration', class: 'w-28', cellClass: 'data-num text-xs', value: (t) => fmt(t.duration) },
+    { key: 'number', label: 'Number', class: 'w-24', value: (t) => fmtDash(t.number) },
+    { key: 'name', label: 'Name', value: (t) => fmtDash(t.name), cellClass: 'font-medium' },
+    { key: 'runs', label: 'Runs', cellClass: 'text-muted-foreground', value: (t) => fmtDash(t.runs) },
+    { key: 'duration', label: 'Duration', class: 'w-28', cellClass: 'data-num text-xs', value: (t) => fmtDash(t.duration) },
     {
       key: 'route',
       label: 'Source → Destination',
@@ -186,9 +180,9 @@ import SignalDot from '$lib/components/SignalDot.svelte'
   ]
 
   const parcelCols = [
-    { key: 'number', label: 'Number', class: 'w-24', value: (t) => fmt(t.number) },
-    { key: 'name', label: 'Name', cellClass: 'max-w-40 truncate font-medium', value: (t) => fmt(t.name) },
-    { key: 'route', label: 'Route', cellClass: 'max-w-56 truncate', value: (t) => fmt(t.route) },
+    { key: 'number', label: 'Number', class: 'w-24', value: (t) => fmtDash(t.number) },
+    { key: 'name', label: 'Name', cellClass: 'max-w-40 truncate font-medium', value: (t) => fmtDash(t.name) },
+    { key: 'route', label: 'Route', cellClass: 'max-w-56 truncate', value: (t) => fmtDash(t.route) },
     {
       key: 'validity',
       label: 'Validity',
@@ -196,7 +190,7 @@ import SignalDot from '$lib/components/SignalDot.svelte'
       cellClass: 'data-num text-xs whitespace-nowrap',
       value: (t) => validityOf(t),
     },
-    { key: 'travel_time', label: 'Travel time', class: 'w-24', cellClass: 'data-num text-xs', value: (t) => fmt(t.travel_time) },
+    { key: 'travel_time', label: 'Travel time', class: 'w-24', cellClass: 'data-num text-xs', value: (t) => fmtDash(t.travel_time) },
     {
       key: 'days',
       label: 'Days',
@@ -210,7 +204,7 @@ import SignalDot from '$lib/components/SignalDot.svelte'
 
   $effect(() => {
     const nextTab = view === 'parcel' ? 'parcel' : 'heritage'
-    const sel = str(selection).trim()
+    const sel = asText(selection).trim()
     untrack(() => {
       tab = nextTab
       if (nextTab === 'heritage') {
@@ -252,7 +246,7 @@ import SignalDot from '$lib/components/SignalDot.svelte'
   {#if days.any}
     <RunsOnBadges flags={days.flags} />
   {:else}
-    <span class="text-xs text-muted-foreground">{fmt(t.days_of_run)}</span>
+    <span class="text-xs text-muted-foreground">{fmtDash(t.days_of_run)}</span>
   {/if}
 {/snippet}
 
@@ -261,13 +255,13 @@ import SignalDot from '$lib/components/SignalDot.svelte'
     <h1 class="signage text-2xl sm:text-3xl">Extras</h1>
     <p class="max-lg:hidden text-sm text-muted-foreground">Heritage trains and running parcel specials, live from NTES.</p>
   </div>
-  <div aria-hidden="true" class="track-rule"></div>
+  <TrackRule />
 
   <Tabs.Root class="min-w-0" bind:value={tab} onValueChange={onTabChange}>
-    <Tabs.List class="w-full justify-start overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden max-lg:grid max-lg:grid-cols-2 max-lg:gap-1 max-lg:overflow-visible max-lg:overflow-x-visible max-lg:h-auto max-lg:p-1 max-lg:bg-muted max-lg:rounded-lg max-lg:border">
-      <Tabs.Trigger value="heritage" class="max-lg:justify-center max-lg:py-2.5"><LandmarkIcon class="size-4 max-lg:size-[18px] shrink-0" /><span class="hidden sm:inline ml-2">Heritage</span><span class="sm:hidden ml-1 text-xs">Heritage</span></Tabs.Trigger>
-      <Tabs.Trigger value="parcel" class="max-lg:justify-center max-lg:py-2.5"><PackageIcon class="size-4 max-lg:size-[18px] shrink-0" /><span class="hidden sm:inline ml-2">Parcel</span><span class="sm:hidden ml-1 text-xs">Parcel</span></Tabs.Trigger>
-    </Tabs.List>
+    <TabBar cols={2}>
+      <Tabs.Trigger value="heritage"><LandmarkIcon class="size-4 max-lg:size-[18px] shrink-0" />Heritage</Tabs.Trigger>
+      <Tabs.Trigger value="parcel"><PackageIcon class="size-4 max-lg:size-[18px] shrink-0" />Parcel</Tabs.Trigger>
+    </TabBar>
 
     <Tabs.Content value="heritage" class="mt-4 grid gap-4">
       <Card.Root>
@@ -315,7 +309,7 @@ import SignalDot from '$lib/components/SignalDot.svelte'
               </div>
             </div>
             <div class="flex flex-wrap items-center justify-end gap-2 min-w-0">
-              {#if str(selection).trim()}<Badge variant="outline" class="max-w-[60vw] truncate">keyword: {selection}</Badge>{/if}
+              {#if asText(selection).trim()}<Badge variant="outline" class="max-w-[60vw] truncate">keyword: {selection}</Badge>{/if}
               <DataSourceBadge source={hSource} />
             </div>
           </Card.Header>
@@ -324,7 +318,7 @@ import SignalDot from '$lib/components/SignalDot.svelte'
               columns={heritageCols}
               rows={hTrains}
               primary="name"
-              rowKey={(t, i) => `${i}|${str(t.number)}|${str(t.name)}`}
+              rowKey={(t, i) => `${i}|${asText(t.number)}|${asText(t.name)}`}
               cells={{ number: hNumberCell, route: hRouteCell }}
               empty="No heritage trains match this selection."
             />
@@ -374,7 +368,7 @@ import SignalDot from '$lib/components/SignalDot.svelte'
               columns={parcelCols}
               rows={pTrains}
               primary="name"
-              rowKey={(t, i) => `${i}|${str(t.number)}|${str(t.name)}`}
+              rowKey={(t, i) => `${i}|${asText(t.number)}|${asText(t.name)}`}
               cells={{ days: pDaysCell, number: pNumberCell }}
               empty="No parcel special trains are currently listed."
             />
@@ -389,4 +383,5 @@ import SignalDot from '$lib/components/SignalDot.svelte'
       {/if}
     </Tabs.Content>
   </Tabs.Root>
+  <BottomSpacer />
 </section>

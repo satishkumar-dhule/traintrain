@@ -31,14 +31,15 @@ import CalendarDaysIcon from 'lucide-svelte/icons/calendar-days'
 import CalendarClockIcon from 'lucide-svelte/icons/calendar-clock'
 import RouteIcon from 'lucide-svelte/icons/route'
 import { journeysHref, trainHref } from '$lib/utils.js'
+import TrackRule from '$lib/components/TrackRule.svelte'
+import BottomSpacer from '$lib/components/BottomSpacer.svelte'
+import { asText, fmtDash, numOrNull, todayISO, DATE_RE } from '$lib/format.js'
 
   let { src = '', dst = '', date = '', embedded = false, filterQuery = '' } = $props()
 
-  const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
-
   let from = $state('')
   let to = $state('')
-  let journeyDate = $state(today())
+  let journeyDate = $state(todayISO())
 
   let phase = $state('idle')
   let errorMsg = $state(null)
@@ -96,31 +97,11 @@ import { journeysHref, trainHref } from '$lib/utils.js'
     const [s, d] = String(r?.id ?? '').split('|')
     let dt = String(r?.date ?? '')
     if (!s || !d || !DATE_RE.test(dt)) return
-    if (dt < today()) dt = today()
+    if (dt < todayISO()) dt = todayISO()
     from = s
     to = d
     journeyDate = dt
     runSearch(s, d, dt, `${s}/${d}/${dt}`)
-  }
-
-  function today() {
-    const d = new Date()
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-  }
-
-  function asText(v) {
-    return String(v ?? '').trim()
-  }
-
-  function fmt(v) {
-    const t = asText(v)
-    return t && t !== '-' && t !== '--' ? t : '—'
-  }
-
-  function numOrNull(v) {
-    if (v == null || String(v).trim() === '') return null
-    const n = Number(v)
-    return Number.isFinite(n) ? n : null
   }
 
   function hmMin(v) {
@@ -139,7 +120,7 @@ import { journeysHref, trainHref } from '$lib/utils.js'
 
   function durationLabel(tr) {
     const m = durationMin(tr)
-    if (m == null) return fmt(tr?.duration)
+    if (m == null) return fmtDash(tr?.duration)
     const h = Math.floor(m / 60)
     const mm = m % 60
     return h ? `${h}h ${mm ? mm + 'm' : ''}`.trim() : `${mm}m`
@@ -341,7 +322,7 @@ import { journeysHref, trainHref } from '$lib/utils.js'
   <div class={`overflow-hidden rounded-md border px-2 py-1 ${tone}`}>
     <div class="flex items-baseline justify-between gap-2">
       <span class="flex min-w-0 items-baseline gap-1">
-        <span class="data-num text-[11px] max-lg:text-xs font-semibold">{fmt(classCode(row))}</span>
+        <span class="data-num text-[11px] max-lg:text-xs font-semibold">{fmtDash(classCode(row))}</span>
         {#if quotaLabel(row)}
           <span
             class="rounded border border-border bg-muted px-1 text-[9px] leading-tight font-medium tracking-wide uppercase text-muted-foreground"
@@ -613,7 +594,7 @@ import { journeysHref, trainHref } from '$lib/utils.js'
         </div>
       </div>
 
-      <div class="track-rule" aria-hidden="true"></div>
+      <TrackRule />
 
       {#if filteredTrains.length === 0}
         <Card.Root>
@@ -634,7 +615,7 @@ import { journeysHref, trainHref } from '$lib/utils.js'
                     <TrainDelayBadge number={tr?.number} name={tr?.name} compact />
                   </div>
                   <div class="data-num mt-0.5 text-[11px] max-lg:text-xs text-muted-foreground">
-                    {fmt(tr?.departure_time)} → {fmt(tr?.arrival_time)} · {durationLabel(tr)}
+                    {fmtDash(tr?.departure_time)} → {fmtDash(tr?.arrival_time)} · {durationLabel(tr)}
                   </div>
                 </div>
                 <div class="grid grid-cols-[repeat(auto-fill,minmax(6.5rem,1fr))] gap-x-3 gap-y-2 px-3 py-2">
@@ -686,7 +667,7 @@ import { journeysHref, trainHref } from '$lib/utils.js'
                       <TrainDelayBadge number={tr?.number} name={tr?.name} compact />
                     </div>
                     <div class="data-num mt-0.5 text-[10px] text-muted-foreground">
-                      {fmt(tr?.departure_time)} → {fmt(tr?.arrival_time)} · {durationLabel(tr)}
+                      {fmtDash(tr?.departure_time)} → {fmtDash(tr?.arrival_time)} · {durationLabel(tr)}
                     </div>
                   </Table.Cell>
                   {#each matrixClasses as c (c)}
@@ -748,7 +729,7 @@ import { journeysHref, trainHref } from '$lib/utils.js'
                       <RunsOnBadges {flags} format="letter" />
                     {/if}
                     <span class="data-num text-xs text-muted-foreground">
-                      {fmt(tr?.departure_time)} → {fmt(tr?.arrival_time)} · {durationLabel(tr)}
+                      {fmtDash(tr?.departure_time)} → {fmtDash(tr?.arrival_time)} · {durationLabel(tr)}
                     </span>
                     {#if asText(tr?.number)}
                       <Button
@@ -784,4 +765,5 @@ import { journeysHref, trainHref } from '$lib/utils.js'
       hint="Pick source, destination and a date, then Search."
     />
   {/if}
+  <BottomSpacer />
 </section>

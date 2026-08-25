@@ -14,6 +14,7 @@
   import IntentForm from '$lib/components/chat/IntentForm.svelte'
   import { classify, executePlan, PROJECTORS, nextActionsFor, buildPlanFor } from '$lib/chat/gate.js'
   import { createMemory, remember } from '$lib/chat/memory.js'
+  import BottomSpacer from '$lib/components/BottomSpacer.svelte'
 
   const HISTORY_KEY = 'rc-assistant-history'
   const MAX_TURNS = 20
@@ -417,7 +418,7 @@
       <p class="flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
         Live-data answers about Indian Railways — served locally.
         {#if model}
-          <Badge variant="secondary" class="font-mono">{model}</Badge>
+          <Badge variant="secondary" class="data-num">{model}</Badge>
         {/if}
       </p>
     </div>
@@ -603,4 +604,4 @@
     </Card.Content>
   </Card.Root>
 </section>
-<div class="h-20 lg:hidden"></div>
+<BottomSpacer />

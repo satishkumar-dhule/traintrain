@@ -15,6 +15,9 @@
   import Gauge from 'lucide-svelte/icons/gauge'
   import AlertTriangle from 'lucide-svelte/icons/alert-triangle'
   import DataTable from '$lib/components/DataTable.svelte'
+  import TrackRule from '$lib/components/TrackRule.svelte'
+  import BottomSpacer from '$lib/components/BottomSpacer.svelte'
+  import { fmtUptime, humanBytes, fmtInt } from '$lib/format.js'
 
   let obs = $state({ phase: 'loading', data: null })
   let logsState = $state({ phase: 'loading', data: null })
@@ -63,28 +66,6 @@
   function num(v) {
     const n = Number(v)
     return Number.isFinite(n) ? n : null
-  }
-
-  function fmtUptime(s) {
-    const t = num(s)
-    if (t === null || t < 0) return '—'
-    const d = Math.floor(t / 86400)
-    const h = Math.floor((t % 86400) / 3600)
-    const m = Math.floor((t % 3600) / 60)
-    if (d >= 1) return `${d}d ${h % 24}h ${m}m`
-    if (h > 0) return `${h}h ${m}m`
-    return `${m}m ${Math.floor(t % 60)}s`
-  }
-
-  function humanBytes(n) {
-    const b = num(n)
-    if (b === null || b < 0) return '—'
-    if (b < 1024) return `${b} B`
-    const kb = b / 1024
-    if (kb < 1024) return `${kb.toFixed(1)} KB`
-    const mb = kb / 1024
-    if (mb < 1024) return `${mb.toFixed(1)} MB`
-    return `${(mb / 1024).toFixed(2)} GB`
   }
 
   function memMb(n) {
@@ -389,7 +370,7 @@
   ]
 
   const logCols = [
-    { key: 'time', label: 'Time', class: 'w-28', cellClass: 'font-mono text-xs max-lg:text-sm', value: (l) => tsTime(l?.ts), sortValue: (l) => num(l?.ts) },
+    { key: 'time', label: 'Time', class: 'w-28', cellClass: 'data-num text-xs max-lg:text-sm', value: (l) => tsTime(l?.ts), sortValue: (l) => num(l?.ts) },
     { key: 'level', label: 'Level', class: 'w-24', value: (l) => String(l?.level ?? '').toLowerCase() },
     { key: 'event', label: 'Event', cellClass: 'max-w-md truncate data-num text-xs', value: (l) => logLine(l) }
   ]
@@ -402,6 +383,11 @@
     rose: 'bg-signal-stop/10 text-signal-stop-ink',
     slate: 'bg-muted text-muted-foreground'
   }
+
+  // reusable compact card pattern (establishes reusability, single source)
+  const COMPACT_HERO_CARD = 'gap-1 py-2 lg:gap-2 lg:py-4'
+  const COMPACT_HERO_TITLE = 'text-[10px] font-medium uppercase tracking-wide text-muted-foreground lg:text-xs'
+  const COMPACT_HERO_VALUE = 'data-num text-lg font-semibold tabular-nums lg:text-2xl'
 
   function updatedTime(iso) {
     if (!iso) return ''
@@ -486,7 +472,7 @@
     </div>
   {/if}
 
-  <div class="track-rule" aria-hidden="true"></div>
+  <TrackRule />
 
   <div class="grid gap-2">
     <h2 class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Overview</h2>
@@ -504,11 +490,11 @@
     {:else}
       <div class="grid grid-cols-2 gap-2 lg:grid-cols-4 lg:gap-3">
         {#each heroTiles as t (t.label)}
-          <Card.Root class="gap-1 py-2 lg:gap-2 lg:py-4">
+          <Card.Root class={COMPACT_HERO_CARD}>
             <Card.Content class="flex items-start justify-between gap-2 px-3 lg:px-4">
               <div class="grid gap-0.5 lg:gap-1">
-                <Card.Title class="text-[10px] font-medium uppercase tracking-wide text-muted-foreground lg:text-xs">{t.label}</Card.Title>
-                <Card.Description class="font-mono text-lg font-semibold tabular-nums lg:text-2xl">{t.value}</Card.Description>
+                <Card.Title class={COMPACT_HERO_TITLE}>{t.label}</Card.Title>
+                <Card.Description class={COMPACT_HERO_VALUE}>{t.value}</Card.Description>
               </div>
               <span class={`rounded-md p-1.5 lg:p-2 ${toneChip[t.tone] ?? toneChip.slate}`} aria-hidden="true">
                 <t.icon class="size-3.5 lg:size-4" />
@@ -736,4 +722,4 @@
     </Card.Root>
   </div>
 </section>
-<div class="h-20 lg:hidden"></div>
+<BottomSpacer />

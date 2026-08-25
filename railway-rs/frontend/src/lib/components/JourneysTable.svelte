@@ -14,14 +14,13 @@ import DataTable from '$lib/components/DataTable.svelte'
 import EmptyState from '$lib/components/EmptyState.svelte'
 import RecentSearches from '$lib/components/RecentSearches.svelte'
 import { loadRecent, rememberRecent, clearStored } from '$lib/recent.js'
-import { TrainNumberBadge, RunsOnBadges, TrainDelayBadge } from '$lib/components/badges/index.js'
+import { TrainNumberBadge, RunsOnBadges, TrainDelayBadge, DAY_LETTERS, daysSummary, dayFlags } from '$lib/components/badges/index.js'
 import { availabilityHref, trainHref } from '$lib/utils.js'
+import { norm } from '$lib/format.js'
 import CalendarDaysIcon from 'lucide-svelte/icons/calendar-days'
 import CalendarClockIcon from 'lucide-svelte/icons/calendar-clock'
 
   let { src = '', dst = '', embedded = false } = $props()
-
-  const DAY_LETTERS = ['M', 'T', 'W', 'T', 'F', 'S', 'S']
 
   let from = $state('')
   let to = $state('')
@@ -42,16 +41,23 @@ import CalendarClockIcon from 'lucide-svelte/icons/calendar-clock'
     commit()
   }
 
-  function norm(v) {
-    return String(v ?? '').trim().toUpperCase()
-  }
-
   let fromCode = $derived(norm(from))
   let toCode = $derived(norm(to))
   let canSearch = $derived(fromCode.length > 0 && toCode.length > 0)
   let sameCode = $derived(canSearch && fromCode === toCode)
   let loading = $derived(phase === 'loading')
   let trains = $derived(Array.isArray(result?.trains) ? result.trains : [])
+
+  const runsCache = new Map()
+  function fmtRuns(runsOn) {
+    if (!Array.isArray(runsOn)) return ''
+    const k = runsOn.join(',')
+    if (runsCache.has(k)) return runsCache.get(k)
+    const flags = dayFlags(runsOn)
+    const out = daysSummary(flags ?? runsOn)
+    runsCache.set(k, out)
+    return out
+  }
 
   const cols = [
     {
@@ -78,15 +84,10 @@ import CalendarClockIcon from 'lucide-svelte/icons/calendar-clock'
       key: 'runs',
       label: 'Runs on',
       class: 'uppercase tracking-wide text-muted-foreground',
-      value: (t) => daysText(t.runs_on),
+      value: (t) => fmtRuns(t.runs_on),
       sortValue: (t) => (Array.isArray(t.runs_on) ? t.runs_on.filter(Boolean).length : null),
     },
   ]
-
-  function daysText(runsOn) {
-    if (!Array.isArray(runsOn)) return ''
-    return runsOn.map((on, i) => (on ? DAY_LETTERS[i] ?? '' : '-')).join('')
-  }
 
   function trainKey(t, i) {
     return `${i}-${t?.number ?? ''}-${t?.name ?? ''}`

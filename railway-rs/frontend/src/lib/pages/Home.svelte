@@ -20,6 +20,9 @@
   import ArrowLeftRight from 'lucide-svelte/icons/arrow-left-right'
   import XIcon from 'lucide-svelte/icons/x'
   import TriangleAlert from 'lucide-svelte/icons/triangle-alert'
+import TrackRule from '$lib/components/TrackRule.svelte'
+import BottomSpacer from '$lib/components/BottomSpacer.svelte'
+import { norm, todayISO, DATE_RE } from '$lib/format.js'
 
   const popularTrains = [12951, 12309, 12002]
 
@@ -35,12 +38,7 @@
   let pnrErr = $state('')
 
   // ---- Plan from where you are -------------------------------------------
-  function todayISO() {
-    const d = new Date()
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-  }
   const TODAY = todayISO()
-  const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
   let originCode = $state('')
   let originName = $state('')
@@ -127,10 +125,6 @@
     navigate(
       `/availability/${encodeURIComponent(originCode)}/${encodeURIComponent(destCode)}/${encodeURIComponent(journeyDate)}`
     )
-  }
-
-  function norm(v) {
-    return String(v ?? '').trim().toUpperCase()
   }
 
   function goTrain(t) {
@@ -343,7 +337,7 @@
     </div>
   </div>
 
-  <div class="track-rule" aria-hidden="true"></div>
+  <TrackRule />
 
   <Card.Root class="transition-colors hover:border-primary/50">
     <form class="grid grid-cols-[minmax(0,1fr)] gap-3 max-lg:gap-2 p-4 max-lg:p-3" onsubmit={submitPlan}>
@@ -539,4 +533,5 @@
     {/if}
     {/if}
   </section>
+  <BottomSpacer />
 </section>

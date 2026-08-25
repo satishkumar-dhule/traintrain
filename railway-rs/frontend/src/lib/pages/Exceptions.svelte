@@ -19,8 +19,9 @@
   import { ExceptionKindBadge } from '$lib/components/badges/index.js'
   import SignalDot from '$lib/components/SignalDot.svelte'
   import CalendarX2Icon from 'lucide-svelte/icons/calendar-x-2'
-
-  const RUN_MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
+  import TrackRule from '$lib/components/TrackRule.svelte'
+  import BottomSpacer from '$lib/components/BottomSpacer.svelte'
+  import { fmtExcDate } from '$lib/format.js'
 
   let trainFilter = $state('')
   let phase = $state('idle')
@@ -59,15 +60,6 @@
       loadExceptions(t)
     }
   })
-
-  function fmtExcDate(iso) {
-    const raw = String(iso ?? '').trim()
-    if (!raw) return '—'
-    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw)
-    if (!m) return raw
-    const mo = (RUN_MONTHS[Number(m[2]) - 1] ?? '').toUpperCase()
-    return mo ? `${m[3]}-${mo}-${m[1]}` : raw
-  }
 
   const excCols = [
     {
@@ -112,7 +104,7 @@
         <Breadcrumbs items={[{ label: 'Home', href: '/' }, { label: 'Service Alerts' }]} />
       {/snippet}
     </PageHeader>
-    <div aria-hidden="true" class="track-rule"></div>
+    <TrackRule />
   {/if}
 
   <Card.Root>
@@ -206,5 +198,5 @@
     />
   {/if}
 
-  <div class="h-20 lg:hidden"></div>
+  <BottomSpacer />
 </section>

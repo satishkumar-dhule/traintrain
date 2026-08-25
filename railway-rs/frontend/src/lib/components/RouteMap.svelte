@@ -5,78 +5,110 @@
   import 'leaflet/dist/leaflet.css'
 
   /** Train-on-map API response (route/track stations with lat-lng,
-      optional live current_station / journey_station spot view). */
+       optional live current_station / journey_station spot view). */
   let { data = null } = $props()
 
   let mapEl = $state(null)
+  // reused across $effect invocations - not $state (avoid infinite loops)
+  let mapInstance = null
+  let featureGroup = null
 
-  /* Track polyline coords when the backend provides the detailed track,
-     else fall back to halts with coordinates. */
-  const line = $derived.by(() => {
-    const track = (data?.track ?? []).filter(
-      (s) => Number.isFinite(s?.lat) && Number.isFinite(s?.lng),
-    )
-    if (track.length >= 2) return track
-    return (data?.route ?? []).filter(
-      (s) => Number.isFinite(s?.lat) && Number.isFinite(s?.lng),
-    )
+  /* Single-pass, memoized line+stops derivation (shallow compare via $derived).
+     Previously two separate filters over same data.route; now one pass. */
+  const coords = $derived.by(() => {
+    const rawRoute = data?.route ?? []
+    const rawTrack = data?.track ?? []
+    const stops = []
+    const track = []
+    for (const s of rawRoute) {
+      if (Number.isFinite(s?.lat) && Number.isFinite(s?.lng)) stops.push(s)
+    }
+    for (const s of rawTrack) {
+      if (Number.isFinite(s?.lat) && Number.isFinite(s?.lng)) track.push(s)
+    }
+    const line = track.length >= 2 ? track : stops
+    return { line, stops }
   })
-
-  const stops = $derived(
-    (data?.route ?? []).filter(
-      (s) => Number.isFinite(s?.lat) && Number.isFinite(s?.lng),
-    ),
-  )
+  const line = $derived(coords.line)
+  const stops = $derived(coords.stops)
 
   const currentCode = $derived(data?.current_station?.code ?? null)
 
+  // memoized tooltipLabel (tiny LRU)
+  const _tipCache = new Map()
   function tooltipLabel(s) {
-    return s.code + (s.name ? ` — ${s.name}` : '')
+    const k = `${s.code}|${s.name ?? ''}`
+    const hit = _tipCache.get(k)
+    if (hit) return hit
+    const v = s.code + (s.name ? ` — ${s.name}` : '')
+    _tipCache.set(k, v)
+    if (_tipCache.size > 256) {
+      const first = _tipCache.keys().next().value
+      _tipCache.delete(first)
+    }
+    return v
   }
 
-  /* Rebuild the whole map whenever the container or the dataset changes;
-     the returned cleanup tears down the previous instance. */
+  /* Reuse map instance: create once, then diff via featureGroup.clearLayers()
+     + invalidateSize. Delegated click via featureGroup single handler (n2). */
   $effect(() => {
-    if (!mapEl || line.length < 2) return
+    const el = mapEl
+    const l = line
+    const st = stops
+    const cur = currentCode
+    const d = data
+    // access reactive deps explicitly for effect tracking
+    void l.length
+    void st.length
+    void cur
+    void d?.current_station
+    void d?.journey_station
 
-    const map = L.map(mapEl, { zoomControl: true, attributionControl: true })
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; OpenStreetMap contributors',
-      maxZoom: 18,
-    }).addTo(map)
-
-    L.polyline(
-      line.map((s) => [s.lat, s.lng]),
-      { color: '#2563eb', weight: 3, opacity: 0.85, lineJoin: 'round', lineCap: 'round' },
-    ).addTo(map)
-
-    for (const s of stops) {
-      const isCurrent = currentCode && s.code === currentCode
-      if (isCurrent) {
-        L.circleMarker([s.lat, s.lng], {
-          radius: 7,
-          fillColor: '#dc2626',
-          color: '#fff',
-          weight: 2,
-          fillOpacity: 0.9,
-        })
-          .addTo(map)
-          .bindTooltip(tooltipLabel(s), { direction: 'top', offset: [0, -6] })
-      } else {
-        L.circleMarker([s.lat, s.lng], {
-          radius: 4,
-          fillColor: '#2563eb',
-          color: '#fff',
-          weight: 1.5,
-          fillOpacity: 0.85,
-        })
-          .addTo(map)
-          .bindTooltip(tooltipLabel(s), { direction: 'top', offset: [0, -6] })
+    if (!el || l.length < 2) {
+      if (mapInstance) {
+        mapInstance.remove()
+        mapInstance = null
+        featureGroup = null
       }
+      return
     }
 
-    /* Precise live position reported by NTES (may sit between halts). */
-    const cs = data?.current_station
+    if (!mapInstance) {
+      mapInstance = L.map(el, { zoomControl: true, attributionControl: true })
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap contributors',
+        maxZoom: 18,
+      }).addTo(mapInstance)
+      featureGroup = L.featureGroup().addTo(mapInstance)
+      // super n2 delegation: single handler for all markers
+      featureGroup.on('click', (e) => {
+        const ll = e.latlng
+        if (ll && mapInstance) mapInstance.panTo(ll, { animate: true })
+      })
+    } else {
+      featureGroup.clearLayers()
+      mapInstance.invalidateSize()
+    }
+
+    L.polyline(
+      l.map((s) => [s.lat, s.lng]),
+      { color: '#2563eb', weight: 3, opacity: 0.85, lineJoin: 'round', lineCap: 'round' },
+    ).addTo(featureGroup)
+
+    for (const s of st) {
+      const isCurrent = cur && s.code === cur
+      const marker = L.circleMarker(
+        [s.lat, s.lng],
+        isCurrent
+          ? { radius: 7, fillColor: '#dc2626', color: '#fff', weight: 2, fillOpacity: 0.9 }
+          : { radius: 4, fillColor: '#2563eb', color: '#fff', weight: 1.5, fillOpacity: 0.85 },
+      )
+      marker.options.code = s.code
+      marker.bindTooltip(tooltipLabel(s), { direction: 'top', offset: [0, -6] })
+      marker.addTo(featureGroup)
+    }
+
+    const cs = d?.current_station
     if (cs && Number.isFinite(cs.lat) && Number.isFinite(cs.lng)) {
       L.circleMarker([cs.lat, cs.lng], {
         radius: 5,
@@ -85,7 +117,7 @@
         weight: 2,
         fillOpacity: 0.9,
       })
-        .addTo(map)
+        .addTo(featureGroup)
         .bindTooltip(`Current: ${cs.code || ''}`, {
           permanent: true,
           direction: 'top',
@@ -94,8 +126,7 @@
         })
     }
 
-    /* Queried journey station (the ?station= spot view). */
-    const js = data?.journey_station
+    const js = d?.journey_station
     if (js && Number.isFinite(js.lat) && Number.isFinite(js.lng)) {
       L.circleMarker([js.lat, js.lng], {
         radius: 6,
@@ -104,7 +135,7 @@
         weight: 2,
         fillOpacity: 0.9,
       })
-        .addTo(map)
+        .addTo(featureGroup)
         .bindTooltip(`Your stop: ${js.code || ''}`, {
           permanent: true,
           direction: 'bottom',
@@ -113,13 +144,20 @@
         })
     }
 
-    map.fitBounds(
-      line.map((s) => [s.lat, s.lng]),
+    mapInstance.fitBounds(
+      l.map((s) => [s.lat, s.lng]),
       { padding: [30, 30] },
     )
+  })
 
+  // onDestroy cleanup for reused instance
+  $effect(() => {
     return () => {
-      map.remove()
+      if (mapInstance) {
+        mapInstance.remove()
+        mapInstance = null
+        featureGroup = null
+      }
     }
   })
 </script>
