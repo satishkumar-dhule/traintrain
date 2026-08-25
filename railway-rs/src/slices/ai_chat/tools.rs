@@ -125,6 +125,15 @@ pub fn registry() -> Vec<ToolDef> {
             }),
         },
         ToolDef {
+            name: "pnr_status",
+            description: "PNR booking status for a 10-digit PNR number: train, journey date, boarding stations and passenger current status. Use when the user provides a PNR.",
+            parameters: json!({
+                "type": "object",
+                "properties": {"pnr": {"type": "string", "description": "10-digit PNR number"}},
+                "required": ["pnr"]
+            }),
+        },
+        ToolDef {
             name: "search_rail",
             description: "Fuzzy-search the offline rail corpus for stations or trains (BM25 over ~20k documents). Use FIRST to resolve vague place/train names into exact codes/numbers before calling other tools.",
             parameters: json!({
@@ -329,6 +338,11 @@ async fn dispatch(state: &AppState, name: &str, args: &Value) -> Result<Value, A
                     .await?;
             Ok(project_chart(&dto))
         }
+        "pnr_status" => {
+            let pnr = require_pnr(args)?;
+            let dto = crate::slices::pnr::service::Service::get_status(state, &pnr, None).await?;
+            Ok(project_pnr_status(&dto))
+        }
         "search_rail" => {
             let query = require_str(args, "query")?;
             let limit = args
@@ -509,6 +523,35 @@ fn project_chart(dto: &crate::models::ChartResponse) -> Value {
     })
 }
 
+fn project_pnr_status(dto: &crate::models::PnrResponse) -> Value {
+    let passengers: Vec<Value> = dto
+        .passengers
+        .as_deref()
+        .unwrap_or(&[])
+        .iter()
+        .take(6)
+        .map(|p| {
+            json!({
+                "booking_status": p.booking_status,
+                "current_status": p.current_status,
+                "coach": p.coach,
+                "berth": p.berth,
+            })
+        })
+        .collect();
+    json!({
+        "pnr": dto.pnr,
+        "train_number": dto.train_number,
+        "train_name": dto.train_name,
+        "journey_date": dto.journey_date,
+        "from": dto.from.as_ref().map(|e| json!({"code": e.code, "name": e.name, "time": e.time})),
+        "to": dto.to.as_ref().map(|e| json!({"code": e.code, "name": e.name, "time": e.time})),
+        "passengers": passengers,
+        "data_source": dto.data_source,
+        "notice": dto.notice,
+    })
+}
+
 /// Suggested follow-ups derived from what the agent actually looked up this
 /// turn. Deterministic (no extra model call): each executed tool contributes
 /// at most one or two chips; duplicates are dropped, newest tools win, cap 4.
@@ -639,6 +682,22 @@ pub fn next_actions(results: &[(String, Value)]) -> Vec<(String, String)> {
                     );
                 }
             }
+            "pnr_status" => {
+                let num = v["train_number"].as_str().unwrap_or("");
+                if !num.is_empty() {
+                    push(
+                        &mut out,
+                        format!("Track {num}"),
+                        format!("live status of {num}"),
+                    );
+                } else {
+                    push(
+                        &mut out,
+                        "Live status".into(),
+                        "live status of 12951".into(),
+                    );
+                }
+            }
             _ => {}
         }
     }
@@ -764,10 +823,8 @@ fn resolve_journey_date(args: &Value) -> Result<String, AppError> {
             if raw.is_empty() || raw.eq_ignore_ascii_case("today") {
                 return Ok(crate::core::time::today_ist());
             }
-            for fmt in ["%Y-%m-%d", "%Y%m%d", "%d-%m-%Y", "%d/%m/%Y"] {
-                if let Ok(d) = chrono::NaiveDate::parse_from_str(raw, fmt) {
-                    return Ok(d.to_string());
-                }
+            if let Some(d) = crate::core::time::parse_date(raw) {
+                return Ok(d.to_string());
             }
             Err(AppError::bad_request(format!(
                 "Invalid date: {raw}. Use YYYY-MM-DD, DD-MM-YYYY or YYYYMMDD."
@@ -786,11 +843,22 @@ fn require_str(args: &Value, key: &str) -> Result<String, AppError> {
 
 fn require_train(args: &Value) -> Result<String, AppError> {
     let t = require_str(args, "train")?;
-    if t.len() == 5 && t.bytes().all(|b| b.is_ascii_digit()) && t != "00000" {
+    if crate::core::validate::is_valid_train_5(&t) {
         Ok(t)
     } else {
         Err(AppError::bad_request(format!(
             "'{t}' is not a valid 5-digit train number"
+        )))
+    }
+}
+
+fn require_pnr(args: &Value) -> Result<String, AppError> {
+    let p = require_str(args, "pnr")?;
+    if crate::core::validate::is_valid_pnr(&p) {
+        Ok(p)
+    } else {
+        Err(AppError::bad_request(format!(
+            "'{p}' is not a valid 10-digit PNR number"
         )))
     }
 }

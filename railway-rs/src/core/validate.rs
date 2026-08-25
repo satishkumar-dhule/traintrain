@@ -1,4 +1,3 @@
-use crate::core::error::AppError;
 pub fn is_valid_train_1_8(train: &str) -> bool { !train.is_empty() && train.len() <= 8 && train.chars().all(|c| c.is_ascii_digit()) }
 pub fn is_valid_train_5(train: &str) -> bool { train.len() == 5 && train.chars().all(|c| c.is_ascii_digit()) && train != "00000" }
 pub fn is_valid_train_4_5(train: &str) -> bool { (4..=5).contains(&train.len()) && train.chars().all(|c| c.is_ascii_digit()) }

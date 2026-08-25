@@ -68,7 +68,7 @@ impl Default for Config {
             static_dir: PathBuf::from("static"),
             http_timeout: Duration::from_secs(15),
             cache_ttl: Duration::from_secs(120),
-            user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36".to_string(),
+            user_agent: crate::core::source::BROWSER_UA.to_string(),
             railyatri_base: "https://www.railyatri.in".to_string(),
             etrain_base: "https://etrain.info".to_string(),
             ntes_base: "https://enquiry.indianrail.gov.in".to_string(),

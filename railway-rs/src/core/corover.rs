@@ -23,9 +23,7 @@ pub const SOURCE_API: &str = "corover-api";
 /// Source id reported for calls against the `cdn.corover.ai` bucket.
 pub const SOURCE_CDN: &str = "corover-cdn";
 
-/// Desktop Chrome UA; the CoRover API sits behind edge bot filtering, so a
-/// browser-like UA is sent even though these endpoints are headerless.
-const BROWSER_UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
+use crate::core::source::BROWSER_UA;
 
 /// Pause before the single retry of a transient failure (matches `HttpClient`).
 const RETRY_DELAY: Duration = Duration::from_millis(400);
