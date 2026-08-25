@@ -163,10 +163,10 @@
       </div>
     {/if}
 
-    <div class="flex min-w-0 items-center gap-1">
+    <div class="flex min-w-0 items-start gap-1">
       {#if sortableCols.length > 0}
         <div
-          class="flex min-w-0 flex-1 snap-x gap-1 overflow-x-auto pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          class="flex min-w-0 flex-1 flex-wrap gap-1 pb-0.5"
           role="group"
           aria-label="Sort by"
         >
@@ -176,21 +176,34 @@
               type="button"
               aria-pressed={activeSort}
               onclick={() => toggleSort(col)}
-              class={`flex min-h-11 shrink-0 snap-start items-center gap-1.5 rounded-full border px-4 text-sm font-medium transition-colors ${
+              title={col.label}
+              class={`flex min-h-8 shrink-0 items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors max-lg:min-h-8 max-lg:px-2.5 max-lg:text-xs ${
                 activeSort
                   ? 'border-primary bg-primary text-primary-foreground'
                   : 'border-border bg-card text-muted-foreground hover:bg-muted hover:text-foreground'
               }`}
             >
-              {col.label}
+              <span class="max-sm:hidden">{col.label}</span>
+              <span class="hidden max-sm:inline" aria-hidden="true">
+                {#if col.label.toLowerCase().includes('station') }Sta
+                {:else if col.label.toLowerCase().includes('sched') }Sch
+                {:else if col.label.toLowerCase().includes('actual') }Act
+                {:else if col.label.toLowerCase().includes('delay') }Dly
+                {:else if col.label.toLowerCase().includes('status') }St
+                {:else if col.label.toLowerCase().includes('arrival') }Arr
+                {:else if col.label.toLowerCase().includes('departure') }Dep
+                {:else if col.label.toLowerCase().includes('platform') }PF
+                {:else}{col.label.slice(0,3)}
+                {/if}
+              </span>
               {#if activeSort}
                 {#if sortDir === 1}
-                  <ArrowUpIcon class="size-3.5" />
+                  <ArrowUpIcon class="size-3" />
                 {:else}
-                  <ArrowDownIcon class="size-3.5" />
+                  <ArrowDownIcon class="size-3" />
                 {/if}
               {:else}
-                <ArrowUpDownIcon class="size-3.5 opacity-40" />
+                <ArrowUpDownIcon class="size-3 opacity-40" />
               {/if}
             </button>
           {/each}

@@ -340,6 +340,20 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
     return rel ? `${rel} · ${short}` : short
   }
 
+  /* Short label for mobile: fits 3-4 items in 1 line without wrapping. */
+  function runShortLabel(sd) {
+    const d = parseRunDate(sd)
+    if (!d) return String(sd ?? '').trim() || 'Run'
+    const now = new Date()
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    const target = new Date(d.getFullYear(), d.getMonth(), d.getDate())
+    const diff = Math.round((target - today) / 86400000)
+    if (diff === 0) return 'Today'
+    if (diff === 1) return 'Tmrw'
+    if (diff === -1) return 'Yday'
+    return `${d.getDate()} ${d.toLocaleDateString('en-US', { month: 'short' })}`
+  }
+
   /* The run NTES lands on by default: the instance whose start date is the
      train's reported train_start_date (the active run), else the first. */
   function defaultRunIdx(d) {
@@ -711,12 +725,14 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
   {/if}
 
   <Tabs.Root class="min-w-0" bind:value={activeTab} onValueChange={onTabChange}>
-    <Tabs.List class="w-full justify-start overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden max-lg:h-8">
-      <Tabs.Trigger value="status" class="max-lg:h-7 max-lg:px-2 max-lg:text-xs"><ActivityIcon class="mr-1 size-3 max-lg:mr-0.5 max-lg:size-3.5" />Status</Tabs.Trigger>
-      <Tabs.Trigger value="schedule" class="max-lg:h-7 max-lg:px-2 max-lg:text-xs"><CalendarClockIcon class="mr-1 size-3 max-lg:mr-0.5 max-lg:size-3.5" />Schedule</Tabs.Trigger>
-      <Tabs.Trigger value="avg" class="max-lg:h-7 max-lg:px-2 max-lg:text-xs"><ChartColumnIcon class="mr-1 size-3 max-lg:mr-0.5 max-lg:size-3.5" />Avg delay</Tabs.Trigger>
-      <Tabs.Trigger value="map" class="max-lg:h-7 max-lg:px-2 max-lg:text-xs"><MapIcon class="mr-1 size-3 max-lg:mr-0.5 max-lg:size-3.5" />Map</Tabs.Trigger>
-      <Tabs.Trigger value="exceptions" class="max-lg:h-7 max-lg:px-2 max-lg:text-xs"><CalendarX2Icon class="mr-1 size-3 max-lg:mr-0.5 max-lg:size-3.5" />Exceptions</Tabs.Trigger>
+    <Tabs.List
+      class="w-full justify-start overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden max-lg:grid max-lg:grid-cols-5 max-lg:gap-1 max-lg:overflow-visible max-lg:h-auto max-lg:p-1 max-lg:bg-muted max-lg:rounded-lg max-lg:border"
+    >
+      <Tabs.Trigger value="status" title="Status" aria-label="Live status" class="max-lg:justify-center max-lg:px-1 max-lg:py-2.5 max-lg:h-9"><ActivityIcon class="size-4 max-lg:size-5 shrink-0" /><span class="max-lg:hidden">Status</span></Tabs.Trigger>
+      <Tabs.Trigger value="schedule" title="Schedule" aria-label="Schedule" class="max-lg:justify-center max-lg:px-1 max-lg:py-2.5 max-lg:h-9"><CalendarClockIcon class="size-4 max-lg:size-5 shrink-0" /><span class="max-lg:hidden">Schedule</span></Tabs.Trigger>
+      <Tabs.Trigger value="avg" title="Avg delay" aria-label="Avg delay" class="max-lg:justify-center max-lg:px-1 max-lg:py-2.5 max-lg:h-9"><ChartColumnIcon class="size-4 max-lg:size-5 shrink-0" /><span class="max-lg:hidden">Avg delay</span></Tabs.Trigger>
+      <Tabs.Trigger value="map" title="Map" aria-label="Map" class="max-lg:justify-center max-lg:px-1 max-lg:py-2.5 max-lg:h-9"><MapIcon class="size-4 max-lg:size-5 shrink-0" /><span class="max-lg:hidden">Map</span></Tabs.Trigger>
+      <Tabs.Trigger value="exceptions" title="Exceptions" aria-label="Exceptions" class="max-lg:justify-center max-lg:px-1 max-lg:py-2.5 max-lg:h-9"><CalendarX2Icon class="size-4 max-lg:size-5 shrink-0" /><span class="max-lg:hidden">Exceptions</span></Tabs.Trigger>
     </Tabs.List>
 
     <Tabs.Content value="status" class="mt-3 grid gap-4">
@@ -763,18 +779,22 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
           </Card.Header>
           <Card.Content class="grid gap-3">
             {#if runInstances.length > 1}
-              <div class="flex flex-wrap items-center gap-1.5" role="group" aria-label="Train run date">
+              <div
+                class="flex w-full items-center gap-0.5 overflow-hidden rounded-lg border bg-muted p-0.5 max-lg:gap-0.5"
+                role="group"
+                aria-label="Train run date"
+              >
                 {#each runInstances as inst, i (inst.start_date ?? i)}
-                  <Button
+                  <button
                     type="button"
-                    size="sm"
-                    variant={i === runIdx ? 'default' : 'outline'}
                     aria-pressed={i === runIdx}
                     onclick={() => pickRun(i)}
-                    class="data-num"
+                    title={runLabel(inst.start_date)}
+                    class={`data-num min-w-0 flex-1 truncate rounded-md px-2 py-1.5 text-xs font-medium transition-colors max-lg:px-1 max-lg:py-2 max-lg:text-[11px] ${i === runIdx ? 'bg-card text-foreground shadow-sm border' : 'text-muted-foreground hover:text-foreground hover:bg-card/50'}`}
                   >
-                    {runLabel(inst.start_date)}
-                  </Button>
+                    <span class="hidden sm:inline">{runLabel(inst.start_date)}</span>
+                    <span class="sm:hidden">{runShortLabel(inst.start_date)}</span>
+                  </button>
                 {/each}
               </div>
             {/if}

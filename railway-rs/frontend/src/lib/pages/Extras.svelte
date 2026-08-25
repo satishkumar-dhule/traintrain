@@ -264,9 +264,9 @@ import SignalDot from '$lib/components/SignalDot.svelte'
   <div aria-hidden="true" class="track-rule"></div>
 
   <Tabs.Root class="min-w-0" bind:value={tab} onValueChange={onTabChange}>
-    <Tabs.List class="w-full justify-start overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-      <Tabs.Trigger value="heritage"><LandmarkIcon class="mr-2 size-4" />Heritage</Tabs.Trigger>
-      <Tabs.Trigger value="parcel"><PackageIcon class="mr-2 size-4" />Parcel</Tabs.Trigger>
+    <Tabs.List class="w-full justify-start overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden max-lg:grid max-lg:grid-cols-2 max-lg:gap-1 max-lg:overflow-visible max-lg:overflow-x-visible max-lg:h-auto max-lg:p-1 max-lg:bg-muted max-lg:rounded-lg max-lg:border">
+      <Tabs.Trigger value="heritage" class="max-lg:justify-center max-lg:py-2.5"><LandmarkIcon class="size-4 max-lg:size-[18px] shrink-0" /><span class="hidden sm:inline ml-2">Heritage</span><span class="sm:hidden ml-1 text-xs">Heritage</span></Tabs.Trigger>
+      <Tabs.Trigger value="parcel" class="max-lg:justify-center max-lg:py-2.5"><PackageIcon class="size-4 max-lg:size-[18px] shrink-0" /><span class="hidden sm:inline ml-2">Parcel</span><span class="sm:hidden ml-1 text-xs">Parcel</span></Tabs.Trigger>
     </Tabs.List>
 
     <Tabs.Content value="heritage" class="mt-4 grid gap-4">

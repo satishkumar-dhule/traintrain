@@ -10,6 +10,8 @@
   import DateStrip from '$lib/components/DateStrip.svelte'
   import Breadcrumbs from '$lib/components/Breadcrumbs.svelte'
   import RouteContextBar from '$lib/components/RouteContextBar.svelte'
+  import JourneysTable from '$lib/pages/JourneysTable.svelte'
+  import Availability from '$lib/pages/Availability.svelte'
 
   let { src = '', dst = '', date = '', tab = 'trains' } = $props()
 
@@ -100,9 +102,9 @@
 
 <!-- Tabs -->
 <Tabs.Root bind:value={activeTab} class="mt-3">
-  <Tabs.List>
-    <Tabs.Trigger value="trains">Trains</Tabs.Trigger>
-    <Tabs.Trigger value="availability">Availability</Tabs.Trigger>
+  <Tabs.List class="max-lg:grid max-lg:grid-cols-2 max-lg:gap-1 max-lg:h-auto max-lg:p-1 max-lg:bg-muted max-lg:rounded-lg max-lg:border max-lg:overflow-visible max-lg:overflow-x-visible">
+    <Tabs.Trigger value="trains" class="max-lg:justify-center max-lg:text-xs max-lg:py-2.5">Trains</Tabs.Trigger>
+    <Tabs.Trigger value="availability" class="max-lg:justify-center max-lg:text-xs max-lg:py-2.5">Availability</Tabs.Trigger>
   </Tabs.List>
 
   <Tabs.Content value="trains">

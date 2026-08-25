@@ -7,23 +7,41 @@
   import { Button } from '$lib/components/ui/button/index.js'
   import { Label } from '$lib/components/ui/label/index.js'
   import * as Tabs from '$lib/components/ui/tabs/index.js'
+  import * as Select from '$lib/components/ui/select/index.js'
   import { Skeleton } from '$lib/components/ui/skeleton/index.js'
-  import EmptyState from '$lib/components/EmptyState.svelte'
-  import RecentSearches from '$lib/components/RecentSearches.svelte'
-  import { loadRecent, rememberRecent, clearStored } from '$lib/recent.js'
-  import PageHeader from '$lib/components/PageHeader.svelte'
-  import Breadcrumbs from '$lib/components/Breadcrumbs.svelte'
-  import RouteContextBar from '$lib/components/RouteContextBar.svelte'
-  import EntityChip from '$lib/components/EntityChip.svelte'
-  import ResultMeta from '$lib/components/ResultMeta.svelte'
-  import StatPill from '$lib/components/StatPill.svelte'
-  import { pickNearbyStation } from '$lib/nearby.svelte.js'
+  import * as Alert from '$lib/components/ui/alert/index.js'
+import AutoCompleteInput from '$lib/components/AutoCompleteInput.svelte'
+import DateStrip from '$lib/components/DateStrip.svelte'
+import DataTable from '$lib/components/DataTable.svelte'
+import EmptyState from '$lib/components/EmptyState.svelte'
+import RecentSearches from '$lib/components/RecentSearches.svelte'
+import { loadRecent, rememberRecent, clearStored } from '$lib/recent.js'
+import PageHeader from '$lib/components/PageHeader.svelte'
+import SignalDot from '$lib/components/SignalDot.svelte'
+import Breadcrumbs from '$lib/components/Breadcrumbs.svelte'
+import RouteContextBar from '$lib/components/RouteContextBar.svelte'
+import EntityChip from '$lib/components/EntityChip.svelte'
+import ResultMeta from '$lib/components/ResultMeta.svelte'
+import StatPill from '$lib/components/StatPill.svelte'
+import { pickNearbyStation } from '$lib/nearby.svelte.js'
+import {
+  StationCodeBadge,
+  DelayBadge,
+  TrainDelayBadge,
+  RunsOnBadges,
+  StatusBadge,
+  CountBadge
+} from '$lib/components/badges/index.js'
+  import ActivityIcon from 'lucide-svelte/icons/activity'
+  import CalendarClockIcon from 'lucide-svelte/icons/calendar-clock'
+  import MapPinIcon from 'lucide-svelte/icons/map-pin'
 
-  let { code = '' } = $props()
+  let { code = '', view = '' } = $props()
 
   let query = $state('')
   let hours = $state('2')
   let dateInput = $state('')
+  let destInput = $state('')
   let tab = $state('live')
   let committedCode = $state('')
 
@@ -38,13 +56,28 @@
   let stationInfo = $state(null)
   let infoFetched = ''
 
+  // Nearby uses the shared blocking dialog (`nearby.svelte.js`): locate ->
+  // list stations around the user -> jump straight to that board.
+  async function pickNearbyBoard() {
+    const picked = await pickNearbyStation()
+    if (!picked || !picked.code) return
+    onPickStation({ code: picked.code })
+  }
+
+  let liveKey = ''
+  let ttKey = ''
+
   const RECENT_KEY = 'rc-station-recent'
   let recent = $state(loadRecent(RECENT_KEY))
 
   function rememberStation(c, d) {
     if (!c) return
     const name = String(d?.station_name ?? '').trim()
-    recent = rememberRecent(RECENT_KEY, { id: c, label: c, sub: name }, (r) => r && typeof r?.id === 'string')
+    recent = rememberRecent(
+      RECENT_KEY,
+      { id: c, label: c, sub: name },
+      (r) => r && typeof r?.id === 'string',
+    )
   }
 
   const MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
@@ -389,9 +422,9 @@
   <div class="track-rule" aria-hidden="true"></div>
 
   <Tabs.Root class="min-w-0" bind:value={tab} onValueChange={onTabChange}>
-    <Tabs.List class="w-full justify-start overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden max-lg:h-9">
-      <Tabs.Trigger value="live" class="max-lg:px-3 max-lg:text-xs"><ActivityIcon class="mr-1.5 size-3.5 max-lg:mr-1 max-lg:size-3" />Live</Tabs.Trigger>
-      <Tabs.Trigger value="timetable" class="max-lg:px-3 max-lg:text-xs"><CalendarClockIcon class="mr-1.5 size-3.5 max-lg:mr-1 max-lg:size-3" />Timetable</Tabs.Trigger>
+    <Tabs.List class="w-full justify-start overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden max-lg:grid max-lg:grid-cols-2 max-lg:gap-1 max-lg:overflow-visible max-lg:overflow-x-visible max-lg:h-auto max-lg:p-1 max-lg:bg-muted max-lg:rounded-lg max-lg:border">
+      <Tabs.Trigger value="live" class="max-lg:justify-center max-lg:px-1 max-lg:py-2 max-lg:h-auto max-lg:text-[10px]"><ActivityIcon class="size-4 max-lg:size-[18px] shrink-0" /><span class="max-lg:hidden ml-1.5">Live</span><span class="hidden max-lg:inline ml-1 text-[10px] font-medium">Live</span></Tabs.Trigger>
+      <Tabs.Trigger value="timetable" class="max-lg:justify-center max-lg:px-1 max-lg:py-2 max-lg:h-auto max-lg:text-[10px]"><CalendarClockIcon class="size-4 max-lg:size-[18px] shrink-0" /><span class="max-lg:hidden ml-1.5">Timetable</span><span class="hidden max-lg:inline ml-1 text-[10px] font-medium">Time</span></Tabs.Trigger>
     </Tabs.List>
 
     <Tabs.Content value="live" class="mt-3 grid gap-4">

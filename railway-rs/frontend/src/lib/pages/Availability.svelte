@@ -472,7 +472,7 @@ import { journeysHref, trainHref } from '$lib/utils.js'
         hint="No availability data returned for this route and date."
       />
     {:else}
-      <div class="rounded-lg border bg-card px-3 py-1.5 max-lg:px-2.5">
+      <div class="rounded-lg border bg-card px-3 py-1.5 max-lg:px-2.5 max-lg:hidden">
         <div
           class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs"
           role="status"
@@ -516,7 +516,7 @@ import { journeysHref, trainHref } from '$lib/utils.js'
           {/if}
         </div>
 
-        <div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 border-t pt-1.5">
+        <div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 border-t pt-1.5 max-lg:hidden">
           <Button
             type="button"
             variant={availableOnly ? 'default' : 'outline'}

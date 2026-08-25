@@ -14,8 +14,8 @@
   const empty = $derived(!src && !fresh && !cached);
 </script>
 
-{#if !empty}
-  <span class={`inline-flex flex-wrap items-center gap-1.5 ${className}`} {...rest}>
+ {#if !empty}
+  <span class={`inline-flex flex-wrap items-center gap-1.5 max-lg:hidden ${className}`} {...rest}>
     {#if fresh}
       <StatusBadge tone="info" size="xs" title="How current this data is">{fresh}</StatusBadge>
     {/if}
