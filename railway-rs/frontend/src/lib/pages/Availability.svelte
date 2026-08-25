@@ -58,6 +58,15 @@ import { asText, fmtDash, numOrNull, todayISO, DATE_RE } from '$lib/format.js'
     ['chance', 'Confirm chance']
   ]
   const CLASS_ORDER = ['1A', 'EA', 'EC', '2A', '3A', '3E', 'FC', 'CC', 'SL', '2S', 'UR']
+  /* Kind → tone mirrors AvailabilityChip so a status reads the same color on
+     every surface (cards, desktop chips, matrix). */
+  const CHIP_TONES = {
+    available: STATUS_TONES.success,
+    rac: STATUS_TONES.info,
+    waitlist: STATUS_TONES.warning,
+    closed: STATUS_TONES.danger,
+    other: STATUS_TONES.neutral
+  }
   const SOURCES = [
     ['auto', 'Auto'],
     ['paytm', 'Paytm'],
@@ -318,14 +327,7 @@ import { asText, fmtDash, numOrNull, todayISO, DATE_RE } from '$lib/format.js'
 
 {#snippet avlChip(row)}
   {@const kind = availabilityStatusKind(row?.status)}
-  {@const tone =
-    kind === 'available'
-      ? STATUS_TONES.success
-      : kind === 'rac'
-        ? STATUS_TONES.warning
-        : kind === 'waitlist' || kind === 'closed'
-          ? STATUS_TONES.danger
-          : STATUS_TONES.neutral}
+  {@const tone = CHIP_TONES[kind] ?? STATUS_TONES.neutral}
   {@const fare = numOrNull(row?.fare)}
   <div class={`overflow-hidden rounded-md border px-2 py-1 ${tone}`}>
     <div class="flex items-baseline justify-between gap-2">
@@ -333,7 +335,7 @@ import { asText, fmtDash, numOrNull, todayISO, DATE_RE } from '$lib/format.js'
         <span class="data-num text-[11px] max-lg:text-xs font-semibold">{fmtDash(classCode(row))}</span>
         {#if quotaLabel(row)}
           <span
-            class="rounded border border-border bg-muted px-1 text-[10px] leading-tight font-medium tracking-wide uppercase text-muted-foreground"
+            class="rounded border border-border bg-muted px-1 text-[9px] leading-tight font-medium tracking-wide uppercase text-muted-foreground"
             title={`${quotaLabel(row)} quota`}
           >
             {quotaLabel(row)}
@@ -342,8 +344,11 @@ import { asText, fmtDash, numOrNull, todayISO, DATE_RE } from '$lib/format.js'
       </span>
       <span class="data-num text-[11px] max-lg:text-xs">{fare != null ? `₹${fare.toLocaleString('en-IN')}` : ''}</span>
     </div>
-    <div class="flex min-w-0 items-center gap-1 text-[10px] max-lg:text-sm max-lg:font-medium">
-      <span class="size-1.5 shrink-0 rounded-full bg-current opacity-80"></span>
+    <div class="flex min-w-0 items-center gap-1.5 text-[10px] max-lg:text-sm max-lg:font-medium">
+      <SignalDot
+        tone={kind === 'available' ? 'go' : kind === 'waitlist' ? 'hold' : kind === 'closed' ? 'stop' : 'idle'}
+        class={kind === 'rac' ? 'bg-primary text-primary' : undefined}
+      />
       <span class="min-w-0 truncate font-medium" title={asText(row?.status)}>{asText(row?.status) || '—'}</span>
     </div>
     {@render chanceBar(row)}
@@ -543,7 +548,7 @@ import { asText, fmtDash, numOrNull, todayISO, DATE_RE } from '$lib/format.js'
               class="inline-flex min-h-11 items-center px-2 -mx-2 text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
               onclick={resetFilters}
             >
-              Reset ({filteredTrains.length}/{trains.length})
+              Reset (<span class="data-num">{filteredTrains.length}/{trains.length}</span>)
             </button>
           {/if}
           <div class="ml-auto flex items-center gap-2 min-w-0 max-lg:flex-wrap">

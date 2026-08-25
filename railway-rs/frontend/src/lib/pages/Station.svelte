@@ -98,13 +98,13 @@ import { norm, fmtDash, numOrNull, ntesDate } from '$lib/format.js'
     live?.station ?? timetable?.station_name ?? timetable?.station ?? ''
   )
 
-  const infoMeta = $derived(
+  const infoRows = $derived(
     stationInfo
-      ? [stationInfo.district, stationInfo.state]
-          .map((s) => String(s ?? '').trim())
-          .filter(Boolean)
-          .join(' · ')
-      : ''
+      ? [
+          { label: 'District', value: String(stationInfo.district ?? '').trim() },
+          { label: 'State', value: String(stationInfo.state ?? '').trim() },
+        ].filter((r) => r.value)
+      : []
   )
 
   async function loadStationInfo(c) {
@@ -298,8 +298,8 @@ import { norm, fmtDash, numOrNull, ntesDate } from '$lib/format.js'
     {#if infoNames.length}
       <p class="text-sm text-muted-foreground">{infoNames.join(' · ')}</p>
     {/if}
-    {#if infoMeta}
-      <p class="text-xs text-muted-foreground">{infoMeta}</p>
+    {#if infoRows.length}
+      <KeyValueGrid rows={infoRows} class="max-w-sm pt-1" />
     {/if}
   {/snippet}
   <PageShell
@@ -341,7 +341,7 @@ import { norm, fmtDash, numOrNull, ntesDate } from '$lib/format.js'
       <div class="flex items-end gap-2 max-lg:w-full">
         <Select.Root type="single" bind:value={hours}>
           <Select.Trigger class="w-28 sm:w-32 max-lg:h-10" aria-label="Time window">
-            {hours} hour{hours === '1' ? '' : 's'}
+            <span class="data-num">{hours}</span> hour{hours === '1' ? '' : 's'}
           </Select.Trigger>
           <Select.Content>
             {#each ['1', '2', '3', '4'] as h (h)}
@@ -414,7 +414,7 @@ import { norm, fmtDash, numOrNull, ntesDate } from '$lib/format.js'
             <Card.Title class="flex flex-wrap items-center gap-2">
               <SignalDot tone="go" pulse />
               <StationCodeBadge code={live.station} link={false} />
-              <span>departures &amp; arrivals</span>
+              <span class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">departures &amp; arrivals</span>
             </Card.Title>
             <ResultMeta source={live.data_source}>
               <StatPill label="Trains" value={live.trains?.length ?? 0} />
@@ -457,9 +457,9 @@ import { norm, fmtDash, numOrNull, ntesDate } from '$lib/format.js'
         {#if timetable}
           <Card.Root>
           <Card.Header class="flex flex-col items-start justify-between gap-3 space-y-0 sm:flex-row sm:items-center">
-            <Card.Title>
-              {#if timetable.station_name}{timetable.station_name}{:else}<span class="data-num tracking-[0.14em] uppercase">{timetable.station ?? '—'}</span>{/if}
-              timetable
+            <Card.Title class="flex flex-wrap items-baseline gap-x-2">
+              {#if timetable.station_name}<span class="min-w-0 break-words">{timetable.station_name}</span>{:else}<span class="signage data-num tracking-[0.14em]">{timetable.station ?? '—'}</span>{/if}
+              <span class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">timetable</span>
             </Card.Title>
             <ResultMeta source={timetable.data_source}>
               <StatPill label="Trains" value={timetable.total ?? timetable.trains?.length ?? 0} />
