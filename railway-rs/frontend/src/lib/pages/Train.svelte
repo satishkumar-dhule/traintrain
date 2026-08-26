@@ -344,9 +344,26 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
     return 0
   }
 
-  function pickRun(i) {
+  async function pickRun(i) {
     runTouched = true
     runIdx = i
+    const inst = runInstances[i]
+    if (!inst?.start_date) return
+    const d = normDay(inst.start_date)
+    if (!d || !committed) return
+    // Honest per-run fetch: the backend's select_run_for_date will
+    // overlay that instance's real timeline (past run's actuals vs
+    // upcoming run's "at origin") so switching dates is never faked.
+    const t = committed
+    const res = await api(`/rail-api/live-status?train=${encodeURIComponent(t)}&date=${encodeURIComponent(d)}`)
+    if (`${committed}` !== `${t}`) return
+    if (res.ok) {
+      data = res.data
+      // Keep the picked tab aligned if the new payload reorders instances
+      const newIdx = Array.isArray(data.instances) ? data.instances.findIndex((x) => normDay(x.start_date) === d) : -1
+      if (newIdx >= 0) runIdx = newIdx
+      runTouched = true
+    }
   }
 
   const runInstances = $derived(data?.instances ?? [])

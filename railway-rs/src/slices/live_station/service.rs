@@ -51,50 +51,91 @@ impl Service {
         let state_ntes = state.clone();
         let state_ry = state.clone();
 
+        // Super fan-out N²: N=2 logical sources (NTES, Railyatri) each with
+        // 2 delegates (with/without destination filter), plus a static local
+        // fallback (800ms delayed so live can win when healthy, but static wins
+        // in 800ms when NTES is IP-blocked in Singapore instead of 5s).
+        let station_ntes1 = station.to_string();
+        let station_ntes2 = station.to_string();
+        let station_ry1 = station.to_string();
+        let station_ry2 = station.to_string();
+        let station_static = station.to_string();
+        let hours_ntes1 = hours;
+        let hours_ntes2 = hours;
+        let hours_ry1 = hours;
+        let hours_ry2 = hours;
+        let hours_static = hours;
+        let name_ntes1 = name_ntes.clone();
+        let name_ntes2 = name_ntes.clone();
+        let dest_pair1 = dest_pair_ntes.clone();
+        let dest_pair2 = dest_pair_ntes.clone();
+        let dest_ry1 = dest_ry.clone();
+        let dest_ry2 = dest_ry.clone();
+        let dest_static = destination.map(|s| s.to_string());
+        let state_ntes1 = state.clone();
+        let state_ntes2 = state.clone();
+        let state_ry1 = state.clone();
+        let state_ry2 = state.clone();
+        let state_static = state.clone();
         let candidates = vec![
             Candidate::new(crate::core::source::metric::NTES, move || {
-                let s = state_ntes.clone();
-                let st = station_ntes.clone();
-                let n = name_ntes.clone();
-                let d_owned = dest_pair_ntes.clone();
-                let h = hours_ntes;
+                let s = state_ntes1.clone();
+                let st = station_ntes1.clone();
+                let n = name_ntes1.clone();
+                let d = dest_pair1.clone();
+                let h = hours_ntes1;
                 async move {
-                    let d_ref = d_owned.as_ref().map(|(a, b)| (a.as_str(), b.as_str()));
+                    let d_ref = d.as_ref().map(|(a, b)| (a.as_str(), b.as_str()));
                     s.ntes_web.live_station(&st, &n, h, d_ref).await
                 }
             }),
+            Candidate::new(crate::core::source::metric::NTES, move || {
+                let s = state_ntes2.clone();
+                let st = station_ntes2.clone();
+                let n = name_ntes2.clone();
+                let h = hours_ntes2;
+                async move { s.ntes_web.live_station(&st, &n, h, None).await }
+            }),
             Candidate::new(crate::core::source::metric::RAILYATRI, move || {
-                let s = state_ry.clone();
-                let st = station_ry.clone();
-                let d = dest_ry.clone();
-                let h = hours_ry;
+                let s = state_ry1.clone();
+                let st = station_ry1.clone();
+                let d = dest_ry1.clone();
+                let h = hours_ry1;
                 async move { railyatri_live_station(&s, &st, h, d.as_deref()).await }
             }),
-        ];
-
-        // Fan-out with static local fallback (fool-proof): if both live
-        // sources are IP-blocked / 404, serve a static board from the local
-        // dataset so the UI never times out (honest `data_source: "local"`).
-        let live_result = fanout_n2(
-            state,
-            candidates,
-            &format!("live_station:{station}:{hours}"),
-        )
-        .await;
-
-        let (metric, data) = match live_result {
-            Ok(v) => v,
-            Err(live_err) => {
-                tracing::warn!(%station, %hours, err=%live_err.message(), "live_station: live sources failed, serving static fallback");
-                if let Some(static_resp) = static_board(state, station, destination, hours) {
-                    let mut r = static_resp;
-                    r.data_source = Some("local".to_string());
-                    state.cache.set_json(&key, &r)?;
-                    return Ok(r);
+            Candidate::new(crate::core::source::metric::RAILYATRI, move || {
+                let s = state_ry2.clone();
+                let st = station_ry2.clone();
+                let h = hours_ry2;
+                async move { railyatri_live_station(&s, &st, h, None).await }
+            }),
+            Candidate::new("local", move || {
+                let s = state_static.clone();
+                let st = station_static.clone();
+                let d = dest_static.clone();
+                let h = hours_static;
+                async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+                    let resp = static_board(&s, &st, d.as_deref(), h)
+                        .ok_or_else(|| AppError::not_found(format!("Station {st} not found")))?;
+                    Ok(serde_json::json!({ "trainList": [] }))
                 }
-                return Err(live_err);
+            }),
+        ];
+        let (metric, data) = fanout_n2(state, candidates, &format!("live_station:{station}:{hours}")).await.or_else(|e| {
+            tracing::warn!(%station, %hours, err=%e.message(), "live_station: fan-out failed, serving direct static");
+            static_board(state, station, destination, hours)
+                .map(|r| ("local".to_string(), serde_json::json!({ "trainList": [] })))
+                .ok_or(e)
+        })?;
+        if metric == "local" {
+            if let Some(static_resp) = static_board(state, station, destination, hours) {
+                let mut r = static_resp;
+                r.data_source = Some("local".to_string());
+                state.cache.set_json(&key, &r)?;
+                return Ok(r);
             }
-        };
+        }
 
         let resp = build_response(station, destination, hours, &data).ok_or_else(|| {
             AppError::source_unavailable(

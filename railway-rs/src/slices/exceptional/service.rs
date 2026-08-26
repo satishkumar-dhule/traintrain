@@ -1,9 +1,10 @@
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use serde_json::Value;
 
 use crate::core::cache::keys;
 use crate::core::error::AppError;
+use crate::core::fanout::{Candidate, fanout_n2};
 use crate::models::{ExceptionEntry, ExceptionalResponse, ExceptionalTrainDetail};
 use crate::state::AppState;
 
@@ -31,39 +32,41 @@ impl Service {
             }
         }
 
-        if state
-            .failover
-            .should_skip(crate::core::source::metric::NTES)
-        {
-            return Err(AppError::source_unavailable(
-                crate::core::source::labels::NTES,
-                "circuit open — ntes temporarily unavailable (cooldown)",
-            ));
+        // Super fan-out N²: NTES (2 delegates: with/without kind) + static local
+        // (800ms delayed). Each delegate retried, first success wins.
+        let train_ntes = train.to_string();
+        let train_static = train.to_string();
+        let state_ntes = state.clone();
+        let state_static = state.clone();
+        let candidates = vec![
+            Candidate::new(crate::core::source::metric::NTES, move || {
+                let s = state_ntes.clone();
+                let t = train_ntes.clone();
+                async move { s.ntes_web.train_exceptions(&t).await }
+            }),
+            Candidate::new("local", move || {
+                let t = train_static.clone();
+                let _s = state_static.clone();
+                async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+                    Ok::<Value, AppError>(serde_json::json!({
+                        "train": {"number": t, "name": "", "source": "", "destination": ""},
+                        "exceptions": [],
+                        "noData": true
+                    }))
+                }
+            }),
+        ];
+        let (metric, data) = fanout_n2(state, candidates, &format!("exceptional:{train}")).await?;
+        let mut response = map_response(&data, train, kind, state)
+            .ok_or_else(|| AppError::internal("unexpected exception-calendar response shape"))?;
+        if metric == "local" {
+            response.data_source = Some("local".to_string());
         }
-        let start = Instant::now();
-        let data = state.ntes_web.train_exceptions(train).await.map_err(|e| {
-            if matches!(
-                e,
-                AppError::SourceUnavailable { .. } | AppError::Internal(_)
-            ) {
-                state
-                    .failover
-                    .record_failure(crate::core::source::metric::NTES);
-            }
-            e
-        })?;
-        state
-            .metrics
-            .record_source_latency(crate::core::source::metric::NTES, start.elapsed());
-        state
-            .failover
-            .record_success(crate::core::source::metric::NTES);
-
-        let response = map_response(&data, train, kind, state).ok_or_else(|| {
-            AppError::internal("NTES: unexpected exception-calendar response shape")
-        })?;
-
-        state.cache.set_with_ttl(&key, data, EXCEPTIONAL_CACHE_TTL);
+        // Only cache live NTES data for 2 hours; local static is not cached long.
+        if metric == crate::core::source::metric::NTES {
+            state.cache.set_with_ttl(&key, data, EXCEPTIONAL_CACHE_TTL);
+        }
         Ok(response)
     }
 }

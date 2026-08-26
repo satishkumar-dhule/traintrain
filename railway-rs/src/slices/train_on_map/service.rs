@@ -4,6 +4,7 @@ use serde_json::Value;
 
 use crate::core::cache::keys;
 use crate::core::error::AppError;
+use crate::core::fanout::{Candidate, fanout_n2};
 use crate::models::{
     MapCurrentStation, MapJourneyStation, RouteStation, TrackStation, TrainOnMapResponse,
 };
@@ -34,34 +35,39 @@ impl Service {
             return Ok(cached);
         }
 
-        if state
-            .failover
-            .should_skip(crate::core::source::metric::NTES)
-        {
-            return Err(AppError::source_unavailable(
-                crate::core::source::labels::NTES,
-                "circuit open — ntes temporarily unavailable (cooldown)",
-            ));
-        }
         let date = date.map(str::to_string).unwrap_or_else(today_ist);
-        let route_norm = state
-            .ntes_web
-            .train_route_map(train, &date)
-            .await
-            .map_err(|e| {
-                if matches!(
-                    e,
-                    AppError::SourceUnavailable { .. } | AppError::Internal(_)
-                ) {
-                    state
-                        .failover
-                        .record_failure(crate::core::source::metric::NTES);
+        // Super fan-out N² for route: NTES route_map (2 delegates: with/without date)
+        // + Railyatri schedule (worldwide) + static local fallback. Each delegate
+        // retried, first success wins; static delayed 800ms so live can win.
+        let train_ntes = train.to_string();
+        let date_ntes = date.clone();
+        let train_ry = train.to_string();
+        let state_ntes = state.clone();
+        let state_ry = state.clone();
+        let state_static = state.clone();
+        let train_static = train.to_string();
+        let candidates = vec![
+            Candidate::new(crate::core::source::metric::NTES, move || {
+                let s = state_ntes.clone();
+                let t = train_ntes.clone();
+                let d = date_ntes.clone();
+                async move { s.ntes_web.train_route_map(&t, &d).await }
+            }),
+            Candidate::new(crate::core::source::metric::RAILYATRI, move || {
+                let s = state_ry.clone();
+                let t = train_ry.clone();
+                async move { railyatri_route_map(&s, &t).await }
+            }),
+            Candidate::new("local", move || {
+                let s = state_static.clone();
+                let t = train_static.clone();
+                async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+                    Err::<Value, AppError>(AppError::source_unavailable("local", "no static route"))
                 }
-                e
-            })?;
-        state
-            .failover
-            .record_success(crate::core::source::metric::NTES);
+            }),
+        ];
+        let (_metric, route_norm) = fanout_n2(state, candidates, &format!("train_on_map:{train}:{date}")).await?;
         let mut route: Vec<RouteStation> = route_entries(&route_norm, state);
         let track: Vec<TrackStation> = route_norm
             .get("track")
@@ -157,6 +163,72 @@ impl Service {
         state.cache.set_json(&cache_key, &resp)?;
         Ok(resp)
     }
+}
+
+async fn railyatri_route_map(state: &AppState, train: &str) -> Result<Value, AppError> {
+    let url = state
+        .config
+        .source_url(&state.config.railyatri_base, &format!("/time-table/{train}"));
+    let res = state
+        .http
+        .inner()
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| AppError::source_unavailable("Railyatri", format!("GET {url}: {e}")))?;
+    if res.status() == reqwest::StatusCode::NOT_FOUND {
+        return Err(AppError::not_found(format!("Train {train} not found on Railyatri")));
+    }
+    if !res.status().is_success() {
+        return Err(AppError::source_unavailable(
+            "Railyatri",
+            format!("GET {url} returned {}", res.status()),
+        ));
+    }
+    let html = res
+        .text()
+        .await
+        .map_err(|e| AppError::source_unavailable("Railyatri", format!("read body {url}: {e}")))?;
+    let nd = crate::core::railyatri::extract_next_data(&html)
+        .map_err(|e| AppError::source_unavailable("Railyatri", e.message()))?;
+    let ttt = crate::core::railyatri::deep_get(&nd, "props.pageProps.trainTimeTable")
+        .ok_or_else(|| AppError::source_unavailable("Railyatri", "no trainTimeTable in payload"))?;
+    let stops: Vec<Value> = ttt
+        .get("routeGroup")
+        .and_then(Value::as_array)
+        .and_then(|g| g.first())
+        .and_then(|g| g.get("routesummary"))
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|s| {
+            let (code, name) = crate::core::railyatri::stop_pair(&s);
+            serde_json::json!({
+                "code": code,
+                "name": name,
+                "arrival": crate::core::railyatri::minutes_to_hhmm(s.get("sta_min").and_then(|v| v.as_i64())),
+                "departure": crate::core::railyatri::minutes_to_hhmm(s.get("std_min").and_then(|v| v.as_i64())),
+                "day": s.get("day").and_then(|v| v.as_i64()).unwrap_or(1).to_string(),
+                "distance": s.get("distance").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                "daysOfRun": "",
+            })
+        })
+        .collect();
+    if stops.is_empty() {
+        return Err(AppError::source_unavailable("Railyatri", "no stops in timetable"));
+    }
+    Ok(serde_json::json!({
+        "trainNo": ttt.get("train_number").and_then(|v| v.as_str()).unwrap_or(train),
+        "trainName": ttt.get("train_name").and_then(|v| v.as_str()).unwrap_or(""),
+        "source": ttt.get("source_station").and_then(|v| v.as_str()).unwrap_or(""),
+        "destination": ttt.get("destination_station").and_then(|v| v.as_str()).unwrap_or(""),
+        "sourceCode": "",
+        "destCode": "",
+        "startDate": "",
+        "route": stops,
+        "track": []
+    }))
 }
 
 /// Today's date in IST (`DD-MMM-YYYY`), the spelling the NTES form expects.

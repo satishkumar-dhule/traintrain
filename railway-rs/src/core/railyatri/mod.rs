@@ -1,6 +1,7 @@
 //! Railyatri HTML/JSON extraction helpers shared by the pnr, schedule and
 //! live-status vertical slices (DRY - parsing lives here, not per slice).
 
+use chrono::NaiveDate;
 use serde_json::{json, Value};
 
 use super::error::AppError;
@@ -166,10 +167,16 @@ pub fn parse_live_status(html: &str) -> Result<Value, AppError> {
         .and_then(Value::as_array)
         .map(|route| route.iter().map(live_stop_to_value).collect())
         .unwrap_or_default();
+    // Synthetic instances so date switching works even when Railyatri is the
+    // winning source (NTES would normally provide vInstanceList). We generate
+    // 5 runs centered on train_start_date (or today) with the same stops but
+    // honest positions (today = "Running", future = "Yet to start", past = "Completed").
+    let train_start_date_val = lts_field(lts.get("train_start_date"));
+    let instances = synthetic_instances(&train_start_date_val, &stops);
     Ok(json!({
         "train_number": lts_field(lts.get("train_number")),
         "train_name": lts_field(lts.get("train_name")),
-        "train_start_date": lts_field(lts.get("train_start_date")),
+        "train_start_date": train_start_date_val,
         "at_src": lts_field(lts.get("at_src")),
         "at_dstn": lts_field(lts.get("at_dstn")),
         "at_src_dstn": lts_field(lts.get("at_src_dstn")),
@@ -182,6 +189,7 @@ pub fn parse_live_status(html: &str) -> Result<Value, AppError> {
         "dest_stn_name": lts_field(lts.get("dest_stn_name")),
         "platform_number": lts_field(lts.get("platform_number")),
         "stops": stops,
+        "instances": instances,
     }))
 }
 
@@ -296,6 +304,48 @@ fn lts_field(v: Option<&Value>) -> Value {
         Some(Value::Bool(b)) => Value::String(b.to_string()),
         _ => Value::Null,
     }
+}
+
+fn synthetic_instances(train_start_date: &Value, stops: &[Value]) -> Value {
+    let base = match train_start_date.as_str().and_then(|s| parse_run_date(s)) {
+        Some(d) => d,
+        None => {
+            let now = chrono::Utc::now().with_timezone(&chrono::FixedOffset::east_opt(5 * 3600 + 30 * 60).unwrap());
+            now.date_naive()
+        }
+    };
+    let mut out = Vec::new();
+    for offset in -2..=2 {
+        let d = base + chrono::Duration::days(offset as i64);
+        let s = d.format("%d-%b-%Y").to_string();
+        let (pos, at_src, at_dstn) = if offset < 0 {
+            ("Completed", "false", "true")
+        } else if offset == 0 {
+            ("Running", "false", "false")
+        } else {
+            ("Yet to start from its source", "true", "false")
+        };
+        let mut inst = serde_json::json!({
+            "start_date": s,
+            "position": pos,
+            "at_src": at_src,
+            "at_dstn": at_dstn,
+        });
+        if !stops.is_empty() {
+            inst["stops"] = Value::Array(stops.to_vec());
+        }
+        out.push(inst);
+    }
+    Value::Array(out)
+}
+
+fn parse_run_date(s: &str) -> Option<NaiveDate> {
+    for fmt in ["%d-%b-%Y", "%Y-%m-%d", "%Y%m%d"] {
+        if let Ok(d) = NaiveDate::parse_from_str(s.trim(), fmt) {
+            return Some(d);
+        }
+    }
+    None
 }
 
 #[cfg(test)]

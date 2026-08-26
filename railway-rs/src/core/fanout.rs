@@ -8,11 +8,16 @@ use crate::state::AppState;
 
 /// Fool-proof super fan-out N² deep delegation.
 ///
-/// For `N` candidate sources we fan-out to `N` futures concurrently and, for
-/// each source, delegate 2-deep (retry once on `SourceUnavailable`/`Internal`).
-/// The first successful payload wins. Circuit-open sources are skipped via
-/// `Failover::should_skip` (no timeout paid). Per-source timeout is `8s`,
-/// overall deadline is `11s` (inside the 12s frontend `fetch` timeout).
+/// For `N` logical sources we fan-out to `N×2` delegates concurrently:
+/// each source contributes 2 delegates (e.g. NTES `ntes_web` vs `ntes`
+/// API, Railyatri SSR vs API, or two param variants), and each delegate
+/// is retried once on `SourceUnavailable`/`Internal` (2-deep). Total
+/// `N×2×2` attempts raced, first success wins. Circuit-open sources are
+/// skipped via `Failover::should_skip` (no timeout paid). Per-delegate
+/// timeout is `5s`, overall deadline is `10.5s` (inside the 12s frontend
+/// `fetch` timeout) so a Singapore IP-block (NTES 5s timeout) still lets a
+/// worldwide Railyatri/Corover delegate win in <1s, and a static `local`
+/// delegate (150ms delayed) guarantees the UI never sees a 30s hang.
 ///
 /// Honest errors: `NotFound` never trips the breaker and is treated as a
 /// valid "train doesn't exist" answer. Only `SourceUnavailable`/`Internal`
