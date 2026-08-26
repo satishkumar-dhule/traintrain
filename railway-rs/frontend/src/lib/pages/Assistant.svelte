@@ -454,25 +454,14 @@
         Ask Train Bro
         <Sparkles class="size-5 text-saffron hidden sm:inline" aria-hidden="true" />
       </h1>
-      <p class="text-sm text-muted-foreground max-w-2xl leading-relaxed">
-        Your on-device railway assistant — live running status, PNR, seat availability, station boards, routes &amp; delays. No hallucinations, just railway data.
-      </p>
     </div>
     <div class="hidden sm:flex items-center gap-2">
       {#if model}<Badge variant="secondary" class="data-num">{model}</Badge>{/if}
-      <Badge variant="outline" class="gap-1.5"><SignalDot tone="go" />Local-first</Badge>
+      <Badge variant="outline" class="gap-1.5"><SignalDot tone="go" />Live</Badge>
     </div>
   </div>
 
   <TrackRule />
-
-  <Alert.Root class="border-primary/15 bg-primary/[0.03]">
-    <BotMessageSquareIcon class="size-4 text-primary" />
-    <Alert.Title class="text-sm">Answers are served locally</Alert.Title>
-    <Alert.Description class="text-xs leading-relaxed">
-      Every reply is matched and fetched right in your browser against live railway APIs. Free-form AI is off — <span class="font-medium">RAILWAY_AI_ENABLED</span> only affects the badge above. Your chat stays on this device.
-    </Alert.Description>
-  </Alert.Root>
 
   <Card.Root class="overflow-hidden border shadow-sm max-lg:flex max-lg:flex-col max-lg:min-h-[min(68dvh,720px)]">
     <Card.Content class="p-0 flex flex-col min-h-0">
@@ -593,7 +582,7 @@
           </div>
         {:else}
           <div class="grid gap-4 py-2">
-            <EmptyState icon={BotMessageSquareIcon} title="Ask anything about Indian Railways" hint="Try a starter below — I’ll open the right form instantly, prefilled from your words. No wrong form anymore.">
+            <EmptyState icon={BotMessageSquareIcon} title="Ask anything" hint="">
               <div class="mt-3 grid w-full max-w-2xl grid-cols-1 gap-2 sm:grid-cols-2">
                 {#each [
                   {icon: TrainFront, label: 'Live status 12951', prompt: 'live status of 12951', desc: 'Where is the train now?'},
@@ -679,14 +668,11 @@
             >
               Clear chat
             </Button>
-            <span class="hidden sm:inline text-[11px] text-muted-foreground">· history stays on this device</span>
           </div>
-          <span class="text-[11px] text-muted-foreground hidden sm:inline">⏎ Send · ⇧⏎ New line</span>
+          <span class="text-[11px] text-muted-foreground hidden sm:inline">⏎ Send</span>
         </div>
       </div>
     </Card.Content>
   </Card.Root>
-
-  <p class="text-center text-[11px] text-muted-foreground leading-relaxed">Train Bro is local-first · PNR requires 10 digits · station codes auto-resolved · data source shown on every card</p>
 </section>
 <BottomSpacer />
