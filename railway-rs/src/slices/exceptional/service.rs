@@ -31,12 +31,33 @@ impl Service {
             }
         }
 
+        if state
+            .failover
+            .should_skip(crate::core::source::metric::NTES)
+        {
+            return Err(AppError::source_unavailable(
+                crate::core::source::labels::NTES,
+                "circuit open — ntes temporarily unavailable (cooldown)",
+            ));
+        }
         let start = Instant::now();
-        let data = state.ntes_web.train_exceptions(train).await;
+        let data = state.ntes_web.train_exceptions(train).await.map_err(|e| {
+            if matches!(
+                e,
+                AppError::SourceUnavailable { .. } | AppError::Internal(_)
+            ) {
+                state
+                    .failover
+                    .record_failure(crate::core::source::metric::NTES);
+            }
+            e
+        })?;
         state
             .metrics
             .record_source_latency(crate::core::source::metric::NTES, start.elapsed());
-        let data = data?;
+        state
+            .failover
+            .record_success(crate::core::source::metric::NTES);
 
         let response = map_response(&data, train, kind, state).ok_or_else(|| {
             AppError::internal("NTES: unexpected exception-calendar response shape")

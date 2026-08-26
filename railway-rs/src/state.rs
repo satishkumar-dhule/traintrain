@@ -5,6 +5,7 @@ use crate::config::Config;
 use crate::core::ai::{AiBackend, AiClient};
 use crate::core::cache::Cache;
 use crate::core::corover::CoroverClient;
+use crate::core::failover::Failover;
 use crate::core::http::HttpClient;
 use crate::core::irctc::IrctcClient;
 use crate::core::metrics::{Metrics, SharedMetrics};
@@ -35,6 +36,8 @@ pub struct AppState {
     /// (`ASKDISHA_ENABLED`). When `None` the askdisha slice router is not
     /// merged and its endpoints answer 404 (zero network footprint).
     pub askdisha: Option<Arc<CoroverClient>>,
+    /// Per-source circuit breaker for flip-flop failover.
+    pub failover: Arc<Failover>,
     pub started_at: Instant,
 }
 
@@ -63,6 +66,10 @@ impl AppState {
                 config.http_timeout,
             ))
         });
+        let failover = Arc::new(Failover::new(
+            config.failover_threshold,
+            config.failover_cooldown,
+        ));
         Ok(Self {
             cache: Arc::new(Cache::with_metrics(config.cache_ttl, Some(metrics.clone()))),
             metrics,
@@ -77,6 +84,7 @@ impl AppState {
             datasets,
             retrieval,
             askdisha,
+            failover,
             started_at: Instant::now(),
         })
     }

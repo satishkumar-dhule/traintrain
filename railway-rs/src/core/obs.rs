@@ -99,6 +99,10 @@ pub struct Telemetry {
     cache_entries: IntGauge,
     source_latency_ms: GaugeVec,
     source_samples_total: IntCounterVec,
+    /// Circuit breaker gauges per source.
+    circuit_state: GaugeVec,
+    circuit_failures: GaugeVec,
+    circuit_open_seconds: GaugeVec,
     /// last-seen totals so `sample` can inc counters by delta (safe to call on
     /// every scrape AND from the background sampler without double counting)
     last_cache_hits: std::sync::atomic::AtomicU64,
@@ -152,6 +156,27 @@ impl Telemetry {
             ),
             &["source"],
         )?;
+        let circuit_state = GaugeVec::new(
+            Opts::new(
+                "railway_circuit_state",
+                "Circuit breaker state (1 = active, 0 = inactive) per source and state",
+            ),
+            &["source", "state"],
+        )?;
+        let circuit_failures = GaugeVec::new(
+            Opts::new(
+                "railway_circuit_failures",
+                "Consecutive failures per source for the circuit breaker",
+            ),
+            &["source"],
+        )?;
+        let circuit_open_seconds = GaugeVec::new(
+            Opts::new(
+                "railway_circuit_open_seconds",
+                "Seconds since circuit opened per source (0 when closed)",
+            ),
+            &["source"],
+        )?;
 
         for c in [
             Box::new(http_requests.clone()) as Box<dyn prometheus::core::Collector>,
@@ -166,6 +191,9 @@ impl Telemetry {
             Box::new(cache_entries.clone()),
             Box::new(source_latency_ms.clone()),
             Box::new(source_samples_total.clone()),
+            Box::new(circuit_state.clone()),
+            Box::new(circuit_failures.clone()),
+            Box::new(circuit_open_seconds.clone()),
         ] {
             registry.register(c)?;
         }
@@ -184,6 +212,9 @@ impl Telemetry {
             cache_entries,
             source_latency_ms,
             source_samples_total,
+            circuit_state,
+            circuit_failures,
+            circuit_open_seconds,
             last_cache_hits: std::sync::atomic::AtomicU64::new(0),
             last_cache_misses: std::sync::atomic::AtomicU64::new(0),
             last_source_samples: Mutex::new(HashMap::new()),
@@ -241,6 +272,31 @@ impl Telemetry {
                     .with_label_values(&[&s.source])
                     .inc_by(s.samples.saturating_sub(prev));
             }
+        }
+    }
+
+    /// Update circuit breaker gauges from a failover snapshot.
+    /// Called from the observability service before returning the JSON payload,
+    /// and can also be called from background samplers if needed.
+    pub fn set_failover_snapshot(&self, snap: &[crate::core::failover::Snapshot]) {
+        for s in snap {
+            let state = match s.state {
+                crate::core::failover::State::Closed => "closed",
+                crate::core::failover::State::Open => "open",
+                crate::core::failover::State::HalfOpen => "half_open",
+            };
+            for st in ["closed", "open", "half_open"] {
+                let v = if st == state { 1.0 } else { 0.0 };
+                self.circuit_state
+                    .with_label_values(&[&s.source, st])
+                    .set(v);
+            }
+            self.circuit_failures
+                .with_label_values(&[&s.source])
+                .set(s.consecutive_failures as f64);
+            self.circuit_open_seconds
+                .with_label_values(&[&s.source])
+                .set(s.open_secs.unwrap_or(0) as f64);
         }
     }
 

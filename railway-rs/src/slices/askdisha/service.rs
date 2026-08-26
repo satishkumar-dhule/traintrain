@@ -237,11 +237,31 @@ impl Service {
             }
         }
 
+        if state.failover.should_skip("corover-api") {
+            return Err(AppError::source_unavailable(
+                SOURCE_API,
+                "circuit open — corover-api temporarily unavailable (cooldown)",
+            )
+            .into());
+        }
+
         let started = Instant::now();
-        let rows = Self::client(state)?.stations_by_location(lat, lng).await?;
+        let rows = Self::client(state)?
+            .stations_by_location(lat, lng)
+            .await
+            .map_err(|e| {
+                if matches!(
+                    e,
+                    AppError::SourceUnavailable { .. } | AppError::Internal(_)
+                ) {
+                    state.failover.record_failure("corover-api");
+                }
+                e
+            })?;
         state
             .metrics
             .record_source_latency(SOURCE_API, started.elapsed());
+        state.failover.record_success("corover-api");
         let resp = nearby_envelope(
             false,
             rows.into_iter().map(NearbyRow::from_station).collect(),
@@ -266,11 +286,31 @@ impl Service {
             }
         }
 
+        if state.failover.should_skip("corover-api") {
+            return Err(AppError::source_unavailable(
+                SOURCE_API,
+                "circuit open — corover-api temporarily unavailable (cooldown)",
+            )
+            .into());
+        }
+
         let started = Instant::now();
-        let lookup: PinLookup = Self::client(state)?.pin_lookup(pincode).await?;
+        let lookup: PinLookup = Self::client(state)?
+            .pin_lookup(pincode)
+            .await
+            .map_err(|e| {
+                if matches!(
+                    e,
+                    AppError::SourceUnavailable { .. } | AppError::Internal(_)
+                ) {
+                    state.failover.record_failure("corover-api");
+                }
+                e
+            })?;
         state
             .metrics
             .record_source_latency(SOURCE_API, started.elapsed());
+        state.failover.record_success("corover-api");
         let inner = CachedPin {
             state: lookup.state,
             city_list: lookup.city_list,
@@ -299,11 +339,28 @@ impl Service {
             }
         }
 
+        if state.failover.should_skip("corover-cdn") {
+            return Err(AppError::source_unavailable(
+                SOURCE_CDN,
+                "circuit open — corover-cdn temporarily unavailable (cooldown)",
+            )
+            .into());
+        }
+
         let started = Instant::now();
-        let faqs = Self::client(state)?.fetch_faqs(lang).await?;
+        let faqs = Self::client(state)?.fetch_faqs(lang).await.map_err(|e| {
+            if matches!(
+                e,
+                AppError::SourceUnavailable { .. } | AppError::Internal(_)
+            ) {
+                state.failover.record_failure("corover-cdn");
+            }
+            e
+        })?;
         state
             .metrics
             .record_source_latency(SOURCE_CDN, started.elapsed());
+        state.failover.record_success("corover-cdn");
         state
             .cache
             .set_with_ttl(&key, serde_json::to_value(&faqs)?, FAQS_TTL);
@@ -326,11 +383,28 @@ impl Service {
             }
         }
 
+        if state.failover.should_skip("corover-cdn") {
+            return Err(AppError::source_unavailable(
+                SOURCE_CDN,
+                "circuit open — corover-cdn temporarily unavailable (cooldown)",
+            )
+            .into());
+        }
+
         let started = Instant::now();
-        let settings = Self::client(state)?.fetch_settings().await?;
+        let settings = Self::client(state)?.fetch_settings().await.map_err(|e| {
+            if matches!(
+                e,
+                AppError::SourceUnavailable { .. } | AppError::Internal(_)
+            ) {
+                state.failover.record_failure("corover-cdn");
+            }
+            e
+        })?;
         state
             .metrics
             .record_source_latency(SOURCE_CDN, started.elapsed());
+        state.failover.record_success("corover-cdn");
         state
             .cache
             .set_with_ttl(SETTINGS_KEY, serde_json::to_value(&settings)?, SETTINGS_TTL);

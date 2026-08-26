@@ -99,6 +99,13 @@ async fn unreserved_fallback(
     date: &str,
     original: AppError,
 ) -> Result<AvailabilityResponse, AppError> {
+    if state
+        .failover
+        .should_skip(crate::core::source::metric::NTES)
+    {
+        tracing::debug!(%src, %dst, "NTES unreserved lookup skipped — circuit open");
+        return Err(original);
+    }
     let started = Instant::now();
     let from_name = state.datasets.station_name(src).unwrap_or(src).to_string();
     let to_name = state.datasets.station_name(dst).unwrap_or(dst).to_string();
@@ -111,6 +118,9 @@ async fn unreserved_fallback(
             state
                 .metrics
                 .record_source_latency(crate::core::source::metric::NTES, started.elapsed());
+            state
+                .failover
+                .record_success(crate::core::source::metric::NTES);
             match map_ntes_unreserved(&data, src, &from_name, dst, &to_name, date) {
                 Some(resp) => {
                     tracing::info!(
@@ -125,6 +135,14 @@ async fn unreserved_fallback(
             }
         }
         Err(e) => {
+            if matches!(
+                e,
+                AppError::SourceUnavailable { .. } | AppError::Internal(_)
+            ) {
+                state
+                    .failover
+                    .record_failure(crate::core::source::metric::NTES);
+            }
             tracing::debug!(%src, %dst, error = %e.message(), "NTES unreserved lookup failed");
             Err(original)
         }
@@ -224,7 +242,8 @@ fn day_bool(entry: &Value, day: &str) -> bool {
 
 /// Fetch from one named source (`"paytm"` / `"irctc"`) and normalize to the
 /// shared DTO. Latency is recorded under the source's lowercase key so the
-/// observability source-status panel sees it.
+/// observability source-status panel sees it. Flip-flop: skipped when the
+/// circuit is open so requests do not pay the upstream timeout.
 async fn fetch_from(
     state: &AppState,
     source: &str,
@@ -232,13 +251,40 @@ async fn fetch_from(
     dst: &str,
     date: &str,
 ) -> Result<AvailabilityResponse, AppError> {
+    if state.failover.should_skip(source) {
+        return Err(AppError::source_unavailable(
+            source.to_string(),
+            "circuit open (cooldown)",
+        ));
+    }
     let start = Instant::now();
     let data = match source {
-        "paytm" => state.paytm.search(src, dst, date).await?,
-        "irctc" => state.irctc.availability(src, dst, date).await?,
+        "paytm" => state.paytm.search(src, dst, date).await.map_err(|e| {
+            if matches!(
+                e,
+                AppError::SourceUnavailable { .. } | AppError::Internal(_)
+            ) {
+                state.failover.record_failure(source);
+            }
+            e
+        })?,
+        "irctc" => state
+            .irctc
+            .availability(src, dst, date)
+            .await
+            .map_err(|e| {
+                if matches!(
+                    e,
+                    AppError::SourceUnavailable { .. } | AppError::Internal(_)
+                ) {
+                    state.failover.record_failure(source);
+                }
+                e
+            })?,
         other => return Err(AppError::internal(format!("unknown source {other}"))),
     };
     state.metrics.record_source_latency(source, start.elapsed());
+    state.failover.record_success(source);
     map_response(source, data, src, dst, date)
 }
 

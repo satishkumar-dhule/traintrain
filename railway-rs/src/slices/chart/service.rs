@@ -25,10 +25,36 @@ impl Service {
         }
 
         let start = Instant::now();
-        let data = state.irctc.train_composition(train, date, station).await?;
+        if state
+            .failover
+            .should_skip(crate::core::source::metric::IRCTC)
+        {
+            return Err(AppError::source_unavailable(
+                crate::core::source::labels::IRCTC,
+                "circuit open — irctc temporarily unavailable (cooldown)",
+            ));
+        }
+        let data = state
+            .irctc
+            .train_composition(train, date, station)
+            .await
+            .map_err(|e| {
+                if matches!(
+                    e,
+                    AppError::SourceUnavailable { .. } | AppError::Internal(_)
+                ) {
+                    state
+                        .failover
+                        .record_failure(crate::core::source::metric::IRCTC);
+                }
+                e
+            })?;
         state
             .metrics
             .record_source_latency(crate::core::source::metric::IRCTC, start.elapsed());
+        state
+            .failover
+            .record_success(crate::core::source::metric::IRCTC);
 
         let resp = map_response(data, train, date, station)?;
         state.cache.set_json(&cache_key, &resp)?;

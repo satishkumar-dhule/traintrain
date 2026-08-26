@@ -635,6 +635,18 @@ pub struct ObservabilityResponse {
     pub cache: CacheStats,
     pub series: SeriesData,
     pub logs: Vec<crate::core::obs::LogEntryDto>,
+    /// Per-source circuit-breaker state for flip-flop failover.
+    #[serde(default)]
+    pub failover: Vec<FailoverStatus>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct FailoverStatus {
+    pub source: String,
+    pub state: String,
+    pub consecutive_failures: u32,
+    pub available: bool,
+    pub open_secs: Option<u64>,
 }
 
 #[derive(Debug, Serialize)]

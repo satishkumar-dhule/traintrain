@@ -12,7 +12,7 @@ export CARGO_HOME="$HOME/.cargo"
 log() { printf '[auto %s] %s\n' "$(date -u '+%F %T')" "$*"; }
 
 tree_dirty() {
-	[ -n "$(git -C "$REPO_ROOT" status --porcelain -- ':!.opencode' ':!logs')" ]
+	[ -n "$(git -C "$REPO_ROOT" status --porcelain -- ':!.opencode' ':!logs' ':!.space-janitor')" ]
 }
 
 tree_settled() {
@@ -97,7 +97,7 @@ while true; do
 		frontend_rebuild_if_stale || continue
 		clean_stale_assets
 		if gates_pass; then
-			git -C "$REPO_ROOT" add -A -- ':!.opencode' ':!logs'
+			git -C "$REPO_ROOT" add -A -- ':!.opencode' ':!logs' ':!.space-janitor'
 			if git -C "$APP_DIR" diff --cached --quiet; then
 				log "gates green, nothing to commit"
 			else

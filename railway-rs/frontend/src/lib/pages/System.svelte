@@ -9,7 +9,7 @@
   import { Skeleton } from '$lib/components/ui/skeleton/index.js'
   import * as Alert from '$lib/components/ui/alert/index.js'
   import { Button } from '$lib/components/ui/button/index.js'
-  import { LogLevelBadge, CountBadge } from '$lib/components/badges/index.js'
+  import { LogLevelBadge, CountBadge, StatusBadge } from '$lib/components/badges/index.js'
   import Activity from 'lucide-svelte/icons/activity'
   import RefreshCw from 'lucide-svelte/icons/refresh-cw'
   import Clock from 'lucide-svelte/icons/clock'
@@ -293,6 +293,38 @@
     { key: 'status', label: 'Status', class: 'w-28', value: (o) => String(o.status ?? '') }
   ]
 
+  const failoverRows = $derived(
+    obs.phase === 'ok' && Array.isArray(obs.data?.failover) ? obs.data.failover : []
+  )
+
+  const failoverCols = [
+    { key: 'source', label: 'Source', cellClass: 'font-medium', value: (r) => r.source },
+    { key: 'state', label: 'State', class: 'w-28', value: (r) => String(r.state ?? '') },
+    {
+      key: 'consecutive_failures',
+      label: 'Failures',
+      class: 'w-24',
+      cellClass: 'data-num text-xs',
+      value: (r) => String(r.consecutive_failures ?? 0),
+      sortValue: (r) => Number(r.consecutive_failures ?? 0)
+    },
+    {
+      key: 'available',
+      label: 'Available',
+      class: 'w-24',
+      value: (r) => (r.available ? 'yes' : 'no'),
+      sortValue: (r) => (r.available ? 1 : 0)
+    },
+    {
+      key: 'open_secs',
+      label: 'Open (s)',
+      class: 'w-24',
+      cellClass: 'data-num text-xs',
+      value: (r) => (r.open_secs == null ? '—' : String(r.open_secs)),
+      sortValue: (r) => (r.open_secs == null ? -1 : Number(r.open_secs))
+    }
+  ]
+
   const logCols = [
     { key: 'time', label: 'Time', class: 'w-28', cellClass: 'data-num text-xs max-lg:text-sm', value: (l) => tsTime(l?.ts), sortValue: (l) => num(l?.ts) },
     { key: 'level', label: 'Level', class: 'w-24', value: (l) => String(l?.level ?? '').toLowerCase() },
@@ -396,9 +428,12 @@
 
 {#snippet originStatusCell(o)}
   <span class="inline-flex items-center gap-1.5 text-xs">
-    {#if o.status === 'up' || o.status === 'reachable'}
+    {#if o.status === 'live'}
       <SignalDot tone="go" pulse />
-      <span class="text-signal-go-ink">up</span>
+      <span class="text-signal-go-ink">live</span>
+    {:else if String(o.status ?? '').includes('degraded')}
+      <SignalDot tone="hold" />
+      <span class="text-signal-hold-ink">{o.status}</span>
     {:else}
       <SignalDot tone="stop" />
       <span class="text-signal-stop-ink">{o.status}</span>
@@ -408,6 +443,30 @@
 
 {#snippet logLevelCell(l)}
   <LogLevelBadge level={l?.level} />
+{/snippet}
+
+{#snippet failoverStateCell(r)}
+  {#if String(r.state) === 'closed'}
+    <StatusBadge tone="success" dot>closed</StatusBadge>
+  {:else if String(r.state) === 'open'}
+    <StatusBadge tone="danger" dot>open</StatusBadge>
+  {:else if String(r.state) === 'half_open' || String(r.state) === 'halfopen'}
+    <StatusBadge tone="warning" dot>half_open</StatusBadge>
+  {:else}
+    <StatusBadge tone="neutral">{r.state ?? '—'}</StatusBadge>
+  {/if}
+{/snippet}
+
+{#snippet failoverAvailCell(r)}
+  <span class="inline-flex items-center gap-1.5 text-xs">
+    {#if r.available}
+      <SignalDot tone="go" pulse />
+      <span class="text-signal-go-ink">yes</span>
+    {:else}
+      <SignalDot tone="stop" />
+      <span class="text-signal-stop-ink">no</span>
+    {/if}
+  </span>
 {/snippet}
 
 <!-- super deep delegation root: ONE click + ONE keydown fan-out to ~23 interactive elements -->
@@ -574,6 +633,25 @@
       </Card.Root>
     {/if}
     <SourceStatus />
+    <div class="grid gap-2">
+      <h2 class={MICRO_LABEL}>Circuit Breaker (Flip-Flop)</h2>
+      <Card.Root>
+        <Card.Header class="max-lg:p-3">
+          <Card.Title class="text-sm lg:text-base">Circuit Breaker (Flip-Flop)</Card.Title>
+          <Card.Description class="max-lg:text-xs">Per-source circuit state, consecutive failures and open time.</Card.Description>
+        </Card.Header>
+        <Card.Content class="max-lg:p-3">
+          <DataTable
+            columns={failoverCols}
+            rows={failoverRows}
+            primary="source"
+            rowKey={(r) => r.source}
+            cells={{ state: failoverStateCell, available: failoverAvailCell }}
+            empty="No circuit data."
+          />
+        </Card.Content>
+      </Card.Root>
+    </div>
   </div>
 
   {#if obs.phase === 'ok'}

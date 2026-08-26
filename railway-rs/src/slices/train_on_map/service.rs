@@ -34,8 +34,34 @@ impl Service {
             return Ok(cached);
         }
 
+        if state
+            .failover
+            .should_skip(crate::core::source::metric::NTES)
+        {
+            return Err(AppError::source_unavailable(
+                crate::core::source::labels::NTES,
+                "circuit open — ntes temporarily unavailable (cooldown)",
+            ));
+        }
         let date = date.map(str::to_string).unwrap_or_else(today_ist);
-        let route_norm = state.ntes_web.train_route_map(train, &date).await?;
+        let route_norm = state
+            .ntes_web
+            .train_route_map(train, &date)
+            .await
+            .map_err(|e| {
+                if matches!(
+                    e,
+                    AppError::SourceUnavailable { .. } | AppError::Internal(_)
+                ) {
+                    state
+                        .failover
+                        .record_failure(crate::core::source::metric::NTES);
+                }
+                e
+            })?;
+        state
+            .failover
+            .record_success(crate::core::source::metric::NTES);
         let mut route: Vec<RouteStation> = route_entries(&route_norm, state);
         let track: Vec<TrackStation> = route_norm
             .get("track")
@@ -63,53 +89,68 @@ impl Service {
 
         if let Some(code) = station {
             let code = code.to_ascii_uppercase();
-            match state
-                .ntes_web
-                .train_spot_map(train, &code, &date, "A")
-                .await
+            if state
+                .failover
+                .should_skip(crate::core::source::metric::NTES)
             {
-                Ok(spot) => {
-                    merge_spot(&mut route, &spot);
-                    resp.route = Some(route);
-                    if let Some(cs) = spot.get("currentStation").and_then(Value::as_object) {
-                        let ccode = cs.get("code").and_then(Value::as_str).unwrap_or_default();
-                        let (lat, lng) = state
-                            .datasets
-                            .coord(ccode)
-                            .map(|(a, b)| (Some(a), Some(b)))
-                            .unwrap_or((None, None));
-                        resp.current_station = Some(MapCurrentStation {
-                            code: ccode.to_string(),
-                            lat,
-                            lng,
-                        });
+                tracing::warn!(%train, %code, "train-spot-map skipped — circuit open; returning route-only map");
+            } else {
+                match state
+                    .ntes_web
+                    .train_spot_map(train, &code, &date, "A")
+                    .await
+                {
+                    Ok(spot) => {
+                        merge_spot(&mut route, &spot);
+                        resp.route = Some(route);
+                        if let Some(cs) = spot.get("currentStation").and_then(Value::as_object) {
+                            let ccode = cs.get("code").and_then(Value::as_str).unwrap_or_default();
+                            let (lat, lng) = state
+                                .datasets
+                                .coord(ccode)
+                                .map(|(a, b)| (Some(a), Some(b)))
+                                .unwrap_or((None, None));
+                            resp.current_station = Some(MapCurrentStation {
+                                code: ccode.to_string(),
+                                lat,
+                                lng,
+                            });
+                        }
+                        if let Some(js) = spot.get("journeyStation") {
+                            let code2 = js
+                                .get("code")
+                                .and_then(Value::as_str)
+                                .unwrap_or_default()
+                                .to_string();
+                            let (lat, lng) = state
+                                .datasets
+                                .coord(&code2)
+                                .map(|(a, b)| (Some(a), Some(b)))
+                                .unwrap_or((None, None));
+                            resp.journey_station = Some(MapJourneyStation {
+                                code: code2,
+                                name: str(js, "name", ""),
+                                lat,
+                                lng,
+                                label: str(js, "label", ""),
+                                expected_arrival: str(js, "expectedArrival", ""),
+                                actual_arrival: str(js, "actualArrival", ""),
+                                delay_status: str(js, "delayStatus", ""),
+                                platform: str(js, "platform", ""),
+                            });
+                        }
                     }
-                    if let Some(js) = spot.get("journeyStation") {
-                        let code2 = js
-                            .get("code")
-                            .and_then(Value::as_str)
-                            .unwrap_or_default()
-                            .to_string();
-                        let (lat, lng) = state
-                            .datasets
-                            .coord(&code2)
-                            .map(|(a, b)| (Some(a), Some(b)))
-                            .unwrap_or((None, None));
-                        resp.journey_station = Some(MapJourneyStation {
-                            code: code2,
-                            name: str(js, "name", ""),
-                            lat,
-                            lng,
-                            label: str(js, "label", ""),
-                            expected_arrival: str(js, "expectedArrival", ""),
-                            actual_arrival: str(js, "actualArrival", ""),
-                            delay_status: str(js, "delayStatus", ""),
-                            platform: str(js, "platform", ""),
-                        });
+                    Err(e) => {
+                        if matches!(
+                            e,
+                            AppError::SourceUnavailable { .. } | AppError::Internal(_)
+                        ) {
+                            state
+                                .failover
+                                .record_failure(crate::core::source::metric::NTES);
+                        }
+                        tracing::warn!(%train, %code, err = %e.message(), "train-spot-map unavailable; returning route-only map")
                     }
-                }
-                Err(e) => {
-                    tracing::warn!(%train, %code, err = %e.message(), "train-spot-map unavailable; returning route-only map")
                 }
             }
         }

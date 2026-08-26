@@ -58,6 +58,12 @@ pub struct Config {
     pub corover_base: String,
     /// AskDISHA CDN origin without the bucket path (`COROVER_CDN_BASE`).
     pub corover_cdn_base: String,
+    /// Consecutive live-source failures before the circuit opens
+    /// (`RAILWAY_FAILOVER_THRESHOLD`, default `3`).
+    pub failover_threshold: u32,
+    /// Seconds a tripped circuit stays open before a half-open probe
+    /// (`RAILWAY_FAILOVER_COOLDOWN_SECS`, default `30`).
+    pub failover_cooldown: Duration,
 }
 
 impl Default for Config {
@@ -83,6 +89,8 @@ impl Default for Config {
             askdisha_enabled: true,
             corover_base: "https://api.disha.corover.ai".to_string(),
             corover_cdn_base: "https://cdn.corover.ai".to_string(),
+            failover_threshold: 3,
+            failover_cooldown: Duration::from_secs(30),
         }
     }
 }
@@ -134,6 +142,14 @@ impl Config {
             ),
             corover_base: std::env::var("COROVER_BASE").unwrap_or(d.corover_base),
             corover_cdn_base: std::env::var("COROVER_CDN_BASE").unwrap_or(d.corover_cdn_base),
+            failover_threshold: env_u64(
+                "RAILWAY_FAILOVER_THRESHOLD",
+                u64::from(d.failover_threshold),
+            ) as u32,
+            failover_cooldown: Duration::from_secs(env_u64(
+                "RAILWAY_FAILOVER_COOLDOWN_SECS",
+                d.failover_cooldown.as_secs(),
+            )),
         }
     }
 

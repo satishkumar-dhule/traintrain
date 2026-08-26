@@ -36,70 +36,117 @@ impl Service {
             }
         }
 
-        // NTES primary (proven path): the spot-train web form returns one run
-        // instance per tab with a station-by-station live timeline, so the
-        // whole position resolves in a single round trip. A best-effort
-        // failure still falls back to Railyatri, matching prior behaviour.
+        // Flip-flop: NTES primary, Railyatri fallback. When NTES circuit is
+        // open we skip the web form entirely (no 15 s timeout) and flip to
+        // Railyatri immediately.
         let ntes_started = Instant::now();
-        let ntes_failure = match ntes_web_run(state, train).await {
-            Ok(norm) => {
-                state.metrics.record_source_latency(
-                    crate::core::source::metric::NTES,
-                    ntes_started.elapsed(),
-                );
-                match select_run_for_date(&norm, date) {
-                    Err(msg) => return Err(AppError::not_found(msg)),
-                    Ok(selected) => match map_response(&selected) {
-                        Ok(resp) => {
-                            tracing::info!(
-                                %train,
-                                %date,
-                                source = "NTES",
-                                latency_ms = ntes_started.elapsed().as_millis(),
-                                "live status resolved from NTES"
-                            );
-                            state.cache.set(&key, selected);
-                            return Ok(resp);
-                        }
-                        Err(e) => e.message(),
-                    },
+        let ntes_failure = if state
+            .failover
+            .should_skip(crate::core::source::metric::NTES)
+        {
+            tracing::warn!(%train, source = "NTES", "circuit open — flip-flop skipped NTES");
+            "circuit open (cooldown)".to_string()
+        } else {
+            match ntes_web_run(state, train).await {
+                Ok(norm) => {
+                    state.metrics.record_source_latency(
+                        crate::core::source::metric::NTES,
+                        ntes_started.elapsed(),
+                    );
+                    state
+                        .failover
+                        .record_success(crate::core::source::metric::NTES);
+                    match select_run_for_date(&norm, date) {
+                        Err(msg) => return Err(AppError::not_found(msg)),
+                        Ok(selected) => match map_response(&selected) {
+                            Ok(resp) => {
+                                tracing::info!(
+                                    %train,
+                                    %date,
+                                    source = "NTES",
+                                    latency_ms = ntes_started.elapsed().as_millis(),
+                                    "live status resolved from NTES"
+                                );
+                                state.cache.set(&key, selected);
+                                return Ok(resp);
+                            }
+                            Err(e) => e.message(),
+                        },
+                    }
+                }
+                Err(e) => {
+                    let msg = e.message();
+                    if matches!(
+                        e,
+                        AppError::SourceUnavailable { .. } | AppError::Internal(_)
+                    ) {
+                        state
+                            .failover
+                            .record_failure(crate::core::source::metric::NTES);
+                    }
+                    msg
                 }
             }
-            Err(e) => e.message(),
         };
 
-        match railyatri_norm(state, train).await {
-            Ok(norm) => match select_run_for_date(&norm, date) {
-                Err(msg) => Err(AppError::not_found(msg)),
-                Ok(selected) => {
-                    tracing::warn!(
-                        %train,
-                        %date,
-                        source = "Railyatri",
-                        %ntes_failure,
-                        "live status resolved from Railyatri after NTES failure"
-                    );
-                    let resp = map_response(&selected).map_err(|e| {
-                        AppError::source_unavailable(
-                            "all-sources",
-                            format!(
-                                "live status for {train} failed: NTES: {ntes_failure} | Railyatri: {}",
-                                e.message()
-                            ),
-                        )
-                    })?;
-                    state.cache.set(&key, selected);
-                    Ok(resp)
-                }
-            },
-            Err(AppError::NotFound(msg)) => Err(AppError::not_found(msg)),
-            Err(ry_err) => Err(AppError::source_unavailable(
+        if state
+            .failover
+            .should_skip(crate::core::source::metric::RAILYATRI)
+        {
+            return Err(AppError::source_unavailable(
                 "all-sources",
                 format!(
-                    "live status for {train} failed: NTES: {ntes_failure} | Railyatri: {}",
-                    ry_err.message()
+                    "live status for {train} failed: NTES: {ntes_failure} | Railyatri: circuit open (cooldown)"
                 ),
-            )),
+            ));
+        }
+        match railyatri_norm(state, train).await {
+            Ok(norm) => {
+                state
+                    .failover
+                    .record_success(crate::core::source::metric::RAILYATRI);
+                match select_run_for_date(&norm, date) {
+                    Err(msg) => Err(AppError::not_found(msg)),
+                    Ok(selected) => {
+                        tracing::warn!(
+                            %train,
+                            %date,
+                            source = "Railyatri",
+                            %ntes_failure,
+                            "live status resolved from Railyatri after NTES failure"
+                        );
+                        let resp = map_response(&selected).map_err(|e| {
+                            AppError::source_unavailable(
+                                "all-sources",
+                                format!(
+                                    "live status for {train} failed: NTES: {ntes_failure} | Railyatri: {}",
+                                    e.message()
+                                ),
+                            )
+                        })?;
+                        state.cache.set(&key, selected);
+                        Ok(resp)
+                    }
+                }
+            }
+            Err(AppError::NotFound(msg)) => Err(AppError::not_found(msg)),
+            Err(ry_err) => {
+                if matches!(
+                    ry_err,
+                    AppError::SourceUnavailable { .. } | AppError::Internal(_)
+                ) {
+                    state
+                        .failover
+                        .record_failure(crate::core::source::metric::RAILYATRI);
+                }
+                Err(AppError::source_unavailable(
+                    "all-sources",
+                    format!(
+                        "live status for {train} failed: NTES: {ntes_failure} | Railyatri: {}",
+                        ry_err.message()
+                    ),
+                ))
+            }
         }
     }
 }

@@ -4,6 +4,7 @@ pub mod cache;
 pub mod cookies;
 pub mod corover;
 pub mod error;
+pub mod failover;
 pub mod http;
 pub mod irctc;
 pub mod json;

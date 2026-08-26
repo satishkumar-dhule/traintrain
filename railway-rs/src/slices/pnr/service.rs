@@ -60,6 +60,13 @@ impl Service {
             }
         }
 
+        if state.failover.should_skip("indian-railways") {
+            return Err(AppError::source_unavailable(
+                SOURCE,
+                "circuit open — indian-railways temporarily unavailable (cooldown)",
+            ));
+        }
+
         match captcha {
             None => Self::challenge(state, pnr).await,
             Some(answer) => Self::answer(state, pnr, &answer).await,
@@ -80,7 +87,16 @@ impl Service {
                 .source_url(base, "/enquiry/PNR/PnrEnquiry.html?locale=en"),
             None,
         )
-        .await?;
+        .await
+        .map_err(|e| {
+            if matches!(
+                e,
+                AppError::SourceUnavailable { .. } | AppError::Internal(_)
+            ) {
+                state.failover.record_failure("indian-railways");
+            }
+            e
+        })?;
         let mut cookies = capture_cookies(&page);
 
         // 2. Ask whether the image captcha is enabled (0 = off, 1 = on).
@@ -89,7 +105,16 @@ impl Service {
             &state.config.source_url(base, "/enquiry/CaptchaConfig"),
             Some(&cookie_str(&cookies)),
         )
-        .await?;
+        .await
+        .map_err(|e| {
+            if matches!(
+                e,
+                AppError::SourceUnavailable { .. } | AppError::Internal(_)
+            ) {
+                state.failover.record_failure("indian-railways");
+            }
+            e
+        })?;
         cookies.extend(capture_cookies(&cfg_res));
         let cfg_text = cfg_res.text().await.unwrap_or_default().trim().to_string();
 
@@ -105,11 +130,21 @@ impl Service {
                 .source_url(base, &format!("/enquiry/captchaDraw.png?{ts}")),
             Some(&cookie_str(&cookies)),
         )
-        .await?;
+        .await
+        .map_err(|e| {
+            if matches!(
+                e,
+                AppError::SourceUnavailable { .. } | AppError::Internal(_)
+            ) {
+                state.failover.record_failure("indian-railways");
+            }
+            e
+        })?;
         cookies.extend(capture_cookies(&img_res));
         let img = img_res.bytes().await.map_err(|e| {
             AppError::source_unavailable(SOURCE, format!("captcha image body: {e}"))
         })?;
+        state.failover.record_success("indian-railways");
 
         let session_id = new_session_id();
         let session = CaptchaSession {
@@ -185,13 +220,23 @@ impl Service {
             &state.config.source_url(base, &query),
             Some(&cookie_str(&cookies)),
         )
-        .await?;
+        .await
+        .map_err(|e| {
+            if matches!(
+                e,
+                AppError::SourceUnavailable { .. } | AppError::Internal(_)
+            ) {
+                state.failover.record_failure("indian-railways");
+            }
+            e
+        })?;
         let body: Value = serde_json::from_slice(&res.bytes().await.map_err(|e| {
             AppError::source_unavailable(SOURCE, format!("CommonCaptcha body: {e}"))
         })?)
         .map_err(|e| {
             AppError::source_unavailable(SOURCE, format!("invalid CommonCaptcha JSON: {e}"))
         })?;
+        state.failover.record_success("indian-railways");
 
         let error_message = body
             .get("errorMessage")

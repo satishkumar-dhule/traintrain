@@ -25,11 +25,37 @@ impl Service {
             }
         }
 
+        if state
+            .failover
+            .should_skip(crate::core::source::metric::NTES)
+        {
+            return Err(AppError::source_unavailable(
+                crate::core::source::labels::NTES,
+                "circuit open — ntes temporarily unavailable (cooldown)",
+            ));
+        }
         let ntes_started = Instant::now();
-        let data = state.ntes_web.heritage_trains(selection).await?;
+        let data = state
+            .ntes_web
+            .heritage_trains(selection)
+            .await
+            .map_err(|e| {
+                if matches!(
+                    e,
+                    AppError::SourceUnavailable { .. } | AppError::Internal(_)
+                ) {
+                    state
+                        .failover
+                        .record_failure(crate::core::source::metric::NTES);
+                }
+                e
+            })?;
         state
             .metrics
             .record_source_latency(crate::core::source::metric::NTES, ntes_started.elapsed());
+        state
+            .failover
+            .record_success(crate::core::source::metric::NTES);
         let resp = map_ntes(data)?;
 
         tracing::info!(

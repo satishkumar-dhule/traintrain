@@ -30,10 +30,16 @@ impl Service {
 
         let origin = |name: &str, source: &str| {
             let sample = metrics.source_latency.iter().find(|s| s.source == source);
+            // Flip-flop: if the circuit is open the origin is degraded, not live.
+            let degraded = !state.failover.is_available(source);
             OriginStatus {
                 name: name.into(),
                 latency: sample.map(|s| s.avg_latency_ms as u64).unwrap_or(0),
-                status: "live".into(),
+                status: if degraded {
+                    "degraded (circuit open)".into()
+                } else {
+                    "live".into()
+                },
                 requests: sample.map(|s| s.samples).unwrap_or(0),
             }
         };
@@ -80,6 +86,19 @@ impl Service {
 
         let logs = log_ring().snapshot(40, None);
 
+        let raw_failover = state.failover.snapshot();
+        state.telemetry.set_failover_snapshot(&raw_failover);
+        let failover = raw_failover
+            .into_iter()
+            .map(|s| crate::models::FailoverStatus {
+                source: s.source,
+                state: format!("{:?}", s.state).to_ascii_lowercase(),
+                consecutive_failures: s.consecutive_failures,
+                available: s.available,
+                open_secs: s.open_secs,
+            })
+            .collect();
+
         ObservabilityResponse {
             active_connections: metrics.in_flight,
             latency_ms: avg as u64,
@@ -100,6 +119,7 @@ impl Service {
             },
             series: to_series_data(&metrics.series),
             logs,
+            failover,
         }
     }
 }

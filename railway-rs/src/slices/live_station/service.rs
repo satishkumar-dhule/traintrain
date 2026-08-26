@@ -28,6 +28,15 @@ impl Service {
             return Ok(cached);
         }
 
+        if state
+            .failover
+            .should_skip(crate::core::source::metric::NTES)
+        {
+            return Err(AppError::source_unavailable(
+                crate::core::source::labels::NTES,
+                "circuit open — ntes temporarily unavailable (cooldown)",
+            ));
+        }
         let start = Instant::now();
         let name = state
             .datasets
@@ -41,11 +50,24 @@ impl Service {
         let data = state
             .ntes_web
             .live_station(station, &name, hours, dest_pair)
-            .await;
+            .await
+            .map_err(|e| {
+                if matches!(
+                    e,
+                    AppError::SourceUnavailable { .. } | AppError::Internal(_)
+                ) {
+                    state
+                        .failover
+                        .record_failure(crate::core::source::metric::NTES);
+                }
+                e
+            })?;
         state
             .metrics
             .record_source_latency(crate::core::source::metric::NTES, start.elapsed());
-        let data = data?;
+        state
+            .failover
+            .record_success(crate::core::source::metric::NTES);
 
         let resp = build_response(station, destination, hours, &data)
             .ok_or_else(|| AppError::internal("NTES: unexpected TrainsAtStationJson shape"))?;

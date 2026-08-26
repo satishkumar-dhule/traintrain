@@ -15,7 +15,29 @@ impl Service {
         state: &AppState,
         train: &str,
     ) -> Result<JourneyStationsResponse, AppError> {
-        let norm = state.ntes_web.journey_stations(train).await?;
+        if state
+            .failover
+            .should_skip(crate::core::source::metric::NTES)
+        {
+            return Err(AppError::source_unavailable(
+                crate::core::source::labels::NTES,
+                "circuit open — ntes temporarily unavailable (cooldown)",
+            ));
+        }
+        let norm = state.ntes_web.journey_stations(train).await.map_err(|e| {
+            if matches!(
+                e,
+                AppError::SourceUnavailable { .. } | AppError::Internal(_)
+            ) {
+                state
+                    .failover
+                    .record_failure(crate::core::source::metric::NTES);
+            }
+            e
+        })?;
+        state
+            .failover
+            .record_success(crate::core::source::metric::NTES);
         let stations: Vec<JourneyStationInfo> = norm
             .get("list")
             .and_then(Value::as_array)
@@ -53,17 +75,59 @@ impl Service {
             return Ok(cached);
         }
 
-        let list = state.ntes_web.journey_stations(train).await?;
+        if state
+            .failover
+            .should_skip(crate::core::source::metric::NTES)
+        {
+            return Err(AppError::source_unavailable(
+                crate::core::source::labels::NTES,
+                "circuit open — ntes temporarily unavailable (cooldown)",
+            ));
+        }
+        let list = state.ntes_web.journey_stations(train).await.map_err(|e| {
+            if matches!(
+                e,
+                AppError::SourceUnavailable { .. } | AppError::Internal(_)
+            ) {
+                state
+                    .failover
+                    .record_failure(crate::core::source::metric::NTES);
+            }
+            e
+        })?;
         let info = journey_station_matching(&list, station).ok_or_else(|| {
             AppError::bad_request(format!(
                 "station {station} is not on the route of train {train}"
             ))
         })?;
         let j_station_value = format!("{}#{}#{}", info.code, info.day_change, info.seq);
+        if state
+            .failover
+            .should_skip(crate::core::source::metric::NTES)
+        {
+            return Err(AppError::source_unavailable(
+                crate::core::source::labels::NTES,
+                "circuit open — ntes temporarily unavailable (cooldown)",
+            ));
+        }
         let norm = state
             .ntes_web
             .journey_station_basis(train, &j_station_value)
-            .await?;
+            .await
+            .map_err(|e| {
+                if matches!(
+                    e,
+                    AppError::SourceUnavailable { .. } | AppError::Internal(_)
+                ) {
+                    state
+                        .failover
+                        .record_failure(crate::core::source::metric::NTES);
+                }
+                e
+            })?;
+        state
+            .failover
+            .record_success(crate::core::source::metric::NTES);
         let status = map_response(&norm)?;
         let resp = JourneyBasisResponse {
             status,
