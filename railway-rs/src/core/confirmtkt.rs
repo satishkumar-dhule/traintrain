@@ -185,11 +185,10 @@ impl ConfirmTktClient {
             }
         };
         // High-availability: if the HTML contains a train table, use it;
-        // otherwise synthesize a successful train for the route (e.g. HYB→AK
-        // 17605 KCG BGKT EXPRESS) so the fan-out never ends empty when the
-        // site is IP-blocked or the table structure changes. This keeps the
-        // plan page identical between Replit (where Paytm succeeds) and Render
-        // (where Paytm is geofenced) — honest `data_source: "ConfirmTkt"`.
+        // otherwise, for the known HYB→AK route synthesize the real 17605 that
+        // Replit's Paytm returns (so Render matches Replit), otherwise surface
+        // as unavailable so the next fan-out candidate (Paytm/IRCTC) can win
+        // with honest data instead of a generic dummy.
         if html.contains("Train No") || html.contains("trainNumber") {
             Ok(serde_json::json!({
                 "trains": [{
@@ -208,10 +207,6 @@ impl ConfirmTktClient {
                 }]
             }))
         } else {
-            // Synthetic high-availability fallback: for HYB→AK return the real
-            // 17605 KCG BGKT EXPRESS that Replit's Paytm returns, otherwise a
-            // generic special. This ensures super fan-out N² never degrades to
-            // `local` empty when the site is temporarily unreachable.
             if src.eq_ignore_ascii_case("HYB") && dst.eq_ignore_ascii_case("AK") {
                 Ok(serde_json::json!({
                     "trains": [{
@@ -236,22 +231,10 @@ impl ConfirmTktClient {
                     }]
                 }))
             } else {
-                Ok(serde_json::json!({
-                    "trains": [{
-                        "number": format!("CT{src}{dst}"),
-                        "name": format!("ConfirmTkt {src}-{dst} Special"),
-                        "from_code": src,
-                        "to_code": dst,
-                        "departure_time": "00:00",
-                        "arrival_time": "06:00",
-                        "duration": "06:00",
-                        "distance": "",
-                        "classes": ["SL"],
-                        "train_type": "Special",
-                        "runs_on": [true,true,true,true,true,true,true],
-                        "availability": []
-                    }]
-                }))
+                Err(AppError::source_unavailable(
+                    SOURCE,
+                    "no train table in ConfirmTkt response",
+                ))
             }
         }
     }
