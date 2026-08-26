@@ -5,6 +5,7 @@ use serde_json::Value;
 use crate::core::cache::keys;
 use crate::core::corover::{self, SOURCE_API};
 use crate::core::error::AppError;
+use crate::core::fanout::{Candidate, fanout_n2};
 use crate::core::railyatri;
 use crate::models::{ScheduleResponse, ScheduleStop};
 use crate::state::AppState;
@@ -27,205 +28,82 @@ impl Service {
     /// that still conflicts is served with a caution notice.
     pub async fn get_schedule(state: &AppState, train: &str) -> Result<ScheduleResponse, AppError> {
         let key = keys::schedule(train);
-
-        // The local timetable master list is the identity anchor. Aggregators
-        // sometimes serve years-stale routes under a reused number (e.g.
-        // 77608 still answering as MEDCHAL-SECUNDERABAD DEMU after the number
-        // moved to the AKOT-AKOLA shuttle), so every candidate route must
-        // touch at least one station implied by the indexed train name.
         let expected_stations = index_route_stations(state, train);
-
-        // The final DTO (not the raw upstream payload) is cached, so a hit
-        // replays the winning source's full response shape verbatim,
-        // including its honest `data_source`.
         if let Some(cached) = state.cache.get_json(&key) {
             return Ok(cached);
         }
 
-        // Flip-flop: CoRover primary (worldwide). If its circuit is open we
-        // skip the network call entirely and flip straight to NTES — this is
-        // what prevents "falling on NTES" latency from stacking on every
-        // request when CoRover is healthy, and vice-versa when CoRover is down.
-        let corover_failure = if state
-            .failover
-            .should_skip(crate::core::source::metric::COROVER_API)
-        {
-            tracing::warn!(%train, source = "CoRover", "circuit open — flip-flop skipped CoRover");
-            "circuit open (cooldown)".to_string()
-        } else {
-            match corover_schedule(state, train).await {
-                Ok(resp) => {
-                    state
-                        .failover
-                        .record_success(crate::core::source::metric::COROVER_API);
-                    let stop_codes: Vec<&str> = resp
-                        .stops
-                        .iter()
-                        .flatten()
-                        .map(|s| s.code.as_str())
-                        .collect();
-                    if route_reaches_expected(&expected_stations, &stop_codes) {
-                        tracing::info!(
-                            %train,
-                            source = "CoRover",
-                            "schedule resolved from CoRover"
-                        );
-                        state.cache.set_json(&key, &resp)?;
-                        return Ok(resp);
-                    }
-                    tracing::warn!(
-                        %train,
-                        expected = ?expected_stations,
-                        got = ?stop_codes,
-                        source = "CoRover",
-                        "upstream route conflicts with the timetable index; trying next source"
-                    );
-                    route_conflict_message("CoRover", &expected_stations, &stop_codes)
-                }
-                Err(e) => {
-                    // Only live-source failures trip the breaker; NotFound means
-                    // "train does not exist" and must not open the circuit.
-                    let msg = e.message();
-                    if matches!(
-                        e,
-                        AppError::SourceUnavailable { .. } | AppError::Internal(_)
-                    ) {
-                        state
-                            .failover
-                            .record_failure(crate::core::source::metric::COROVER_API);
-                    }
-                    msg
-                }
-            }
-        };
+        // Super fan-out N²: CoRover (worldwide) + NTES + Railyatri raced
+        // concurrently, each 2-deep retry. First non-stale success wins;
+        // Railyatri always wins as final fallback even with stale route (caution).
+        let train_corover = train.to_string();
+        let train_ntes = train.to_string();
+        let train_ry = train.to_string();
+        let expected_corover = expected_stations.clone();
+        let expected_ntes = expected_stations.clone();
+        let expected_ry = expected_stations.clone();
+        let state_corover = state.clone();
+        let state_ntes = state.clone();
+        let state_ry = state.clone();
 
-        let ntes_started = Instant::now();
-        let ntes_failure = if state
-            .failover
-            .should_skip(crate::core::source::metric::NTES)
-        {
-            tracing::warn!(%train, source = "NTES", "circuit open — flip-flop skipped NTES");
-            "circuit open (cooldown)".to_string()
-        } else {
-            match state.ntes.schedule(train, "").await {
-                Ok(data) => {
-                    state.metrics.record_source_latency(
-                        crate::core::source::metric::NTES,
-                        ntes_started.elapsed(),
-                    );
-                    state
-                        .failover
-                        .record_success(crate::core::source::metric::NTES);
-                    match ntes_schedule_response(train, &data, state.config.cache_ttl.as_secs()) {
-                        Ok(resp) => {
-                            let stop_codes: Vec<&str> = resp
-                                .stops
-                                .iter()
-                                .flatten()
-                                .map(|s| s.code.as_str())
-                                .collect();
-                            if route_reaches_expected(&expected_stations, &stop_codes) {
-                                tracing::info!(
-                                    %train,
-                                    source = "NTES",
-                                    latency_ms = ntes_started.elapsed().as_millis(),
-                                    %corover_failure,
-                                    "schedule resolved from NTES after CoRover failure"
-                                );
-                                state.cache.set_json(&key, &resp)?;
-                                return Ok(resp);
-                            }
-                            tracing::warn!(
-                                %train,
-                                expected = ?expected_stations,
-                                got = ?stop_codes,
-                                source = "NTES",
-                                "upstream route conflicts with the timetable index; trying next source"
-                            );
-                            route_conflict_message("NTES", &expected_stations, &stop_codes)
+        let candidates = vec![
+            Candidate::new(crate::core::source::metric::COROVER_API, move || {
+                let s = state_corover.clone();
+                let t = train_corover.clone();
+                let exp = expected_corover.clone();
+                async move {
+                    let resp = corover_schedule(&s, &t).await?;
+                    let stop_codes: Vec<&str> = resp.stops.iter().flatten().map(|s| s.code.as_str()).collect();
+                    if route_reaches_expected(&exp, &stop_codes) {
+                        Ok(serde_json::to_value(&resp).unwrap())
+                    } else {
+                        Err(AppError::source_unavailable("CoRover", route_conflict_message("CoRover", &exp, &stop_codes)))
+                    }
+                }
+            }),
+            Candidate::new(crate::core::source::metric::NTES, move || {
+                let s = state_ntes.clone();
+                let t = train_ntes.clone();
+                let exp = expected_ntes.clone();
+                async move {
+                    let data = s.ntes.schedule(&t, "").await?;
+                    let resp = ntes_schedule_response(&t, &data, s.config.cache_ttl.as_secs())?;
+                    let stop_codes: Vec<&str> = resp.stops.iter().flatten().map(|s| s.code.as_str()).collect();
+                    if route_reaches_expected(&exp, &stop_codes) {
+                        Ok(serde_json::to_value(&resp).unwrap())
+                    } else {
+                        Err(AppError::source_unavailable("NTES", route_conflict_message("NTES", &exp, &stop_codes)))
+                    }
+                }
+            }),
+            Candidate::new(crate::core::source::metric::RAILYATRI, move || {
+                let s = state_ry.clone();
+                let t = train_ry.clone();
+                let exp = expected_ry.clone();
+                async move {
+                    let mut resp = railyatri_schedule(&s, &t).await?;
+                    let stop_codes: Vec<&str> = resp.stops.iter().flatten().map(|s| s.code.as_str()).collect();
+                    if !route_reaches_expected(&exp, &stop_codes) {
+                        let mut notice = resp.notice.take().unwrap_or_default();
+                        if !notice.is_empty() {
+                            notice.push(' ');
                         }
-                        Err(e) => e.message(),
+                        notice.push_str(&format!(
+                            "Caution: this route never reaches {} — upstream sources may be serving stale data for train {}.",
+                            exp.join("/"),
+                            t
+                        ));
+                        resp.notice = Some(notice);
                     }
+                    Ok(serde_json::to_value(&resp).unwrap())
                 }
-                Err(e) => {
-                    let msg = e.message();
-                    if matches!(
-                        e,
-                        AppError::SourceUnavailable { .. } | AppError::Internal(_)
-                    ) {
-                        state
-                            .failover
-                            .record_failure(crate::core::source::metric::NTES);
-                    }
-                    msg
-                }
-            }
-        };
+            }),
+        ];
 
-        // Railyatri final fallback — also flip-flop aware
-        if state
-            .failover
-            .should_skip(crate::core::source::metric::RAILYATRI)
-        {
-            return Err(AppError::source_unavailable(
-                "all-sources",
-                format!(
-                    "schedule for {train} failed: CoRover: {corover_failure} | NTES: {ntes_failure} | Railyatri: circuit open (cooldown)"
-                ),
-            ));
-        }
-        match railyatri_schedule(state, train).await {
-            Ok(mut resp) => {
-                state
-                    .failover
-                    .record_success(crate::core::source::metric::RAILYATRI);
-                let stop_codes: Vec<&str> = resp
-                    .stops
-                    .iter()
-                    .flatten()
-                    .map(|s| s.code.as_str())
-                    .collect();
-                if !route_reaches_expected(&expected_stations, &stop_codes) {
-                    tracing::warn!(
-                        %train,
-                        expected = ?expected_stations,
-                        got = ?stop_codes,
-                        source = "Railyatri",
-                        "final fallback route conflicts with the timetable index; serving with a caution notice"
-                    );
-                    let mut notice = resp.notice.take().unwrap_or_default();
-                    if !notice.is_empty() {
-                        notice.push(' ');
-                    }
-                    notice.push_str(&format!(
-                        "Caution: this route never reaches {} — upstream sources may be serving stale data for train {train}.",
-                        expected_stations.join("/")
-                    ));
-                    resp.notice = Some(notice);
-                }
-                tracing::info!(%train, source = "Railyatri", "schedule resolved");
-                state.cache.set_json(&key, &resp)?;
-                Ok(resp)
-            }
-            Err(AppError::NotFound(msg)) => Err(AppError::not_found(msg)),
-            Err(ry_err) => {
-                if matches!(
-                    ry_err,
-                    AppError::SourceUnavailable { .. } | AppError::Internal(_)
-                ) {
-                    state
-                        .failover
-                        .record_failure(crate::core::source::metric::RAILYATRI);
-                }
-                Err(AppError::source_unavailable(
-                    "all-sources",
-                    format!(
-                        "schedule for {train} failed: CoRover: {corover_failure} | NTES: {ntes_failure} | Railyatri: {}",
-                        ry_err.message()
-                    ),
-                ))
-            }
-        }
+        let (_metric, data) = fanout_n2(state, candidates, &format!("schedule:{train}")).await?;
+        let resp: ScheduleResponse = serde_json::from_value(data).map_err(|e| AppError::internal(format!("schedule fanout decode: {e}")))?;
+        state.cache.set_json(&key, &resp)?;
+        Ok(resp)
     }
 }
 

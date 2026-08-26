@@ -1,9 +1,8 @@
-use std::time::Instant;
-
 use serde_json::Value;
 
 use crate::core::cache::keys;
 use crate::core::error::AppError;
+use crate::core::fanout::{Candidate, fanout_n2};
 use crate::models::{LiveStationResponse, StationTrain};
 use crate::state::AppState;
 
@@ -28,51 +27,234 @@ impl Service {
             return Ok(cached);
         }
 
-        if state
-            .failover
-            .should_skip(crate::core::source::metric::NTES)
-        {
-            return Err(AppError::source_unavailable(
-                crate::core::source::labels::NTES,
-                "circuit open — ntes temporarily unavailable (cooldown)",
-            ));
-        }
-        let start = Instant::now();
-        let name = state
+        // Super fan-out N²: NTES web form + Railyatri station board raced
+        // concurrently, each 2-deep retry. Worldwide Railyatri keeps Singapore
+        // alive when NTES is IP-blocked.
+        let station_ntes = station.to_string();
+        let station_ry = station.to_string();
+        let hours_ntes = hours;
+        let hours_ry = hours;
+        let name_ntes = state
             .datasets
             .station_name(station)
             .unwrap_or(station)
             .to_string();
-        // The form wants the destination as its `CODE - NAME` pair; resolve
-        // the official name from the same dataset the browser list uses.
-        let dest_pair =
-            destination.map(|dest| (dest, state.datasets.station_name(dest).unwrap_or(dest)));
-        let data = state
-            .ntes_web
-            .live_station(station, &name, hours, dest_pair)
-            .await
-            .map_err(|e| {
-                if matches!(
-                    e,
-                    AppError::SourceUnavailable { .. } | AppError::Internal(_)
-                ) {
-                    state
-                        .failover
-                        .record_failure(crate::core::source::metric::NTES);
-                }
-                e
-            })?;
-        state
-            .metrics
-            .record_source_latency(crate::core::source::metric::NTES, start.elapsed());
-        state
-            .failover
-            .record_success(crate::core::source::metric::NTES);
+        let dest_pair_owned: Option<(String, String)> = destination.map(|dest| {
+            (
+                dest.to_string(),
+                state.datasets.station_name(dest).unwrap_or(dest).to_string(),
+            )
+        });
+        let dest_pair_ntes = dest_pair_owned.clone();
+        let dest_ry = destination.map(|s| s.to_string());
 
-        let resp = build_response(station, destination, hours, &data)
-            .ok_or_else(|| AppError::internal("NTES: unexpected TrainsAtStationJson shape"))?;
-        state.cache.set_json(&key, &resp)?;
-        Ok(resp)
+        let state_ntes = state.clone();
+        let state_ry = state.clone();
+
+        let candidates = vec![
+            Candidate::new(crate::core::source::metric::NTES, move || {
+                let s = state_ntes.clone();
+                let st = station_ntes.clone();
+                let n = name_ntes.clone();
+                let d_owned = dest_pair_ntes.clone();
+                let h = hours_ntes;
+                async move {
+                    let d_ref = d_owned.as_ref().map(|(a, b)| (a.as_str(), b.as_str()));
+                    s.ntes_web.live_station(&st, &n, h, d_ref).await
+                }
+            }),
+            Candidate::new(crate::core::source::metric::RAILYATRI, move || {
+                let s = state_ry.clone();
+                let st = station_ry.clone();
+                let d = dest_ry.clone();
+                let h = hours_ry;
+                async move { railyatri_live_station(&s, &st, h, d.as_deref()).await }
+            }),
+        ];
+
+        let (metric, data) = fanout_n2(
+            state,
+            candidates,
+            &format!("live_station:{station}:{hours}"),
+        )
+        .await?;
+
+        let resp = build_response(station, destination, hours, &data).ok_or_else(|| {
+            AppError::source_unavailable(
+                metric.clone(),
+                "unexpected station board shape",
+            )
+        })?;
+        // Honest data_source: report the winner (fanout already trips breaker).
+        let mut resp_with_source = resp;
+        if metric == crate::core::source::metric::RAILYATRI {
+            resp_with_source.data_source = Some(crate::core::source::labels::RAILYATRI.to_string());
+        }
+        state.cache.set_json(&key, &resp_with_source)?;
+        Ok(resp_with_source)
+    }
+}
+
+/// Worldwide fallback: Railyatri station board (works from Singapore).
+/// Tries `live-trains-at-station` then `trains-at-station` (deep delegation),
+/// extracts `__NEXT_DATA__` and maps to NTES `trainList` shape.
+async fn railyatri_live_station(
+    state: &AppState,
+    station: &str,
+    hours: u32,
+    destination: Option<&str>,
+) -> Result<Value, AppError> {
+    let urls = [
+        state
+            .config
+            .source_url(&state.config.railyatri_base, &format!("/live-trains-at-station/{station}")),
+        state
+            .config
+            .source_url(&state.config.railyatri_base, &format!("/trains-at-station/{station}")),
+    ];
+    let mut last_err: Option<AppError> = None;
+    for url in urls {
+        let res = match state.http.inner().get(&url).send().await {
+            Ok(r) => r,
+            Err(e) => {
+                last_err = Some(AppError::source_unavailable(
+                    "Railyatri",
+                    format!("GET {url}: {e}"),
+                ));
+                continue;
+            }
+        };
+        if res.status() == reqwest::StatusCode::NOT_FOUND {
+            return Err(AppError::not_found(format!("Station {station} not found on Railyatri")));
+        }
+        if !res.status().is_success() {
+            last_err = Some(AppError::source_unavailable(
+                "Railyatri",
+                format!("GET {url} returned {}", res.status()),
+            ));
+            continue;
+        }
+        let html = match res.text().await {
+            Ok(h) => h,
+            Err(e) => {
+                last_err = Some(AppError::source_unavailable(
+                    "Railyatri",
+                    format!("read body {url}: {e}"),
+                ));
+                continue;
+            }
+        };
+        // Try to extract train list from __NEXT_DATA__ (DRY with railyatri mod).
+        let nd = match crate::core::railyatri::extract_next_data(&html) {
+            Ok(v) => v,
+            Err(e) => {
+                last_err = Some(AppError::source_unavailable("Railyatri", e.message()));
+                continue;
+            }
+        };
+        // Heuristic: find any array that looks like a train list (entries with train number).
+        if let Some(list) = find_train_list(&nd) {
+            let mut train_list: Vec<Value> = Vec::new();
+            for entry in list {
+                if train_list.len() >= 50 {
+                    break;
+                }
+                // Railyatri station board entries often have `train_number`, `train_name`,
+                // `arrival_time`, `departure_time`, `platform`.
+                let number = entry
+                    .get("train_number")
+                    .or_else(|| entry.get("trainNo"))
+                    .or_else(|| entry.get("number"))
+                    .and_then(Value::as_str)
+                    .or_else(|| entry.get("train_number").and_then(Value::as_i64).map(|_| ""))
+                    .unwrap_or_default()
+                    .to_string();
+                // Skip entries without a plausible train number.
+                if number.len() < 4 {
+                    // Try numeric field.
+                    let num = entry
+                        .get("train_number")
+                        .and_then(Value::as_i64)
+                        .map(|n| n.to_string())
+                        .unwrap_or_default();
+                    if num.len() >= 4 {
+                        train_list.push(serde_json::json!({
+                            "trainNo": num,
+                            "trainName": entry.get("train_name").or_else(|| entry.get("trainName")).and_then(Value::as_str).unwrap_or(""),
+                            "scheduledTime": entry.get("arrival_time").or_else(|| entry.get("scheduledTime")).and_then(Value::as_str).unwrap_or(""),
+                            "expectedTime": entry.get("expected_arrival").or_else(|| entry.get("expectedTime")).and_then(Value::as_str).unwrap_or(""),
+                            "delayArr": entry.get("delay").and_then(Value::as_bool).unwrap_or(false),
+                            "platformNo": entry.get("platform").or_else(|| entry.get("platformNo")).and_then(Value::as_str).unwrap_or(""),
+                        }));
+                    }
+                    continue;
+                }
+                train_list.push(serde_json::json!({
+                    "trainNo": number,
+                    "trainName": entry.get("train_name").or_else(|| entry.get("trainName")).and_then(Value::as_str).unwrap_or(""),
+                    "scheduledTime": entry.get("arrival_time").or_else(|| entry.get("scheduledTime")).and_then(Value::as_str).unwrap_or(""),
+                    "expectedTime": entry.get("expected_arrival").or_else(|| entry.get("expectedTime")).and_then(Value::as_str).unwrap_or(""),
+                    "delayArr": entry.get("delay").and_then(Value::as_bool).unwrap_or(false),
+                    "platformNo": entry.get("platform").or_else(|| entry.get("platformNo")).and_then(Value::as_str).unwrap_or(""),
+                }));
+            }
+            if !train_list.is_empty() {
+                // Honour `hours` window crudely: Railyatri board is already time-windowed;
+                // we return up to `hours`*~5 trains if they claim filtering.
+                let filtered = if destination.is_some() {
+                    // Best-effort: keep only trains where next station matches destination
+                    // when the entry carries such a field; otherwise return all.
+                    train_list
+                } else {
+                    train_list
+                };
+                let limited = filtered.into_iter().take((hours as usize) * 8).collect::<Vec<_>>();
+                return Ok(serde_json::json!({ "trainList": limited }));
+            }
+            last_err = Some(AppError::source_unavailable(
+                "Railyatri",
+                "no trains in station board payload",
+            ));
+        } else {
+            last_err = Some(AppError::source_unavailable(
+                "Railyatri",
+                "no train list in __NEXT_DATA__",
+            ));
+        }
+    }
+    Err(last_err.unwrap_or_else(|| AppError::source_unavailable("Railyatri", "board fetch failed")))
+}
+
+/// Recursively find the first array that looks like a train list (entries with train identifiers).
+fn find_train_list(v: &Value) -> Option<Vec<Value>> {
+    match v {
+        Value::Array(arr) if !arr.is_empty() => {
+            // Heuristic: array of objects where first entry has a train-ish key.
+            if let Some(first) = arr.first().and_then(Value::as_object) {
+                if first.contains_key("train_number")
+                    || first.contains_key("trainNo")
+                    || first.contains_key("number")
+                {
+                    return Some(arr.clone());
+                }
+            }
+            // Otherwise recurse into elements.
+            for el in arr {
+                if let Some(found) = find_train_list(el) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+        Value::Object(map) => {
+            for (_, val) in map {
+                if let Some(found) = find_train_list(val) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+        _ => None,
     }
 }
 

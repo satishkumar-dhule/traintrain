@@ -4,6 +4,7 @@ use serde_json::Value;
 
 use crate::core::cache::keys;
 use crate::core::error::AppError;
+use crate::core::fanout::{Candidate, fanout_n2};
 use crate::core::irctc;
 use crate::models::{BetweenTrain, TrainsBetweenResponse};
 use crate::state::AppState;
@@ -28,72 +29,99 @@ impl Service {
             return Ok(cached);
         }
 
-        let ntes_started = Instant::now();
+        // Super fan-out N²: NTES + IRCTC + Paytm raced concurrently.
+        // NTES is primary; IRCTC/Paytm are worldwide-ish booking APIs that
+        // answer from any IP (IRCTC geofenced but less aggressively than NTES).
         let from_name = state.datasets.station_name(src).unwrap_or(src).to_string();
         let to_name = state.datasets.station_name(dst).unwrap_or(dst).to_string();
-        let ntes_failure = if state
-            .failover
-            .should_skip(crate::core::source::metric::NTES)
-        {
-            tracing::warn!(%src, %dst, source = "NTES", "circuit open — flip-flop skipped NTES");
-            "circuit open (cooldown)".to_string()
+        let src_ntes = src.to_string();
+        let dst_ntes = dst.to_string();
+        let from_ntes = from_name.clone();
+        let to_ntes = to_name.clone();
+        let state_ntes = state.clone();
+
+        let src_irctc = src.to_string();
+        let dst_irctc = dst.to_string();
+        let state_irctc = state.clone();
+
+        let src_paytm = src.to_string();
+        let dst_paytm = dst.to_string();
+        let state_paytm = state.clone();
+
+        let candidates = vec![
+            Candidate::new(crate::core::source::metric::NTES, move || {
+                let s = state_ntes.clone();
+                let src = src_ntes.clone();
+                let dst = dst_ntes.clone();
+                let from = from_ntes.clone();
+                let to = to_ntes.clone();
+                async move { s.ntes_web.trains_between(&src, &from, &dst, &to).await }
+            }),
+            Candidate::new(crate::core::source::metric::IRCTC, move || {
+                let s = state_irctc.clone();
+                let src = src_irctc.clone();
+                let dst = dst_irctc.clone();
+                async move {
+                    let today = today_ist();
+                    let data = s.irctc.availability(&src, &dst, &today).await?;
+                    // Normalize to a trains-between shape (Value with "trains")
+                    let norm = irctc::normalize::availability_trains(&data)?;
+                    Ok::<Value, AppError>(norm)
+                }
+            }),
+            Candidate::new(crate::core::source::metric::PAYTM, move || {
+                let s = state_paytm.clone();
+                let src = src_paytm.clone();
+                let dst = dst_paytm.clone();
+                async move {
+                    let today = today_ist();
+                    let data = s.paytm.search(&src, &dst, &today).await?;
+                    let norm = crate::core::paytm::normalize::availability_trains(&data)?;
+                    Ok::<Value, AppError>(norm)
+                }
+            }),
+        ];
+
+        let (metric, data) = fanout_n2(state, candidates, &format!("trains_between:{src}:{dst}")).await?;
+
+        let resp = if metric == crate::core::source::metric::NTES {
+            map_ntes(data, src, dst)?
         } else {
-            match state
-                .ntes_web
-                .trains_between(src, &from_name, dst, &to_name)
-                .await
-            {
-                Ok(data) => {
-                    state.metrics.record_source_latency(
-                        crate::core::source::metric::NTES,
-                        ntes_started.elapsed(),
-                    );
-                    state
-                        .failover
-                        .record_success(crate::core::source::metric::NTES);
-                    match map_ntes(data, src, dst) {
-                        Ok(resp) => {
-                            tracing::info!(
-                                %src,
-                                %dst,
-                                source = "NTES",
-                                latency_ms = ntes_started.elapsed().as_millis(),
-                                "trains-between resolved from NTES"
-                            );
-                            state.cache.set_json(&cache_key, &resp)?;
-                            return Ok(resp);
-                        }
-                        Err(e) => e.message(),
-                    }
-                }
-                Err(e) => {
-                    let msg = e.message();
-                    if matches!(
-                        e,
-                        AppError::SourceUnavailable { .. } | AppError::Internal(_)
-                    ) {
-                        state
-                            .failover
-                            .record_failure(crate::core::source::metric::NTES);
-                    }
-                    msg
-                }
+            // IRCTC/Paytm normalized shape -> BetweenTrain
+            let trains: Vec<BetweenTrain> = data["trains"]
+                .as_array()
+                .map(|list| {
+                    list.iter()
+                        .map(|t| BetweenTrain {
+                            number: str_field(t, "number"),
+                            name: str_field(t, "name"),
+                            departure_time: str_field(t, "departure_time"),
+                            arrival_time: str_field(t, "arrival_time"),
+                            runs_on: t["runs_on"]
+                                .as_array()
+                                .map(|a| a.iter().filter_map(Value::as_bool).collect())
+                                .unwrap_or_default(),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            if trains.is_empty() {
+                return Err(AppError::source_unavailable(metric.clone(), "no trains in response"));
+            }
+            TrainsBetweenResponse {
+                src: Some(src.to_string()),
+                dst: Some(dst.to_string()),
+                trains: Some(trains),
+                data_source: Some(if metric == "irctc" {
+                    irctc::client::SOURCE.to_string()
+                } else {
+                    crate::core::paytm::client::SOURCE.to_string()
+                }),
             }
         };
 
-        match irctc_fallback(state, src, dst, &ntes_failure).await {
-            Ok(resp) => {
-                state.cache.set_json(&cache_key, &resp)?;
-                Ok(resp)
-            }
-            Err(e) => Err(AppError::source_unavailable(
-                "all-sources",
-                format!(
-                    "trains between {src} and {dst} failed: NTES: {ntes_failure} | IRCTC: {}",
-                    e.message()
-                ),
-            )),
-        }
+        state.cache.set_json(&cache_key, &resp)?;
+        Ok(resp)
     }
 }
 
