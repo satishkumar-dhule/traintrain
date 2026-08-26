@@ -23,11 +23,15 @@ impl Service {
             return Ok(resp);
         }
 
-        // Super fan-out N²: NTES average-delay + Railyatri timetable fallback.
-        // Railyatri is worldwide; when NTES is IP-blocked the board still loads.
+        // Super fan-out N² deep: NTES (2 delegates via retry) + Replit proxy
+        // (which itself is NTES but not IP-blocked from Replit) + Railyatri.
+        // This ensures HYB→AK 12951 shows real delays (On Time, 00:12 etc.)
+        // even when Render Singapore is IP-blocked for NTES.
         let train_ntes = train.to_string();
+        let train_proxy = train.to_string();
         let train_ry = train.to_string();
         let state_ntes = state.clone();
+        let state_proxy = state.clone();
         let state_ry = state.clone();
 
         let candidates = vec![
@@ -35,6 +39,61 @@ impl Service {
                 let s = state_ntes.clone();
                 let t = train_ntes.clone();
                 async move { s.ntes_web.average_delay(&t).await }
+            }),
+            Candidate::new("replit-proxy", move || {
+                let t = train_proxy.clone();
+                async move {
+                    // High-availability deep delegate: proxy via Replit dev (not IP-blocked)
+                    let url = format!(
+                        "https://0e9c30bf-6501-4ddd-a725-0281891f9d2d-00-1172yhblxl1si.pike.replit.dev:3000/rail-api/ntes/average-delay?train={}",
+                        urlencoding::encode(&t)
+                    );
+                    let client = reqwest::Client::builder()
+                        .timeout(std::time::Duration::from_secs(4))
+                        .build()
+                        .map_err(|e| AppError::source_unavailable("replit-proxy", format!("client build: {e}")))?;
+                    let res = client
+                        .get(&url)
+                        .send()
+                        .await
+                        .map_err(|e| AppError::source_unavailable("replit-proxy", format!("GET {url}: {e}")))?;
+                    if !res.status().is_success() {
+                        return Err(AppError::source_unavailable(
+                            "replit-proxy",
+                            format!("GET {url} returned {}", res.status()),
+                        ));
+                    }
+                    let data: Value = res
+                        .json()
+                        .await
+                        .map_err(|e| AppError::source_unavailable("replit-proxy", format!("invalid JSON from {url}: {e}")))?;
+                    // Replit's average-delay already has the correct shape (train_no, list, etc.)
+                    // Convert it to the NTES web shape so map_ntes can handle it
+                    if data.get("train_no").is_some() {
+                        let list = data.get("stations").and_then(Value::as_array).cloned().unwrap_or_default();
+                        let mapped_list: Vec<Value> = list
+                            .iter()
+                            .map(|s| {
+                                serde_json::json!({
+                                    "sr": s.get("sr").and_then(Value::as_str).unwrap_or(""),
+                                    "name": s.get("name").and_then(Value::as_str).unwrap_or(""),
+                                    "code": s.get("code").and_then(Value::as_str).unwrap_or(""),
+                                    "arrivalDelay": s.get("arrival_delay").and_then(Value::as_str).unwrap_or(""),
+                                    "departureDelay": s.get("departure_delay").and_then(Value::as_str).unwrap_or("")
+                                })
+                            })
+                            .collect();
+                        Ok(serde_json::json!({
+                            "trainNo": data.get("train_no").and_then(Value::as_str).unwrap_or(&t),
+                            "trainName": data.get("train_name").and_then(Value::as_str).unwrap_or(""),
+                            "daysOfRun": data.get("days_of_run").and_then(Value::as_str).unwrap_or(""),
+                            "trainType": data.get("train_type").and_then(Value::as_str).unwrap_or(""),
+                            "list": mapped_list
+                        }))
+                    } else {
+                        Err(AppError::source_unavailable("replit-proxy", "unexpected shape"))
+                    }
+                }
             }),
             Candidate::new(crate::core::source::metric::RAILYATRI, move || {
                 let s = state_ry.clone();
