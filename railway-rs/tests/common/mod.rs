@@ -323,6 +323,10 @@ impl TestApp {
             "paytm",
             "zen",
             "corover",
+            "confirmtkt",
+            "ixigo",
+            "erail",
+            "indiarailinfo",
         ] {
             let m = MockServer::new();
             m.spawn().await;
@@ -335,6 +339,10 @@ impl TestApp {
         config.ir_base = mocks["ir"].base_url();
         config.irctc_base = mocks["irctc"].base_url();
         config.paytm_base = mocks["paytm"].base_url();
+        config.confirmtkt_base = mocks["confirmtkt"].base_url();
+        config.ixigo_base = mocks["ixigo"].base_url();
+        config.erail_base = mocks["erail"].base_url();
+        config.indiarailinfo_base = mocks["indiarailinfo"].base_url();
         config.ai_base = mocks["zen"].base_url();
         config.corover_base = mocks["corover"].base_url();
 

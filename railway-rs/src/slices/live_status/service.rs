@@ -166,23 +166,13 @@ fn ensure_instances(mut norm: Value) -> Value {
     if has_instances {
         return norm;
     }
-    let train_start = norm
-        .get("train_start_date")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .to_string();
     let stops = norm.get("stops").cloned().unwrap_or(Value::Array(Vec::new()));
-    // Reuse the same synthetic logic as Railyatri: 5 runs centered on train_start_date or today
-    let base = train_start
-        .parse::<chrono::NaiveDate>()
-        .or_else(|_| {
-            // Try DD-MMM-YYYY
-            chrono::NaiveDate::parse_from_str(&train_start, "%d-%b-%Y")
-        })
-        .unwrap_or_else(|_| {
-            let now = chrono::Utc::now().with_timezone(&ist_offset());
-            now.date_naive()
-        });
+    // Always center on today IST so Today±2 are always valid, regardless of
+    // the winning source's train_start_date (e.g. Railyatri 12951's 13-Aug).
+    let base = {
+        let now = chrono::Utc::now().with_timezone(&ist_offset());
+        now.date_naive()
+    };
     let mut instances = Vec::new();
     for offset in -2..=2 {
         let d = base + chrono::Duration::days(offset as i64);

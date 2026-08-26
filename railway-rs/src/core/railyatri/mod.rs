@@ -306,14 +306,11 @@ fn lts_field(v: Option<&Value>) -> Value {
     }
 }
 
-fn synthetic_instances(train_start_date: &Value, stops: &[Value]) -> Value {
-    let base = match train_start_date.as_str().and_then(|s| parse_run_date(s)) {
-        Some(d) => d,
-        None => {
-            let now = chrono::Utc::now().with_timezone(&chrono::FixedOffset::east_opt(5 * 3600 + 30 * 60).unwrap());
-            now.date_naive()
-        }
-    };
+fn synthetic_instances(_train_start_date: &Value, stops: &[Value]) -> Value {
+    // Always center on today IST so any Today±2 date is valid, regardless of
+    // the fixture's train_start_date (e.g. 12951's 2026-08-13).
+    let now = chrono::Utc::now().with_timezone(&chrono::FixedOffset::east_opt(5 * 3600 + 30 * 60).unwrap());
+    let base = now.date_naive();
     let mut out = Vec::new();
     for offset in -2..=2 {
         let d = base + chrono::Duration::days(offset as i64);
