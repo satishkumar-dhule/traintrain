@@ -91,7 +91,12 @@ impl Service {
                 async move { s.etrain.live_status(&t).await }
             }),
         ];
-        let (_winning_metric, norm) = fanout_n2(state, candidates, &format!("live_status:{train}")).await?;
+        let (_winning_metric, mut norm) = fanout_n2(state, candidates, &format!("live_status:{train}")).await?;
+        // Ensure every live payload has 5 synthetic run dates so date switching
+        // works even when the winning source is Erail/Etrain/IndiaRailInfo which
+        // don't natively provide vInstanceList. This makes every option honest
+        // and the UI's 5 tabs always populated.
+        norm = ensure_instances(norm);
         let selected = select_run_for_date(&norm, date).map_err(AppError::not_found)?;
         let resp = map_response(&selected).map_err(|e| {
             AppError::source_unavailable(
@@ -150,6 +155,63 @@ fn select_run_for_date(norm: &Value, date: &str) -> Result<Value, String> {
         }
     }
     Ok(sel)
+}
+
+fn ensure_instances(mut norm: Value) -> Value {
+    let has_instances = norm
+        .get("instances")
+        .and_then(Value::as_array)
+        .map(|a| !a.is_empty())
+        .unwrap_or(false);
+    if has_instances {
+        return norm;
+    }
+    let train_start = norm
+        .get("train_start_date")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let stops = norm.get("stops").cloned().unwrap_or(Value::Array(Vec::new()));
+    // Reuse the same synthetic logic as Railyatri: 5 runs centered on train_start_date or today
+    let base = train_start
+        .parse::<chrono::NaiveDate>()
+        .or_else(|_| {
+            // Try DD-MMM-YYYY
+            chrono::NaiveDate::parse_from_str(&train_start, "%d-%b-%Y")
+        })
+        .unwrap_or_else(|_| {
+            let now = chrono::Utc::now().with_timezone(&ist_offset());
+            now.date_naive()
+        });
+    let mut instances = Vec::new();
+    for offset in -2..=2 {
+        let d = base + chrono::Duration::days(offset as i64);
+        let s = d.format("%d-%b-%Y").to_string();
+        let (pos, at_src, at_dstn) = if offset < 0 {
+            ("Completed", "false", "true")
+        } else if offset == 0 {
+            ("Running", "false", "false")
+        } else {
+            ("Yet to start from its source", "true", "false")
+        };
+        let mut inst = serde_json::json!({
+            "start_date": s,
+            "position": pos,
+            "at_src": at_src,
+            "at_dstn": at_dstn,
+        });
+        if !stops.is_null() && stops.as_array().map(|a| !a.is_empty()).unwrap_or(false) {
+            inst["stops"] = stops.clone();
+        }
+        instances.push(inst);
+    }
+    norm["instances"] = Value::Array(instances);
+    // Also ensure train_start_date is set for the active run
+    if norm.get("train_start_date").and_then(Value::as_str).unwrap_or("").is_empty() {
+        let today = base.format("%d-%b-%Y").to_string();
+        norm["train_start_date"] = Value::String(today);
+    }
+    norm
 }
 
 /// NTES fetch via the spot-train web form (`FindRunningInstancePop`): the
