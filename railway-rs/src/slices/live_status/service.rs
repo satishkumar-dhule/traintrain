@@ -37,14 +37,16 @@ impl Service {
             }
         }
 
-        // Super fan-out N²: NTES (2 delegates via Fanout retry) + Railyatri (worldwide)
-        // — the two high-quality live sources. IndiaRailInfo/Erail/Etrain are
-        // available as deep delegates for other slices (schedule/trains-between)
-        // but for live_status only NTES/Railyatri have honest per-stop actuals.
+        // Super fan-out N² deep: NTES + Railyatri (worldwide) + Replit proxy
+        // (high-availability deep delegate when both are IP-blocked in Singapore).
+        // Each retried, first success wins; static local fallback ensures the UI
+        // never sees a 30s hang.
         let train_ntes = train.to_string();
         let train_ry = train.to_string();
+        let train_proxy = train.to_string();
         let state_ntes = state.clone();
         let state_ry = state.clone();
+        let state_proxy = state.clone();
         let candidates = vec![
             Candidate::new(crate::core::source::metric::NTES, move || {
                 let s = state_ntes.clone();
@@ -55,6 +57,48 @@ impl Service {
                 let s = state_ry.clone();
                 let t = train_ry.clone();
                 async move { railyatri_norm(&s, &t).await }
+            }),
+            Candidate::new("replit-proxy", move || {
+                let t = train_proxy.clone();
+                async move {
+                    let url = format!(
+                        "https://0e9c30bf-6501-4ddd-a725-0281891f9d2d-00-1172yhblxl1si.pike.replit.dev:3000/rail-api/live-status?train={}",
+                        urlencoding::encode(&t)
+                    );
+                    let client = reqwest::Client::builder()
+                        .timeout(std::time::Duration::from_secs(4))
+                        .build()
+                        .map_err(|e| AppError::source_unavailable("replit-proxy", format!("client build: {e}")))?;
+                    let res = client
+                        .get(&url)
+                        .send()
+                        .await
+                        .map_err(|e| AppError::source_unavailable("replit-proxy", format!("GET {url}: {e}")))?;
+                    if !res.status().is_success() {
+                        return Err(AppError::source_unavailable(
+                            "replit-proxy",
+                            format!("GET {url} returned {}", res.status()),
+                        ));
+                    }
+                    let data: Value = res
+                        .json()
+                        .await
+                        .map_err(|e| AppError::source_unavailable("replit-proxy", format!("invalid JSON from {url}: {e}")))?;
+                    // Replit's live-status already has the correct shape (train_number, instances, etc.)
+                    // Convert it back to the normalized Value shape expected by map_response
+                    Ok(serde_json::json!({
+                        "train_number": data.get("train_number").and_then(Value::as_str).unwrap_or(&t),
+                        "train_name": data.get("train_name").and_then(Value::as_str).unwrap_or(""),
+                        "train_start_date": data.get("train_start_date").and_then(Value::as_str).unwrap_or(""),
+                        "at_src": if data.get("current_location_info").and_then(Value::as_str).unwrap_or("").contains("at origin") { "true" } else { "false" },
+                        "at_dstn": if data.get("current_location_info").and_then(Value::as_str).unwrap_or("").contains("Arrived at") { "true" } else { "false" },
+                        "next_station_code": data.get("platform_number").and_then(Value::as_str).unwrap_or(""),
+                        "next_station_name": "",
+                        "stops": data.get("stations").cloned().unwrap_or(Value::Array(vec![])),
+                        "instances": data.get("instances").cloned().unwrap_or(Value::Array(vec![])),
+                        "data_source": data.get("data_source").and_then(Value::as_str).unwrap_or("Railyatri")
+                    }))
+                }
             }),
         ];
         let (_winning_metric, mut norm) = fanout_n2(state, candidates, &format!("live_status:{train}")).await?;
