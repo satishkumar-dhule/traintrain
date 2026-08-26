@@ -32,41 +32,51 @@ impl Service {
             }
         }
 
-        // Super fan-out N²: NTES (2 delegates: with/without kind) + static local
-        // (800ms delayed). Each delegate retried, first success wins.
-        let train_ntes = train.to_string();
-        let train_static = train.to_string();
-        let state_ntes = state.clone();
-        let state_static = state.clone();
+        // Super fan-out N²: NTES (2 delegates: same train, duplicated for N=2) raced,
+        // each retried. First success wins. Static local fallback ensures UI never
+        // sees 30s hang when NTES is IP-blocked (timeout), but honest 404/500
+        // remain 502.
+        let train_ntes1 = train.to_string();
+        let train_ntes2 = train.to_string();
+        let state_ntes1 = state.clone();
+        let state_ntes2 = state.clone();
         let candidates = vec![
             Candidate::new(crate::core::source::metric::NTES, move || {
-                let s = state_ntes.clone();
-                let t = train_ntes.clone();
+                let s = state_ntes1.clone();
+                let t = train_ntes1.clone();
                 async move { s.ntes_web.train_exceptions(&t).await }
             }),
-            Candidate::new("local", move || {
-                let t = train_static.clone();
-                let _s = state_static.clone();
-                async move {
-                    tokio::time::sleep(std::time::Duration::from_millis(800)).await;
-                    Ok::<Value, AppError>(serde_json::json!({
-                        "train": {"number": t, "name": "", "source": "", "destination": ""},
-                        "exceptions": [],
-                        "noData": true
-                    }))
-                }
+            Candidate::new(crate::core::source::metric::NTES, move || {
+                let s = state_ntes2.clone();
+                let t = train_ntes2.clone();
+                async move { s.ntes_web.train_exceptions(&t).await }
             }),
         ];
-        let (metric, data) = fanout_n2(state, candidates, &format!("exceptional:{train}")).await?;
+        let data = match fanout_n2(state, candidates, &format!("exceptional:{train}")).await {
+            Ok((_, v)) => v,
+            Err(e) if matches!(e, AppError::NotFound(_)) => return Err(e),
+            Err(e) => {
+                let msg = e.message().to_lowercase();
+                let is_timeout = msg.contains("timeout") || msg.contains("circuit open") || msg.contains("overall timeout");
+                if !is_timeout {
+                    return Err(e);
+                }
+                tracing::warn!(train, err=%e.message(), "exceptional: live timed out, serving static empty");
+                let synthetic = serde_json::json!({
+                    "train": {"number": train, "name": "", "source": "", "destination": ""},
+                    "exceptions": [],
+                    "noData": true
+                });
+                let mut response = map_response(&synthetic, train, kind, state)
+                    .ok_or_else(|| AppError::internal("unexpected exception-calendar response shape"))?;
+                response.data_source = Some("local".to_string());
+                return Ok(response);
+            }
+        };
         let mut response = map_response(&data, train, kind, state)
             .ok_or_else(|| AppError::internal("unexpected exception-calendar response shape"))?;
-        if metric == "local" {
-            response.data_source = Some("local".to_string());
-        }
-        // Only cache live NTES data for 2 hours; local static is not cached long.
-        if metric == crate::core::source::metric::NTES {
-            state.cache.set_with_ttl(&key, data, EXCEPTIONAL_CACHE_TTL);
-        }
+        // Cache live NTES data for 2 hours.
+        state.cache.set_with_ttl(&key, data, EXCEPTIONAL_CACHE_TTL);
         Ok(response)
     }
 }

@@ -1,8 +1,7 @@
-use std::time::Instant;
-
 use serde_json::Value;
 
 use crate::core::error::AppError;
+use crate::core::fanout::{Candidate, fanout_n2};
 use crate::models::{HeritageResponse, HeritageTrain};
 use crate::state::AppState;
 
@@ -25,45 +24,45 @@ impl Service {
             }
         }
 
-        if state
-            .failover
-            .should_skip(crate::core::source::metric::NTES)
-        {
-            return Err(AppError::source_unavailable(
-                crate::core::source::labels::NTES,
-                "circuit open — ntes temporarily unavailable (cooldown)",
-            ));
-        }
-        let ntes_started = Instant::now();
-        let data = state
-            .ntes_web
-            .heritage_trains(selection)
-            .await
-            .map_err(|e| {
-                if matches!(
-                    e,
-                    AppError::SourceUnavailable { .. } | AppError::Internal(_)
-                ) {
-                    state
-                        .failover
-                        .record_failure(crate::core::source::metric::NTES);
+        // Super fan-out N²: NTES (2 delegates: selection and 0) raced, first success wins.
+        // Static local fallback ensures UI never sees 30s hang when NTES IP-blocked.
+        let sel1 = selection;
+        let sel2 = 0u8;
+        let state1 = state.clone();
+        let state2 = state.clone();
+        let candidates = vec![
+            Candidate::new(crate::core::source::metric::NTES, move || {
+                let s = state1.clone();
+                let sel = sel1;
+                async move { s.ntes_web.heritage_trains(sel).await }
+            }),
+            Candidate::new(crate::core::source::metric::NTES, move || {
+                let s = state2.clone();
+                let sel = sel2;
+                async move { s.ntes_web.heritage_trains(sel).await }
+            }),
+        ];
+        let data = match fanout_n2(state, candidates, &format!("heritage:{selection}")).await {
+            Ok((_, v)) => v,
+            Err(e) if matches!(e, AppError::NotFound(_)) => return Err(e),
+            Err(e) => {
+                let msg = e.message().to_lowercase();
+                let is_timeout = msg.contains("timeout") || msg.contains("circuit open") || msg.contains("overall timeout");
+                if !is_timeout {
+                    return Err(e);
                 }
-                e
-            })?;
-        state
-            .metrics
-            .record_source_latency(crate::core::source::metric::NTES, ntes_started.elapsed());
-        state
-            .failover
-            .record_success(crate::core::source::metric::NTES);
+                tracing::warn!(selection, err=%e.message(), "heritage: live timed out, serving static empty");
+                let resp = HeritageResponse {
+                    selection: Some(selection.to_string()),
+                    total: Some(0),
+                    trains: Some(Vec::new()),
+                    data_source: Some("local".to_string()),
+                };
+                state.cache.set(&cache_key, serde_json::to_value(&resp)?);
+                return Ok(resp);
+            }
+        };
         let resp = map_ntes(data)?;
-
-        tracing::info!(
-            selection,
-            source = "NTES",
-            latency_ms = ntes_started.elapsed().as_millis(),
-            "heritage trains resolved from NTES"
-        );
         state.cache.set(&cache_key, serde_json::to_value(&resp)?);
         Ok(resp)
     }

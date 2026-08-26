@@ -1,5 +1,3 @@
-use std::time::Instant;
-
 use serde_json::Value;
 
 use crate::core::cache::keys;
@@ -48,6 +46,16 @@ impl Service {
         let dst_paytm = dst.to_string();
         let state_paytm = state.clone();
 
+        let src_ct = src.to_string();
+        let dst_ct = dst.to_string();
+        let state_ct = state.clone();
+        let src_ix = src.to_string();
+        let dst_ix = dst.to_string();
+        let state_ix = state.clone();
+        let src_er = src.to_string();
+        let dst_er = dst.to_string();
+        let state_er = state.clone();
+
         let candidates = vec![
             Candidate::new(crate::core::source::metric::NTES, move || {
                 let s = state_ntes.clone();
@@ -64,7 +72,6 @@ impl Service {
                 async move {
                     let today = today_ist();
                     let data = s.irctc.availability(&src, &dst, &today).await?;
-                    // Normalize to a trains-between shape (Value with "trains")
                     let norm = irctc::normalize::availability_trains(&data)?;
                     Ok::<Value, AppError>(norm)
                 }
@@ -80,14 +87,44 @@ impl Service {
                     Ok::<Value, AppError>(norm)
                 }
             }),
+            Candidate::new(crate::core::source::metric::CONFIRMTKT, move || {
+                let s = state_ct.clone();
+                let src = src_ct.clone();
+                let dst = dst_ct.clone();
+                async move {
+                    let today = today_ist();
+                    let data = s.confirmtkt.availability(&src, &dst, &today).await?;
+                    Ok::<Value, AppError>(data)
+                }
+            }),
+            Candidate::new(crate::core::source::metric::IXIGO, move || {
+                let s = state_ix.clone();
+                let src = src_ix.clone();
+                let dst = dst_ix.clone();
+                async move {
+                    let today = today_ist();
+                    let data = s.ixigo.availability(&src, &dst, &today).await?;
+                    Ok::<Value, AppError>(data)
+                }
+            }),
+            Candidate::new(crate::core::source::metric::ERAIL, move || {
+                let s = state_er.clone();
+                let src = src_er.clone();
+                let dst = dst_er.clone();
+                async move {
+                    let data = s.erail.trains_between(&src, &dst).await?;
+                    // Erail returns trainBtwStationList, map directly via map_ntes
+                    Ok::<Value, AppError>(data)
+                }
+            }),
         ];
 
         let (metric, data) = fanout_n2(state, candidates, &format!("trains_between:{src}:{dst}")).await?;
 
-        let resp = if metric == crate::core::source::metric::NTES {
+        let resp = if metric == crate::core::source::metric::NTES || metric == crate::core::source::metric::ERAIL {
             map_ntes(data, src, dst)?
         } else {
-            // IRCTC/Paytm normalized shape -> BetweenTrain
+            // IRCTC/Paytm/ConfirmTkt/Ixigo normalized shape -> BetweenTrain
             let trains: Vec<BetweenTrain> = data["trains"]
                 .as_array()
                 .map(|list| {
@@ -112,10 +149,12 @@ impl Service {
                 src: Some(src.to_string()),
                 dst: Some(dst.to_string()),
                 trains: Some(trains),
-                data_source: Some(if metric == "irctc" {
-                    irctc::client::SOURCE.to_string()
-                } else {
-                    crate::core::paytm::client::SOURCE.to_string()
+                data_source: Some(match metric.as_str() {
+                    "irctc" => irctc::client::SOURCE.to_string(),
+                    "confirmtkt" => crate::core::confirmtkt::SOURCE.to_string(),
+                    "ixigo" => crate::core::ixigo::SOURCE.to_string(),
+                    "erail" => crate::core::erail::SOURCE.to_string(),
+                    _ => crate::core::paytm::client::SOURCE.to_string(),
                 }),
             }
         };
@@ -123,84 +162,6 @@ impl Service {
         state.cache.set_json(&cache_key, &resp)?;
         Ok(resp)
     }
-}
-
-/// IRCTC fallback: direct trains with availability from the no-login
-/// `altAvlEnq/TC` API for today's date (IST), normalized to the same
-/// `BetweenTrain` shape as the NTES payload.
-async fn irctc_fallback(
-    state: &AppState,
-    src: &str,
-    dst: &str,
-    ntes_failure: &str,
-) -> Result<TrainsBetweenResponse, AppError> {
-    if state
-        .failover
-        .should_skip(crate::core::source::metric::IRCTC)
-    {
-        return Err(AppError::source_unavailable(
-            crate::core::source::labels::IRCTC,
-            "circuit open (cooldown)",
-        ));
-    }
-    let start = Instant::now();
-    let today = today_ist();
-    let data = state
-        .irctc
-        .availability(src, dst, &today)
-        .await
-        .map_err(|e| {
-            if matches!(
-                e,
-                AppError::SourceUnavailable { .. } | AppError::Internal(_)
-            ) {
-                state
-                    .failover
-                    .record_failure(crate::core::source::metric::IRCTC);
-            }
-            e
-        })?;
-    state
-        .metrics
-        .record_source_latency(crate::core::source::metric::IRCTC, start.elapsed());
-    state
-        .failover
-        .record_success(crate::core::source::metric::IRCTC);
-
-    let norm = irctc::normalize::availability_trains(&data)?;
-    let trains: Vec<BetweenTrain> = norm["trains"]
-        .as_array()
-        .map(|list| {
-            list.iter()
-                .map(|t| BetweenTrain {
-                    number: str_field(t, "number"),
-                    name: str_field(t, "name"),
-                    departure_time: str_field(t, "departure_time"),
-                    arrival_time: str_field(t, "arrival_time"),
-                    runs_on: t["runs_on"]
-                        .as_array()
-                        .map(|a| a.iter().filter_map(Value::as_bool).collect())
-                        .unwrap_or_default(),
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-
-    tracing::warn!(
-        %src,
-        %dst,
-        source = "IRCTC",
-        %ntes_failure,
-        latency_ms = start.elapsed().as_millis(),
-        "trains-between resolved from IRCTC after NTES failure"
-    );
-
-    Ok(TrainsBetweenResponse {
-        src: Some(src.to_string()),
-        dst: Some(dst.to_string()),
-        trains: Some(trains),
-        data_source: Some(irctc::client::SOURCE.to_string()),
-    })
 }
 
 /// Today's date in IST (UTC+05:30), which is what IRCTC bookings are quoted in.

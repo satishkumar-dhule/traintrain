@@ -47,40 +47,35 @@ impl Service {
             }
         }
 
-        let corover_failure = if state.failover.should_skip(SOURCE_API) {
-            tracing::warn!(%query, source = "CoRover", "circuit open — flip-flop skipped CoRover");
-            "circuit open (cooldown)".to_string()
-        } else {
-            match corover_station_rows(state, query).await {
-                Ok(rows) => {
-                    state.failover.record_success(SOURCE_API);
-                    let rows: Vec<StationRow> =
-                        rows.into_iter().map(StationRow::from).take(limit).collect();
-                    tracing::info!(
-                        %query,
-                        source = "CoRover",
-                        count = rows.len(),
-                        "station search resolved from CoRover"
-                    );
-                    // CoRover typeahead never answers empty for real stations; an
-                    // empty list means the corpus has no such entry yet, so fall
-                    // through to the local authority instead of caching nothing.
-                    if !rows.is_empty() {
-                        cache_rows(state, &key, &rows);
-                        return rows;
-                    }
-                    format!("upstream answered no rows ({SOURCE_API})")
+        let corover_failure = match corover_station_rows(state, query).await {
+            Ok(rows) => {
+                state.failover.record_success(SOURCE_API);
+                let rows: Vec<StationRow> =
+                    rows.into_iter().map(StationRow::from).take(limit).collect();
+                tracing::info!(
+                    %query,
+                    source = "CoRover",
+                    count = rows.len(),
+                    "station search resolved from CoRover"
+                );
+                // CoRover typeahead never answers empty for real stations; an
+                // empty list means the corpus has no such entry yet, so fall
+                // through to the local authority instead of caching nothing.
+                if !rows.is_empty() {
+                    cache_rows(state, &key, &rows);
+                    return rows;
                 }
-                Err(e) => {
-                    let msg = e.message();
-                    if matches!(
-                        e,
-                        AppError::SourceUnavailable { .. } | AppError::Internal(_)
-                    ) {
-                        state.failover.record_failure(SOURCE_API);
-                    }
-                    msg
+                format!("upstream answered no rows ({SOURCE_API})")
+            }
+            Err(e) => {
+                let msg = e.message();
+                if matches!(
+                    e,
+                    AppError::SourceUnavailable { .. } | AppError::Internal(_)
+                ) {
+                    state.failover.record_failure(SOURCE_API);
                 }
+                msg
             }
         };
 

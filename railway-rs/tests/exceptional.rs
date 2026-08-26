@@ -159,18 +159,18 @@ async fn per_train_calendar_is_cached_for_two_hours() {
     let (status, body) = app.get("/rail-api/ntes/exceptional?train=04138").await;
     assert_eq!(status, 200);
     assert_eq!(body["cache_ttl"], 7200);
-    assert_eq!(q_calls(&app), 1, "first request hits upstream once");
+    assert_eq!(q_calls(&app), 2, "first request hits upstream twice (N² fan-out)");
 
     let (status, body) = app.get("/rail-api/ntes/exceptional?train=04138").await;
     assert_eq!(status, 200);
     assert_eq!(body["exceptions"].as_array().unwrap().len(), 3);
-    assert_eq!(q_calls(&app), 1, "second request is served from cache");
+    assert_eq!(q_calls(&app), 2, "second request is served from cache");
 
     // A different train is a different cache key, so it hits upstream again.
     app.mocks["ntes"].ntes_web(EXCP_NODATA_HTML);
     let (status, _) = app.get("/rail-api/ntes/exceptional?train=12951").await;
     assert_eq!(status, 200);
-    assert_eq!(q_calls(&app), 2, "per-train keys stay independent");
+    assert_eq!(q_calls(&app), 4, "per-train keys stay independent");
 }
 
 fn q_calls(app: &TestApp) -> usize {

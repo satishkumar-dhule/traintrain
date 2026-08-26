@@ -12,6 +12,10 @@ pub mod labels {
     pub const COROVER: &str = "CoRover";
     pub const INDIAN_RAILWAYS: &str = "Indian Railways";
     pub const ETRAIN: &str = "etrain";
+    pub const CONFIRMTKT: &str = "ConfirmTkt";
+    pub const IXIGO: &str = "Ixigo";
+    pub const ERAIL: &str = "Erail";
+    pub const INDIARAILINFO: &str = "IndiaRailInfo";
 }
 pub mod metric {
     pub const NTES: &str = "ntes";
@@ -20,6 +24,11 @@ pub mod metric {
     pub const PAYTM: &str = "paytm";
     pub const COROVER_API: &str = "corover-api";
     pub const COROVER_CDN: &str = "corover-cdn";
+    pub const CONFIRMTKT: &str = "confirmtkt";
+    pub const IXIGO: &str = "ixigo";
+    pub const ERAIL: &str = "erail";
+    pub const INDIARAILINFO: &str = "indiarailinfo";
+    pub const ETRAIN: &str = "etrain";
 }
 pub const RETRY_DELAY_MS: u64 = 400;
 pub const BROWSER_UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";

@@ -16,6 +16,10 @@ use std::time::Duration;
 /// - `RAILWAY_SOURCE_IR_BASE`        (default `https://www.indianrail.gov.in`)
 /// - `RAILWAY_SOURCE_IRCTC_BASE`     (default `https://www.irctc.co.in`)
 /// - `RAILWAY_SOURCE_PAYTM_BASE`     (default `https://travel.paytm.com`)
+/// - `RAILWAY_SOURCE_CONFIRMTKT_BASE` (default `https://www.confirmtkt.com`)
+/// - `RAILWAY_SOURCE_IXIGO_BASE`     (default `https://www.ixigo.com`)
+/// - `RAILWAY_SOURCE_ERAIL_BASE`     (default `https://erail.in`)
+/// - `RAILWAY_SOURCE_INDIA_RAIL_INFO_BASE` (default `https://indiarailinfo.com`)
 /// - `RAILWAY_AI_ENABLED`    (default `true`) — master switch for AI endpoints
 /// - `RAILWAY_AI_BASE`       (default `https://opencode.ai/zen/v1`) — OpenAI-compatible
 ///   inference gateway; override to point at any compatible server
@@ -47,6 +51,10 @@ pub struct Config {
     pub ir_base: String,
     pub irctc_base: String,
     pub paytm_base: String,
+    pub confirmtkt_base: String,
+    pub ixigo_base: String,
+    pub erail_base: String,
+    pub indiarailinfo_base: String,
     pub ai_enabled: bool,
     pub ai_base: String,
     pub ai_model: String,
@@ -81,6 +89,10 @@ impl Default for Config {
             ir_base: "https://www.indianrail.gov.in".to_string(),
             irctc_base: "https://www.irctc.co.in".to_string(),
             paytm_base: "https://travel.paytm.com".to_string(),
+            confirmtkt_base: "https://www.confirmtkt.com".to_string(),
+            ixigo_base: "https://www.ixigo.com".to_string(),
+            erail_base: "https://erail.in".to_string(),
+            indiarailinfo_base: "https://indiarailinfo.com".to_string(),
             ai_enabled: true,
             ai_base: "https://opencode.ai/zen/v1".to_string(),
             ai_model: "x-preview-f-free".to_string(),
@@ -119,6 +131,12 @@ impl Config {
             ir_base: std::env::var("RAILWAY_SOURCE_IR_BASE").unwrap_or(d.ir_base),
             irctc_base: std::env::var("RAILWAY_SOURCE_IRCTC_BASE").unwrap_or(d.irctc_base),
             paytm_base: std::env::var("RAILWAY_SOURCE_PAYTM_BASE").unwrap_or(d.paytm_base),
+            confirmtkt_base: std::env::var("RAILWAY_SOURCE_CONFIRMTKT_BASE")
+                .unwrap_or(d.confirmtkt_base),
+            ixigo_base: std::env::var("RAILWAY_SOURCE_IXIGO_BASE").unwrap_or(d.ixigo_base),
+            erail_base: std::env::var("RAILWAY_SOURCE_ERAIL_BASE").unwrap_or(d.erail_base),
+            indiarailinfo_base: std::env::var("RAILWAY_SOURCE_INDIA_RAIL_INFO_BASE")
+                .unwrap_or(d.indiarailinfo_base),
             ai_enabled: std::env::var("RAILWAY_AI_ENABLED")
                 .map(|v| {
                     !matches!(

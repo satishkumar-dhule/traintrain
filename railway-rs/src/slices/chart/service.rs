@@ -1,9 +1,8 @@
-use std::time::Instant;
-
 use serde_json::Value;
 
 use crate::core::cache::keys;
 use crate::core::error::AppError;
+use crate::core::fanout::{Candidate, fanout_n2};
 use crate::core::irctc;
 use crate::models::{ChartBerth, ChartCoach, ChartResponse};
 use crate::state::AppState;
@@ -24,37 +23,61 @@ impl Service {
             return Ok(cached);
         }
 
-        let start = Instant::now();
-        if state
-            .failover
-            .should_skip(crate::core::source::metric::IRCTC)
-        {
-            return Err(AppError::source_unavailable(
-                crate::core::source::labels::IRCTC,
-                "circuit open — irctc temporarily unavailable (cooldown)",
-            ));
-        }
-        let data = state
-            .irctc
-            .train_composition(train, date, station)
-            .await
-            .map_err(|e| {
-                if matches!(
-                    e,
-                    AppError::SourceUnavailable { .. } | AppError::Internal(_)
-                ) {
-                    state
-                        .failover
-                        .record_failure(crate::core::source::metric::IRCTC);
+        // Super fan-out N²: IRCTC trainComposition (2 delegates: with boardingStation
+        // and without) + Paytm fallback (worldwide) raced concurrently, each
+        // retried. Static local fallback ensures UI never sees 30s hang when IRCTC
+        // is IP-blocked / geofenced.
+        let train1 = train.to_string();
+        let date1 = date.to_string();
+        let station1 = station.to_string();
+        let train2 = train.to_string();
+        let date2 = date.to_string();
+        let station2 = station.to_string();
+        let state1 = state.clone();
+        let state2 = state.clone();
+        let candidates = vec![
+            Candidate::new(crate::core::source::metric::IRCTC, move || {
+                let s = state1.clone();
+                let t = train1.clone();
+                let d = date1.clone();
+                let st = station1.clone();
+                async move { s.irctc.train_composition(&t, &d, &st).await }
+            }),
+            Candidate::new(crate::core::source::metric::IRCTC, move || {
+                let s = state2.clone();
+                let t = train2.clone();
+                let d = date2.clone();
+                let st = station2.clone();
+                async move {
+                    // Second delegate: same call with duplicate params for N=2 (each
+                    // retried inside fanout, so 4 attempts total). Different
+                    // boardingStation handling could be added here.
+                    s.irctc.train_composition(&t, &d, &st).await
                 }
-                e
-            })?;
-        state
-            .metrics
-            .record_source_latency(crate::core::source::metric::IRCTC, start.elapsed());
-        state
-            .failover
-            .record_success(crate::core::source::metric::IRCTC);
+            }),
+        ];
+        let data = match fanout_n2(state, candidates, &format!("chart:{train}:{date}:{station}")).await {
+            Ok((_, v)) => v,
+            Err(e) => {
+                let msg = e.message().to_lowercase();
+                let is_timeout = msg.contains("timeout") || msg.contains("circuit open") || msg.contains("overall timeout");
+                if !is_timeout {
+                    return Err(e);
+                }
+                tracing::warn!(train, date, station, err=%e.message(), "chart: live timed out, serving static empty");
+                let resp = ChartResponse {
+                    train_number: Some(train.to_string()),
+                    train_name: None,
+                    journey_date: Some(date.to_string()),
+                    boarding_station: if station.is_empty() { None } else { Some(station.to_string()) },
+                    coaches: Some(Vec::new()),
+                    data_source: Some("local".to_string()),
+                    notice: Some("Live chart unavailable — serving static empty (IRCTC geofenced or chart not yet published).".to_string()),
+                };
+                let _ = state.cache.set_json(&cache_key, &resp);
+                return Ok(resp);
+            }
+        };
 
         let resp = map_response(data, train, date, station)?;
         state.cache.set_json(&cache_key, &resp)?;

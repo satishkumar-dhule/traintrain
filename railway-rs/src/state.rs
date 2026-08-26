@@ -4,10 +4,15 @@ use std::time::Instant;
 use crate::config::Config;
 use crate::core::ai::{AiBackend, AiClient};
 use crate::core::cache::Cache;
+use crate::core::confirmtkt::ConfirmTktClient;
 use crate::core::corover::CoroverClient;
+use crate::core::erail::ErailClient;
+use crate::core::etrain::EtrainClient;
 use crate::core::failover::Failover;
 use crate::core::http::HttpClient;
+use crate::core::indiarailinfo::IndiaRailInfoClient;
 use crate::core::irctc::IrctcClient;
+use crate::core::ixigo::IxigoClient;
 use crate::core::metrics::{Metrics, SharedMetrics};
 use crate::core::ntes::{NtesClient, NtesWebClient};
 use crate::core::obs::Telemetry;
@@ -27,6 +32,11 @@ pub struct AppState {
     pub ntes_web: NtesWebClient,
     pub irctc: IrctcClient,
     pub paytm: PaytmClient,
+    pub confirmtkt: ConfirmTktClient,
+    pub ixigo: IxigoClient,
+    pub erail: ErailClient,
+    pub indiarailinfo: IndiaRailInfoClient,
+    pub etrain: EtrainClient,
     /// Primary AI backend (OpenAI-compatible zen gateway).
     pub ai: Arc<dyn AiBackend>,
     pub datasets: Arc<Datasets>,
@@ -50,6 +60,11 @@ impl AppState {
         let ntes_web = NtesWebClient::new(&http, &config.ntes_base);
         let irctc = IrctcClient::new(&http, &config.irctc_base);
         let paytm = PaytmClient::new(&http, &config.paytm_base);
+        let confirmtkt = ConfirmTktClient::new(&http, &config.confirmtkt_base);
+        let ixigo = IxigoClient::new(&http, &config.ixigo_base);
+        let erail = ErailClient::new(&http, &config.erail_base);
+        let indiarailinfo = IndiaRailInfoClient::new(&http, &config.indiarailinfo_base);
+        let etrain = EtrainClient::new(&http, &config.etrain_base);
         let ai = Arc::new(AiClient::new(
             &config.ai_base,
             &config.ai_model,
@@ -80,6 +95,11 @@ impl AppState {
             ntes_web,
             irctc,
             paytm,
+            confirmtkt,
+            ixigo,
+            erail,
+            indiarailinfo,
+            etrain,
             ai,
             datasets,
             retrieval,

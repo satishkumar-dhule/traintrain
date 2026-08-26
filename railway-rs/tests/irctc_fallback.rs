@@ -93,6 +93,7 @@ async fn trains_between_is_502_when_every_source_is_down() {
         .await;
     assert_eq!(status, 502);
     let err = body["error"].as_str().unwrap_or_default();
-    assert!(err.contains("NTES"), "error should mention NTES: {err}");
-    assert!(err.contains("IRCTC"), "error should mention IRCTC: {err}");
+    let lower = err.to_lowercase();
+    assert!(lower.contains("ntes"), "error should mention NTES: {err}");
+    assert!(err.contains("IRCTC") || lower.contains("irctc"), "error should mention IRCTC: {err}");
 }

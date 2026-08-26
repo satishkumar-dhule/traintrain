@@ -60,13 +60,6 @@ impl Service {
             }
         }
 
-        if state.failover.should_skip("indian-railways") {
-            return Err(AppError::source_unavailable(
-                SOURCE,
-                "circuit open — indian-railways temporarily unavailable (cooldown)",
-            ));
-        }
-
         match captcha {
             None => Self::challenge(state, pnr).await,
             Some(answer) => Self::answer(state, pnr, &answer).await,
