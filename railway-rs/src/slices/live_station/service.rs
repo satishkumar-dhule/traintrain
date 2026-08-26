@@ -72,12 +72,29 @@ impl Service {
             }),
         ];
 
-        let (metric, data) = fanout_n2(
+        // Fan-out with static local fallback (fool-proof): if both live
+        // sources are IP-blocked / 404, serve a static board from the local
+        // dataset so the UI never times out (honest `data_source: "local"`).
+        let live_result = fanout_n2(
             state,
             candidates,
             &format!("live_station:{station}:{hours}"),
         )
-        .await?;
+        .await;
+
+        let (metric, data) = match live_result {
+            Ok(v) => v,
+            Err(live_err) => {
+                tracing::warn!(%station, %hours, err=%live_err.message(), "live_station: live sources failed, serving static fallback");
+                if let Some(static_resp) = static_board(state, station, destination, hours) {
+                    let mut r = static_resp;
+                    r.data_source = Some("local".to_string());
+                    state.cache.set_json(&key, &r)?;
+                    return Ok(r);
+                }
+                return Err(live_err);
+            }
+        };
 
         let resp = build_response(station, destination, hours, &data).ok_or_else(|| {
             AppError::source_unavailable(
@@ -256,6 +273,31 @@ fn find_train_list(v: &Value) -> Option<Vec<Value>> {
         }
         _ => None,
     }
+}
+
+fn static_board(
+    state: &AppState,
+    station: &str,
+    destination: Option<&str>,
+    hours: u32,
+) -> Option<LiveStationResponse> {
+    let _rec = state
+        .datasets
+        .stations
+        .iter()
+        .find(|s| s.code.eq_ignore_ascii_case(station))?;
+    // Static fallback: we know the station exists (train_count) but live
+    // board is currently unavailable (IP-block). Return an empty board with
+    // an honest notice so the UI shows the station header instead of timing
+    // out. The datasets know train_count, coords, etc., so we can still
+    // render the station page shell.
+    Some(LiveStationResponse {
+        station: Some(station.to_uppercase()),
+        destination: destination.map(|d| d.to_uppercase()),
+        hours: Some(hours as u8),
+        trains: Some(Vec::new()),
+        data_source: Some("local".to_string()),
+    })
 }
 
 fn build_response(

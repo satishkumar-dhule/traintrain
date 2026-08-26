@@ -19,8 +19,8 @@ use crate::state::AppState;
 /// increments the breaker. The winning source is reported honestly in
 /// `data_source` by the caller.
 
-const PER_SOURCE_TIMEOUT: Duration = Duration::from_secs(8);
-const OVERALL_TIMEOUT: Duration = Duration::from_millis(11_000);
+const PER_SOURCE_TIMEOUT: Duration = Duration::from_secs(5);
+const OVERALL_TIMEOUT: Duration = Duration::from_millis(10_500);
 const RETRY_DELAY: Duration = Duration::from_millis(200);
 
 use std::future::Future;
