@@ -105,6 +105,40 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app).await?;
+    let shutdown_grace = Duration::from_secs(config.shutdown_grace_secs);
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal(shutdown_grace))
+        .await?;
     Ok(())
+}
+
+/// Graceful shutdown handler — listens for SIGTERM/SIGINT and drains in-flight requests.
+/// Pattern: Graceful Shutdown — drain with grace period, log SRE marker.
+/// Logs exactly "SRE: graceful shutdown — draining in-flight requests" on signal.
+async fn shutdown_signal(grace: Duration) {
+    let ctrl_c = async {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("failed to install CtrlC handler");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut sig) => sig.recv().await,
+            Err(_) => std::future::pending::<Option<()>>().await,
+        };
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {},
+    }
+
+    tracing::info!("SRE: graceful shutdown — draining in-flight requests");
+    // Allow in-flight requests to finish within grace period
+    tokio::time::sleep(grace).await;
 }

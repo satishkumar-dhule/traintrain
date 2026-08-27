@@ -8,6 +8,8 @@ use crate::state::AppState;
 
 /// Fool-proof super fan-out N² deep delegation.
 ///
+/// Pattern: Request Hedging — fan-out N×2 race N upstreams, cancel losers; p95 hedged
+/// Pattern: Timeout Budget — per-source 5s, overall 10.5s deadline propagation
 /// For `N` logical sources we fan-out to `N×2` delegates concurrently:
 /// each source contributes 2 delegates (e.g. NTES `ntes_web` vs `ntes`
 /// API, Railyatri SSR vs API, or two param variants), and each delegate

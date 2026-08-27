@@ -17,11 +17,16 @@ use tower_http::catch_panic::CatchPanicLayer;
 use tower_http::services::ServeDir;
 use tower_http::timeout::TimeoutLayer;
 use tower_http::trace::TraceLayer;
+use tracing::Instrument;
 
 use crate::core::metrics::RequestGuard;
 use crate::slices;
 use crate::state::AppState;
 use crate::system;
+
+/// Request ID extension stored in request extensions for handlers.
+#[derive(Clone, Debug)]
+pub struct RequestId(pub String);
 
 /// Build the full application router (slices + system + static) and materialize
 /// it with `state`. Slices return `Router<AppState>`; this is the single place
@@ -36,6 +41,9 @@ use crate::system;
 ///   safety, tracing, logging and security headers still apply.
 pub fn router(state: AppState, static_dir: PathBuf) -> Router {
     let index = static_dir.join("index.html");
+
+    // Pattern: Timeout Budget — SRE budget aware: 30s outer (configurable), 5s per upstream via fanout
+    let timeout_secs = state.config.request_timeout_secs;
 
     let mut buffered = Router::new()
         .merge(system::router())
@@ -63,22 +71,39 @@ pub fn router(state: AppState, static_dir: PathBuf) -> Router {
     if state.askdisha.is_some() {
         buffered = buffered.merge(slices::askdisha::router());
     }
+    // Middleware order (outermost -> innermost): request_id outermost, then metrics, rate_limit, bulkhead, trace, catch_panic, timeout
+    // Since axum's .layer makes last added = outermost, we add innermost first.
     let buffered = buffered
-        .layer(middleware::from_fn_with_state(state.clone(), metrics_mw))
+        // Pattern: Timeout Budget — per-request deadline propagation; 30s outer, 5s per upstream via fanout
+        .layer(TimeoutLayer::new(Duration::from_secs(timeout_secs)))
         .layer(CatchPanicLayer::new())
         .layer(TraceLayer::new_for_http())
-        .layer(TimeoutLayer::new(Duration::from_secs(30)));
+        // Pattern: Bulkhead — isolate failure domains via semaphore, must not block healthz
+        .layer(middleware::from_fn_with_state(state.clone(), bulkhead_mw))
+        // Pattern: Load Shedding — shed when in_flight > threshold or memory high, 503 + Retry-After
+        .layer(middleware::from_fn_with_state(state.clone(), load_shed_mw))
+        // Pattern: Rate Limiting — token bucket per IP, 429 when exceeded
+        .layer(middleware::from_fn_with_state(state.clone(), rate_limit_mw))
+        .layer(middleware::from_fn_with_state(state.clone(), metrics_mw));
 
     let streaming = Router::new()
         .merge(slices::ai_chat::router())
         .layer(CatchPanicLayer::new())
-        .layer(TraceLayer::new_for_http());
+        .layer(TraceLayer::new_for_http())
+        // Pattern: Bulkhead for streaming as well (isolated)
+        .layer(middleware::from_fn_with_state(state.clone(), bulkhead_mw))
+        // Pattern: Load Shedding for streaming
+        .layer(middleware::from_fn_with_state(state.clone(), load_shed_mw))
+        // Pattern: Rate Limiting for streaming
+        .layer(middleware::from_fn_with_state(state.clone(), rate_limit_mw));
 
     Router::new()
         .merge(buffered)
         .merge(streaming)
         .layer(middleware::from_fn(security_headers_mw))
         .layer(middleware::from_fn(request_log_mw))
+        // Pattern: Request ID tracing — generate UUID v4 per request, X-Request-Id header, propagate into tracing spans. Outermost.
+        .layer(middleware::from_fn(request_id_mw))
         .fallback_service({
             let spa_index_path = index.clone();
             tower::ServiceBuilder::new()
@@ -107,6 +132,157 @@ async fn api_404() -> impl IntoResponse {
         axum::http::StatusCode::NOT_FOUND,
         Json(json!({ "error": "not found" })),
     )
+}
+
+/// Pattern: Request Hedging note — see fanout.rs for fan-out N×2 hedging
+
+/// RequestIdLayer: generate UUID v4 per request, inject X-Request-Id header, propagate into tracing spans.
+/// Pattern: Request Hedging is also covered via fanout, but this layer ensures per-request traceability.
+async fn request_id_mw(mut req: Request, next: Next) -> Response {
+    // Generate UUID v4
+    let id = uuid::Uuid::new_v4().to_string();
+    // Stash in extensions for handlers
+    req.extensions_mut().insert(RequestId(id.clone()));
+    // Also set header on request for downstream tracing
+    if let Ok(val) = HeaderValue::from_str(&id) {
+        req.headers_mut().insert("x-request-id", val);
+    }
+    // Create span with request_id
+    let method = req.method().clone();
+    let path = req.uri().path().to_string();
+    let span = tracing::info_span!("request", request_id = %id, method = %method, path = %path);
+    let mut res = async move { next.run(req).await }.instrument(span).await;
+    // Inject header into response
+    if let Ok(val) = HeaderValue::from_str(&id) {
+        res.headers_mut().insert("x-request-id", val);
+    }
+    res
+}
+
+/// Helper: extract client IP for rate limiting (X-Forwarded-For first entry, else X-Real-IP, else unknown).
+fn client_ip(req: &Request) -> String {
+    if let Some(forwarded) = req.headers().get("x-forwarded-for").and_then(|v| v.to_str().ok()) {
+        if let Some(first) = forwarded.split(',').next().map(|s| s.trim()).filter(|s| !s.is_empty()) {
+            return first.to_string();
+        }
+    }
+    if let Some(real) = req.headers().get("x-real-ip").and_then(|v| v.to_str().ok()) {
+        if !real.trim().is_empty() {
+            return real.trim().to_string();
+        }
+    }
+    // Fallback to peer IP via extensions if available (ConnectInfo), else unknown
+    // We also check for forwarded header set by tests via reqwest.
+    "unknown".to_string()
+}
+
+fn is_health_path(path: &str) -> bool {
+    matches!(
+        path,
+        "/healthz"
+            | "/api/healthz"
+            | "/metrics"
+            | "/metrics/"
+            | "/readyz"
+            | "/ready"
+            | "/health/ready"
+            | "/health/live"
+            | "/api/readyz"
+    ) || path.starts_with("/healthz")
+        || path.starts_with("/health/ready")
+        || path.starts_with("/health/live")
+        || path.starts_with("/readyz")
+        || path.starts_with("/ready")
+}
+
+/// Pattern: Rate Limiting — token bucket per IP (100 rps, burst 50) returning 429
+async fn rate_limit_mw(State(state): State<AppState>, req: Request, next: Next) -> Response {
+    // Pattern: Rate Limiting
+    let path = req.uri().path().to_string();
+    // Bypass health checks from rate limiting to keep probes reliable
+    if is_health_path(&path) {
+        return next.run(req).await;
+    }
+    let ip = client_ip(&req);
+    if !state.rate_limiter.check(&ip) {
+        state.telemetry.inc_rate_limited();
+        let body = Json(json!({ "error": "rate limited", "retry_after": 1 }));
+        let mut res = (axum::http::StatusCode::TOO_MANY_REQUESTS, body).into_response();
+        res.headers_mut()
+            .insert(header::RETRY_AFTER, HeaderValue::from_static("1"));
+        // Ensure request-id if not already set by outer layer? Outer layer already sets, but we also ensure.
+        if let Some(req_id) = req.extensions().get::<RequestId>() {
+            if let Ok(v) = HeaderValue::from_str(&req_id.0) {
+                res.headers_mut().insert("x-request-id", v);
+            }
+        }
+        return res;
+    }
+    next.run(req).await
+}
+
+/// Pattern: Bulkhead — concurrency limit via semaphore (512 default), must not block healthz
+async fn bulkhead_mw(State(state): State<AppState>, req: Request, next: Next) -> Response {
+    // Pattern: Bulkhead
+    let path = req.uri().path().to_string();
+    if is_health_path(&path) {
+        return next.run(req).await;
+    }
+    // Try to acquire bulkhead permit without waiting (fail fast)
+    let permit = match state.bulkhead.clone().try_acquire_owned() {
+        Ok(p) => p,
+        Err(_) => {
+            state.telemetry.inc_bulkhead_rejected();
+            let body = Json(json!({ "error": "bulkhead saturated", "retry_after": 5 }));
+            let mut res = (axum::http::StatusCode::SERVICE_UNAVAILABLE, body).into_response();
+            res.headers_mut()
+                .insert(header::RETRY_AFTER, HeaderValue::from_static("5"));
+            if let Some(req_id) = req.extensions().get::<RequestId>() {
+                if let Ok(v) = HeaderValue::from_str(&req_id.0) {
+                    res.headers_mut().insert("x-request-id", v);
+                }
+            }
+            return res;
+        }
+    };
+    let res = next.run(req).await;
+    drop(permit);
+    res
+}
+
+/// Pattern: Load Shedding — when in_flight > threshold or memory high, 503 + Retry-After
+async fn load_shed_mw(State(state): State<AppState>, req: Request, next: Next) -> Response {
+    // Pattern: Load Shedding
+    let path = req.uri().path().to_string();
+    if is_health_path(&path) {
+        return next.run(req).await;
+    }
+    let in_flight = state.metrics.snapshot().in_flight;
+    let threshold = state.config.load_shed_threshold;
+    let (_, mem_bytes) = crate::core::obs::proc_stats();
+    // memory limit 2 GiB (configurable via threshold; we use 2048 MB)
+    let mem_limit = (crate::core::sre::SATURATION_MEMORY_THRESHOLD_MB * 1024.0 * 1024.0) as u64;
+    let should_shed = in_flight > threshold || (mem_limit > 0 && mem_bytes > mem_limit);
+    if should_shed {
+        state.telemetry.inc_load_shed();
+        let body = Json(json!({
+            "error": "service overloaded",
+            "retry_after": 5,
+            "in_flight": in_flight,
+            "threshold": threshold
+        }));
+        let mut res = (axum::http::StatusCode::SERVICE_UNAVAILABLE, body).into_response();
+        res.headers_mut()
+            .insert(header::RETRY_AFTER, HeaderValue::from_static("5"));
+        if let Some(req_id) = req.extensions().get::<RequestId>() {
+            if let Ok(v) = HeaderValue::from_str(&req_id.0) {
+                res.headers_mut().insert("x-request-id", v);
+            }
+        }
+        tracing::warn!(in_flight, threshold, mem_bytes, "load shed: in_flight > threshold");
+        return res;
+    }
+    next.run(req).await
 }
 
 /// Record per-request path counters, in-flight count, status code, latency and
@@ -149,6 +325,12 @@ async fn request_log_mw(req: Request, next: Next) -> Response {
         .to_string();
     let start = Instant::now();
     let res = next.run(req).await;
+    // include request_id if present
+    let req_id = res
+        .headers()
+        .get("x-request-id")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("-");
     log_request(
         method.as_str(),
         &path,
@@ -156,6 +338,7 @@ async fn request_log_mw(req: Request, next: Next) -> Response {
         res.status(),
         start.elapsed(),
     );
+    tracing::debug!(request_id = %req_id, path = %path, "request_id trace");
     res
 }
 

@@ -1,6 +1,12 @@
 //! State-of-the-art observability: Prometheus /metrics, instantaneous CPU/RSS
 //! sampling, and an in-memory structured-log ring that backs the dashboard's
 //! live log stream (`/rail-api/logs`) without needing an external log shipper.
+//!
+//! Instrumentation follows Google SRE:
+//! - Pattern: RED — Rate, Errors, Duration per microservice (Tom Wilkie)
+//! - Pattern: USE — Utilization, Saturation, Errors per resource (Brendan Gregg)
+//! - Pattern: Saturation — CPU, memory, in_flight, RPS vs thresholds
+//! - Pattern: SLO — availability SLI, error budget, burn rate (SRE Ch.4)
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::Ordering;
@@ -8,7 +14,8 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use prometheus::{
-    Encoder, Gauge, GaugeVec, HistogramVec, IntCounterVec, IntGauge, Opts, Registry, TextEncoder,
+    Encoder, Gauge, GaugeVec, HistogramVec, IntCounter, IntCounterVec, IntGauge, Opts, Registry,
+    TextEncoder,
 };
 use serde_json::{json, Value};
 use tracing::field::Visit;
@@ -87,6 +94,7 @@ fn utime_plus_stime(stat: &str) -> Option<u64> {
 /// task refreshes the gauges via `sample`.
 pub struct Telemetry {
     registry: Registry,
+    // --- Core HTTP / process ---
     http_requests: IntCounterVec,
     http_duration_seconds: HistogramVec,
     http_in_flight: IntGauge,
@@ -103,6 +111,67 @@ pub struct Telemetry {
     circuit_state: GaugeVec,
     circuit_failures: GaugeVec,
     circuit_open_seconds: GaugeVec,
+    // --- Pattern: SLO ---
+    /// Pattern: SLO — availability SLI (0.0..1.0)
+    slo_availability: Gauge,
+    /// Pattern: SLO — error budget remaining (0.0..1.0)
+    slo_error_budget_remaining: Gauge,
+    /// Pattern: SLO — error budget consumed (0.0..inf)
+    slo_error_budget_consumed: Gauge,
+    /// Pattern: SLO — burn rate (error_rate / budget)
+    slo_burn_rate: Gauge,
+    /// Pattern: SLO — target availability constant (0.999)
+    slo_availability_target: Gauge,
+    // --- Pattern: Saturation ---
+    /// Pattern: Saturation — cpu fraction (0.0..1.0) headroom vs 0.80 threshold
+    saturation_cpu: Gauge,
+    /// Pattern: Saturation — memory in MB vs 2048 threshold
+    saturation_memory: Gauge,
+    /// Pattern: Saturation — memory bytes raw
+    saturation_memory_bytes: Gauge,
+    /// Pattern: Saturation — in-flight requests vs 1000 threshold
+    saturation_inflight: Gauge,
+    /// Pattern: Saturation — rps vs 500 threshold
+    saturation_rps: Gauge,
+    // --- Pattern: RED ---
+    /// Pattern: RED — Rate is http_requests_rps; Duration is histogram; Errors are counters/ratios below.
+    red_errors_total: IntCounterVec,
+    /// Pattern: RED — 5xx ratio gauge
+    red_error_ratio_5xx: Gauge,
+    /// Pattern: RED — 4xx ratio gauge
+    red_error_ratio_4xx: Gauge,
+    /// Pattern: RED — overall error ratio
+    red_error_ratio: Gauge,
+    /// Pattern: RED — explicit RPS gauge alias for RED dashboard
+    red_requests_per_second: Gauge,
+    // --- Pattern: USE ---
+    /// Pattern: USE — Utilization: CPU fraction
+    use_cpu: Gauge,
+    /// Pattern: USE — Utilization: memory bytes
+    use_memory_bytes: Gauge,
+    /// Pattern: USE — Utilization: memory MB
+    use_memory_mb: Gauge,
+    /// Pattern: USE — Saturation: in-flight
+    use_saturation_inflight: Gauge,
+    /// Pattern: USE — Saturation: rps
+    use_saturation_rps: Gauge,
+    /// Pattern: USE — Errors: circuit open count
+    use_circuit_open: Gauge,
+    /// Pattern: USE — Errors: total circuit-open transitions (counter via gauge)
+    use_errors_total: IntGauge,
+    // --- Resilience ---
+    /// Pattern: Rate Limiting — counter for 429 responses
+    rate_limited_total: IntCounter,
+    /// Pattern: Load Shedding — counter for 503 responses
+    load_shed_total: IntCounter,
+    /// Pattern: Bulkhead — counter for bulkhead rejections (503 due to concurrency)
+    bulkhead_rejected_total: IntCounter,
+    /// Pattern: Health Checks — readiness gauge (1 ready, 0 not ready)
+    railway_ready: Gauge,
+    /// Pattern: Capacity Planning — recommendation gauge
+    railway_capacity_recommendation: Gauge,
+    /// Pattern: Capacity Planning — saturated count
+    railway_capacity_saturated: Gauge,
     /// last-seen totals so `sample` can inc counters by delta (safe to call on
     /// every scrape AND from the background sampler without double counting)
     last_cache_hits: std::sync::atomic::AtomicU64,
@@ -178,6 +247,143 @@ impl Telemetry {
             &["source"],
         )?;
 
+        // Pattern: SLO — gauges derived from MetricsSnapshot via crate::core::sre
+        let slo_availability = Gauge::new(
+            "railway_slo_availability",
+            "SLO availability SLI (2xx+3xx)/total, Pattern: SLO",
+        )?;
+        let slo_error_budget_remaining = Gauge::new(
+            "railway_slo_error_budget_remaining",
+            "Error budget remaining 0.0..1.0, Pattern: SLO",
+        )?;
+        let slo_error_budget_consumed = Gauge::new(
+            "railway_slo_error_budget_consumed",
+            "Error budget consumed fraction, Pattern: SLO",
+        )?;
+        let slo_burn_rate = Gauge::new(
+            "railway_slo_burn_rate",
+            "Burn rate = error_rate / budget, Pattern: SLO",
+        )?;
+        let slo_availability_target = Gauge::new(
+            "railway_slo_availability_target",
+            "SLO target (0.999), Pattern: SLO",
+        )?;
+
+        // Pattern: Saturation
+        let saturation_cpu = Gauge::new(
+            "railway_saturation_cpu",
+            "CPU saturation fraction 0.0..1.0 vs 0.80 threshold, Pattern: Saturation",
+        )?;
+        let saturation_memory = Gauge::new(
+            "railway_saturation_memory",
+            "Memory saturation MB vs 2048 threshold, Pattern: Saturation",
+        )?;
+        let saturation_memory_bytes = Gauge::new(
+            "railway_saturation_memory_bytes",
+            "Memory saturation bytes, Pattern: Saturation",
+        )?;
+        let saturation_inflight = Gauge::new(
+            "railway_saturation_inflight",
+            "In-flight requests vs 1000 threshold, Pattern: Saturation",
+        )?;
+        let saturation_rps = Gauge::new(
+            "railway_saturation_rps",
+            "RPS vs 500 threshold, Pattern: Saturation",
+        )?;
+
+        // Pattern: RED
+        let red_errors_total = IntCounterVec::new(
+            Opts::new(
+                "railway_red_errors_total",
+                "RED Errors - total per status class (4xx,5xx), Pattern: RED",
+            ),
+            &["status_class"],
+        )?;
+        let red_error_ratio_5xx = Gauge::new(
+            "railway_red_error_ratio_5xx",
+            "RED 5xx error ratio 0.0..1.0, Pattern: RED",
+        )?;
+        let red_error_ratio_4xx = Gauge::new(
+            "railway_red_error_ratio_4xx",
+            "RED 4xx error ratio 0.0..1.0, Pattern: RED",
+        )?;
+        let red_error_ratio = Gauge::new(
+            "railway_red_error_ratio",
+            "RED total error ratio (4xx+5xx)/total, Pattern: RED",
+        )?;
+        let red_requests_per_second = Gauge::new(
+            "railway_red_requests_per_second",
+            "RED Rate - requests per second, Pattern: RED",
+        )?;
+
+        // Pattern: USE
+        let use_cpu = Gauge::new(
+            "railway_use_cpu",
+            "USE Utilization CPU fraction, Pattern: USE",
+        )?;
+        let use_memory_bytes = Gauge::new(
+            "railway_use_memory_bytes",
+            "USE Utilization memory bytes, Pattern: USE",
+        )?;
+        let use_memory_mb = Gauge::new(
+            "railway_use_memory_mb",
+            "USE Utilization memory MB, Pattern: USE",
+        )?;
+        let use_saturation_inflight = Gauge::new(
+            "railway_use_saturation_inflight",
+            "USE Saturation in-flight, Pattern: USE",
+        )?;
+        let use_saturation_rps = Gauge::new(
+            "railway_use_saturation_rps",
+            "USE Saturation RPS, Pattern: USE",
+        )?;
+        let use_circuit_open = Gauge::new(
+            "railway_use_circuit_open",
+            "USE Errors - circuit open count, Pattern: USE",
+        )?;
+        let use_errors_total = IntGauge::new(
+            "railway_use_errors_total",
+            "USE Errors - failover open count, Pattern: USE",
+        )?;
+
+        // Pattern: Rate Limiting — token bucket per IP, returns 429
+        let rate_limited_total = IntCounter::new(
+            "railway_rate_limited_total",
+            "Total requests rate limited (429), Pattern: Rate Limiting",
+        )?;
+        // Pattern: Load Shedding — shed when saturated, returns 503
+        let load_shed_total = IntCounter::new(
+            "railway_load_shed_total",
+            "Total requests shed due to load (503), Pattern: Load Shedding",
+        )?;
+        // Pattern: Bulkhead — concurrency limit, returns 503 when saturated
+        let bulkhead_rejected_total = IntCounter::new(
+            "railway_bulkhead_rejected_total",
+            "Total requests rejected by bulkhead (503), Pattern: Bulkhead",
+        )?;
+
+        // Pattern: Health Checks — readiness gauge (1 ready, 0 not ready)
+        let railway_ready = Gauge::new(
+            "railway_ready",
+            "Readiness probe (1 = ready, 0 = not ready), Pattern: Health Checks",
+        )?;
+        // Pattern: Capacity Planning — recommendation gauge (1 scale_up, 0 ok, -1 scale_down)
+        let railway_capacity_recommendation = Gauge::new(
+            "railway_capacity_recommendation",
+            "Capacity recommendation (1 = scale_up, 0 = ok, -1 = scale_down), Pattern: Capacity Planning",
+        )?;
+        // Pattern: Capacity Planning — saturated count (how many saturation signals breached)
+        let railway_capacity_saturated = Gauge::new(
+            "railway_capacity_saturated",
+            "Number of saturated signals (0..4), Pattern: Capacity Planning",
+        )?;
+
+        // initialize SLO target const
+        slo_availability_target.set(crate::core::sre::SLO_AVAILABILITY_TARGET);
+        // default ready unknown -> 1 (assume ready until probed; readiness handler will set accurately)
+        railway_ready.set(1.0);
+        railway_capacity_recommendation.set(0.0);
+
         for c in [
             Box::new(http_requests.clone()) as Box<dyn prometheus::core::Collector>,
             Box::new(http_duration_seconds.clone()),
@@ -194,6 +400,34 @@ impl Telemetry {
             Box::new(circuit_state.clone()),
             Box::new(circuit_failures.clone()),
             Box::new(circuit_open_seconds.clone()),
+            Box::new(slo_availability.clone()),
+            Box::new(slo_error_budget_remaining.clone()),
+            Box::new(slo_error_budget_consumed.clone()),
+            Box::new(slo_burn_rate.clone()),
+            Box::new(slo_availability_target.clone()),
+            Box::new(saturation_cpu.clone()),
+            Box::new(saturation_memory.clone()),
+            Box::new(saturation_memory_bytes.clone()),
+            Box::new(saturation_inflight.clone()),
+            Box::new(saturation_rps.clone()),
+            Box::new(red_errors_total.clone()),
+            Box::new(red_error_ratio_5xx.clone()),
+            Box::new(red_error_ratio_4xx.clone()),
+            Box::new(red_error_ratio.clone()),
+            Box::new(red_requests_per_second.clone()),
+            Box::new(use_cpu.clone()),
+            Box::new(use_memory_bytes.clone()),
+            Box::new(use_memory_mb.clone()),
+            Box::new(use_saturation_inflight.clone()),
+            Box::new(use_saturation_rps.clone()),
+            Box::new(use_circuit_open.clone()),
+            Box::new(use_errors_total.clone()),
+            Box::new(rate_limited_total.clone()),
+            Box::new(load_shed_total.clone()),
+            Box::new(bulkhead_rejected_total.clone()),
+            Box::new(railway_ready.clone()),
+            Box::new(railway_capacity_recommendation.clone()),
+            Box::new(railway_capacity_saturated.clone()),
         ] {
             registry.register(c)?;
         }
@@ -215,13 +449,90 @@ impl Telemetry {
             circuit_state,
             circuit_failures,
             circuit_open_seconds,
+            slo_availability,
+            slo_error_budget_remaining,
+            slo_error_budget_consumed,
+            slo_burn_rate,
+            slo_availability_target,
+            saturation_cpu,
+            saturation_memory,
+            saturation_memory_bytes,
+            saturation_inflight,
+            saturation_rps,
+            red_errors_total,
+            red_error_ratio_5xx,
+            red_error_ratio_4xx,
+            red_error_ratio,
+            red_requests_per_second,
+            use_cpu,
+            use_memory_bytes,
+            use_memory_mb,
+            use_saturation_inflight,
+            use_saturation_rps,
+            use_circuit_open,
+            use_errors_total,
+            rate_limited_total,
+            load_shed_total,
+            bulkhead_rejected_total,
+            railway_ready,
+            railway_capacity_recommendation,
+            railway_capacity_saturated,
             last_cache_hits: std::sync::atomic::AtomicU64::new(0),
             last_cache_misses: std::sync::atomic::AtomicU64::new(0),
             last_source_samples: Mutex::new(HashMap::new()),
         })
     }
 
+    /// Pattern: Rate Limiting — increment counter when 429 emitted
+    pub fn inc_rate_limited(&self) {
+        self.rate_limited_total.inc();
+    }
+
+    /// Pattern: Load Shedding — increment counter when 503 shed
+    pub fn inc_load_shed(&self) {
+        self.load_shed_total.inc();
+    }
+
+    /// Pattern: Bulkhead — increment counter when bulkhead rejects
+    pub fn inc_bulkhead_rejected(&self) {
+        self.bulkhead_rejected_total.inc();
+    }
+
+    /// Pattern: Health Checks — set readiness gauge (1 ready, 0 not ready)
+    pub fn set_ready(&self, ready: bool) {
+        self.railway_ready.set(if ready { 1.0 } else { 0.0 });
+    }
+
+    /// Pattern: Health Checks — read readiness gauge
+    pub fn ready_value(&self) -> f64 {
+        self.railway_ready.get()
+    }
+
+    /// Pattern: Capacity Planning — set recommendation gauge
+    /// rec: "scale_up" => 1, "scale_down" => -1, "ok" => 0
+    pub fn set_capacity_recommendation(&self, rec: &str) {
+        let v = match rec {
+            "scale_up" => 1.0,
+            "scale_down" => -1.0,
+            _ => 0.0,
+        };
+        self.railway_capacity_recommendation.set(v);
+    }
+
+    pub fn capacity_recommendation_value(&self) -> f64 {
+        self.railway_capacity_recommendation.get()
+    }
+
+    pub fn set_capacity_saturated(&self, n: f64) {
+        self.railway_capacity_saturated.set(n);
+    }
+
+    pub fn capacity_saturated_value(&self) -> f64 {
+        self.railway_capacity_saturated.get()
+    }
+
     /// Record one finished HTTP request (called by the shared metrics middleware).
+    /// Pattern: RED — observes Duration histogram and increments Rate/Errors counters.
     pub fn record_http(&self, method: &str, path: &str, status: u16, duration: Duration) {
         self.http_requests
             .with_label_values(&[method, path, &status.to_string()])
@@ -229,12 +540,27 @@ impl Telemetry {
         self.http_duration_seconds
             .with_label_values(&[path])
             .observe(duration.as_secs_f64());
+
+        // Pattern: RED — Errors split by class
+        let class = match status {
+            400..=499 => Some("4xx"),
+            500..=599 => Some("5xx"),
+            _ => None,
+        };
+        if let Some(c) = class {
+            self.red_errors_total.with_label_values(&[c]).inc();
+        }
     }
 
     /// Refresh gauges from a metrics snapshot + live process readings.
     /// Called by the background sampler and on every `/metrics` scrape, so a
     /// Prometheus/Grafana stack always sees fresh values. Counters are
     /// incremented by the delta since the last call (never double counted).
+    ///
+    /// Pattern: RED — Rate (RPS), Errors (ratios), Duration (histogram already observed in record_http)
+    /// Pattern: USE — Utilization (cpu, mem), Saturation (in_flight, rps), Errors via failover gauges
+    /// Pattern: Saturation — cpu/mem/inflight/rps vs thresholds
+    /// Pattern: SLO — availability, error budget, burn rate from snapshot
     pub fn sample(
         &self,
         snap: &MetricsSnapshot,
@@ -250,6 +576,42 @@ impl Telemetry {
         self.process_cpu_fraction.set(cpu_fraction);
         self.process_rss_bytes.set(rss_bytes as f64);
         self.cache_entries.set(cache_entries as i64);
+
+        // Pattern: USE — Utilization mirrors process stats
+        self.use_cpu.set(cpu_fraction);
+        self.use_memory_bytes.set(rss_bytes as f64);
+        let mem_mb = rss_bytes as f64 / (1024.0 * 1024.0);
+        self.use_memory_mb.set(mem_mb);
+
+        // Pattern: Saturation — snapshot feeds saturation gauges
+        self.saturation_cpu.set(cpu_fraction);
+        self.saturation_memory.set(mem_mb);
+        self.saturation_memory_bytes.set(rss_bytes as f64);
+        self.saturation_inflight.set(snap.in_flight as f64);
+        self.saturation_rps.set(snap.req_per_sec);
+        // Pattern: USE — Saturation dimensions
+        self.use_saturation_inflight.set(snap.in_flight as f64);
+        self.use_saturation_rps.set(snap.req_per_sec);
+
+        // Pattern: RED — Rate alias + error ratios from snapshot
+        self.red_requests_per_second.set(snap.req_per_sec);
+        let ratio_4xx = snap.red_error_ratio_4xx();
+        let ratio_5xx = snap.red_error_ratio_5xx();
+        self.red_error_ratio_4xx.set(ratio_4xx);
+        self.red_error_ratio_5xx.set(ratio_5xx);
+        self.red_error_ratio.set(ratio_4xx + ratio_5xx);
+
+        // Pattern: SLO — derived via sre helpers (pure over snapshot)
+        let slo = crate::core::sre::SloSnapshot::from_metrics_with_telemetry(
+            snap,
+            cpu_fraction,
+            mem_mb,
+        );
+        self.slo_availability.set(slo.availability_sli);
+        self.slo_error_budget_remaining
+            .set(slo.error_budget_remaining);
+        self.slo_error_budget_consumed.set(slo.error_budget_consumed);
+        self.slo_burn_rate.set(slo.burn_rate);
 
         let delta = |last: &std::sync::atomic::AtomicU64, total: u64| {
             let prev = last.swap(total, Ordering::Relaxed);
@@ -278,13 +640,18 @@ impl Telemetry {
     /// Update circuit breaker gauges from a failover snapshot.
     /// Called from the observability service before returning the JSON payload,
     /// and can also be called from background samplers if needed.
+    /// Pattern: USE — Errors dimension is failover circuit open count
     pub fn set_failover_snapshot(&self, snap: &[crate::core::failover::Snapshot]) {
+        let mut open_count: f64 = 0.0;
         for s in snap {
             let state = match s.state {
                 crate::core::failover::State::Closed => "closed",
                 crate::core::failover::State::Open => "open",
                 crate::core::failover::State::HalfOpen => "half_open",
             };
+            if state == "open" {
+                open_count += 1.0;
+            }
             for st in ["closed", "open", "half_open"] {
                 let v = if st == state { 1.0 } else { 0.0 };
                 self.circuit_state
@@ -298,6 +665,39 @@ impl Telemetry {
                 .with_label_values(&[&s.source])
                 .set(s.open_secs.unwrap_or(0) as f64);
         }
+        // Pattern: USE — Errors is circuit open count
+        self.use_circuit_open.set(open_count);
+        self.use_errors_total.set(open_count as i64);
+    }
+
+    /// Pattern: SLO — expose SLO snapshot via telemetry for dashboards / alerts.
+    /// Builds a fresh `SloSnapshot` from the supplied metrics snapshot and live
+    /// proc stats. Mirrors what `sample()` computes but returns it for JSON
+    /// endpoints without needing to scrape Prometheus.
+    pub fn slo_snapshot(
+        &self,
+        snap: &MetricsSnapshot,
+        cpu_fraction: f64,
+        rss_bytes: u64,
+    ) -> crate::core::sre::SloSnapshot {
+        let mem_mb = rss_bytes as f64 / (1024.0 * 1024.0);
+        crate::core::sre::SloSnapshot::from_metrics_with_telemetry(snap, cpu_fraction, mem_mb)
+    }
+
+    /// Convenience: build SLO snapshot from snapshot alone (cpu/mem = 0).
+    pub fn slo_snapshot_from_metrics(
+        &self,
+        snap: &MetricsSnapshot,
+    ) -> crate::core::sre::SloSnapshot {
+        crate::core::sre::SloSnapshot::from_metrics(snap)
+    }
+
+    /// Direct accessors for Prom scrape tests / debugging.
+    pub fn slo_availability_value(&self) -> f64 {
+        self.slo_availability.get()
+    }
+    pub fn saturation_cpu_value(&self) -> f64 {
+        self.saturation_cpu.get()
     }
 
     /// Render the registry in Prometheus text format (v0.0.4).

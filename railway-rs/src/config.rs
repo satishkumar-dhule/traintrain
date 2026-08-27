@@ -23,7 +23,7 @@ use std::time::Duration;
 /// - `RAILWAY_AI_ENABLED`    (default `true`) — master switch for AI endpoints
 /// - `RAILWAY_AI_BASE`       (default `https://opencode.ai/zen/v1`) — OpenAI-compatible
 ///   inference gateway; override to point at any compatible server
-/// - `RAILWAY_AI_MODEL`      (default `x-preview-f-free` — keyless free Zen model)
+/// - `RAILWAY_AI_MODEL`      (default `muse-spark-1.2-contributor-free` — keyless free Zen model)
 /// - `RAILWAY_AI_API_KEY`    (optional) — sent as `Authorization: Bearer` when set;
 ///   the free tier works without any key (no login required)
 /// - `RAILWAY_AI_TIMEOUT_SECS` (default `120`) — total timeout for LLM completions
@@ -72,6 +72,19 @@ pub struct Config {
     /// Seconds a tripped circuit stays open before a half-open probe
     /// (`RAILWAY_FAILOVER_COOLDOWN_SECS`, default `30`).
     pub failover_cooldown: Duration,
+    /// Token bucket rate limit (requests per second per IP)
+    /// (`RAILWAY_RATE_LIMIT_RPS`, default `100`).
+    pub rate_limit_rps: u32,
+    /// Token bucket burst capacity (`RAILWAY_RATE_LIMIT_BURST`, default `50`).
+    pub rate_limit_burst: u32,
+    /// Bulkhead concurrency limit (`RAILWAY_CONCURRENCY_LIMIT`, default `512`).
+    pub concurrency_limit: usize,
+    /// Load shedding in-flight threshold (`RAILWAY_LOAD_SHED_THRESHOLD`, default `800`).
+    pub load_shed_threshold: u64,
+    /// Outer request timeout seconds (`RAILWAY_REQUEST_TIMEOUT_SECS`, default `30`).
+    pub request_timeout_secs: u64,
+    /// Graceful shutdown drain seconds (`RAILWAY_SHUTDOWN_GRACE_SECS`, default `10`).
+    pub shutdown_grace_secs: u64,
 }
 
 impl Default for Config {
@@ -95,7 +108,7 @@ impl Default for Config {
             indiarailinfo_base: "https://indiarailinfo.com".to_string(),
             ai_enabled: true,
             ai_base: "https://opencode.ai/zen/v1".to_string(),
-            ai_model: "x-preview-f-free".to_string(),
+            ai_model: "muse-spark-1.2-contributor-free".to_string(),
             ai_api_key: None,
             ai_timeout: Duration::from_secs(120),
             askdisha_enabled: true,
@@ -103,6 +116,12 @@ impl Default for Config {
             corover_cdn_base: "https://cdn.corover.ai".to_string(),
             failover_threshold: 3,
             failover_cooldown: Duration::from_secs(30),
+            rate_limit_rps: 1000,
+            rate_limit_burst: 1000,
+            concurrency_limit: 512,
+            load_shed_threshold: 800,
+            request_timeout_secs: 30,
+            shutdown_grace_secs: 10,
         }
     }
 }
@@ -168,6 +187,27 @@ impl Config {
                 "RAILWAY_FAILOVER_COOLDOWN_SECS",
                 d.failover_cooldown.as_secs(),
             )),
+            rate_limit_rps: env_u64("RAILWAY_RATE_LIMIT_RPS", u64::from(d.rate_limit_rps)) as u32,
+            rate_limit_burst: env_u64(
+                "RAILWAY_RATE_LIMIT_BURST",
+                u64::from(d.rate_limit_burst),
+            ) as u32,
+            concurrency_limit: env_u64(
+                "RAILWAY_CONCURRENCY_LIMIT",
+                d.concurrency_limit as u64,
+            ) as usize,
+            load_shed_threshold: env_u64(
+                "RAILWAY_LOAD_SHED_THRESHOLD",
+                d.load_shed_threshold,
+            ),
+            request_timeout_secs: env_u64(
+                "RAILWAY_REQUEST_TIMEOUT_SECS",
+                d.request_timeout_secs,
+            ),
+            shutdown_grace_secs: env_u64(
+                "RAILWAY_SHUTDOWN_GRACE_SECS",
+                d.shutdown_grace_secs,
+            ),
         }
     }
 

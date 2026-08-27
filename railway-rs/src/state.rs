@@ -17,6 +17,7 @@ use crate::core::metrics::{Metrics, SharedMetrics};
 use crate::core::ntes::{NtesClient, NtesWebClient};
 use crate::core::obs::Telemetry;
 use crate::core::paytm::PaytmClient;
+use crate::core::resilience::RateLimiter;
 use crate::core::retrieval::RetrievalIndex;
 use crate::data::Datasets;
 
@@ -48,6 +49,10 @@ pub struct AppState {
     pub askdisha: Option<Arc<CoroverClient>>,
     /// Per-source circuit breaker for flip-flop failover.
     pub failover: Arc<Failover>,
+    /// Pattern: Rate Limiting — per-IP token bucket
+    pub rate_limiter: Arc<RateLimiter>,
+    /// Pattern: Bulkhead — concurrency semaphore
+    pub bulkhead: Arc<tokio::sync::Semaphore>,
     pub started_at: Instant,
 }
 
@@ -85,6 +90,13 @@ impl AppState {
             config.failover_threshold,
             config.failover_cooldown,
         ));
+        let rate_limiter = Arc::new(RateLimiter::new(
+            config.rate_limit_rps,
+            config.rate_limit_burst,
+        ));
+        let bulkhead = Arc::new(tokio::sync::Semaphore::new(
+            config.concurrency_limit.max(1),
+        ));
         Ok(Self {
             cache: Arc::new(Cache::with_metrics(config.cache_ttl, Some(metrics.clone()))),
             metrics,
@@ -105,6 +117,8 @@ impl AppState {
             retrieval,
             askdisha,
             failover,
+            rate_limiter,
+            bulkhead,
             started_at: Instant::now(),
         })
     }

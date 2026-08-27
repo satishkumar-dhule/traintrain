@@ -25,6 +25,7 @@ base64 = "0.22"
 thiserror = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "alloc"] }
+uuid = { version = "1", features = ["v4"] }
 tracing-appender = "0.2"
 # Pin time (transitive via tracing-appender/prometheus): 0.3.55+ needs Rust 1.88,
 # this project targets Rust 1.86.

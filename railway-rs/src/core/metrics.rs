@@ -8,6 +8,12 @@ use std::time::{Duration, Instant};
 /// All numbers are real: request counters, in-flight requests, per-source
 /// latencies recorded by the vertical slices, cache hit/miss totals, uptime
 /// and a rolling time-series for the dashboard charts. Nothing is fabricated.
+///
+/// Instrumentation follows Google SRE patterns:
+/// - Pattern: RED — Rate (req_per_sec), Errors (status_by_code), Duration (latency_ms histogram)
+/// - Pattern: USE — Utilization (cpu via proc_stats), Saturation (in_flight, rps), Errors (status 5xx + failover)
+/// - Pattern: Saturation — in_flight vs threshold, rps vs threshold, cpu/mem headroom
+/// - Pattern: SLO — availability SLI from status_by_code, error budget & burn rate derived
 #[derive(Debug)]
 pub struct Metrics {
     requests_total: AtomicU64,
@@ -28,6 +34,18 @@ pub struct Metrics {
     started_at: Instant,
 }
 
+// ---------------------------------------------------------------------------
+// Snapshot — the serializable view consumed by observability & SRE.
+// ---------------------------------------------------------------------------
+
+/// Snapshot of all counters at an instant. This is the single source of truth
+/// for SRE calculations (`crate::core::sre`) and for Prometheus sampling
+/// (`crate::core::obs::Telemetry::sample`).
+///
+/// Pattern: RED — `requests_total`/`req_per_sec` = Rate, `status_by_code` = Errors, `latency_ms` = Duration
+/// Pattern: USE — `in_flight` is Saturation, cpu/mem are supplied externally via `proc_stats` but derived here for SLO
+/// Pattern: Saturation — `in_flight`, `req_per_sec` vs thresholds in `crate::core::sre`
+/// Pattern: SLO — `status_by_code` feeds availability SLI, error budget and burn rate
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct MetricsSnapshot {
     pub requests_total: u64,
@@ -75,6 +93,122 @@ pub struct SeriesPoint {
     pub cpu_frac: f64,
     /// (source name, avg latency ms) at this instant
     pub sources: Vec<(String, f64)>,
+}
+
+impl MetricsSnapshot {
+    // -----------------------------------------------------------------------
+    // Pattern: RED helpers — Rate / Errors / Duration derived from snapshot
+    // -----------------------------------------------------------------------
+
+    /// Pattern: RED — total requests (Rate denominator)
+    pub fn total_requests(&self) -> u64 {
+        self.requests_total
+    }
+
+    /// Pattern: RED — count of 2xx/3xx (good) requests
+    pub fn red_success_count(&self) -> u64 {
+        self.status_by_code
+            .iter()
+            .filter(|s| (200..400).contains(&s.code))
+            .map(|s| s.count)
+            .sum()
+    }
+
+    /// Pattern: RED — count of 4xx requests
+    pub fn red_4xx_count(&self) -> u64 {
+        self.status_by_code
+            .iter()
+            .filter(|s| (400..500).contains(&s.code))
+            .map(|s| s.count)
+            .sum()
+    }
+
+    /// Pattern: RED — count of 5xx requests
+    pub fn red_5xx_count(&self) -> u64 {
+        self.status_by_code
+            .iter()
+            .filter(|s| (500..600).contains(&s.code))
+            .map(|s| s.count)
+            .sum()
+    }
+
+    /// Pattern: RED — total error count (4xx + 5xx)
+    pub fn red_errors_total(&self) -> u64 {
+        self.red_4xx_count() + self.red_5xx_count()
+    }
+
+    /// Pattern: RED — 5xx error ratio (0.0..1.0)
+    pub fn red_error_ratio_5xx(&self) -> f64 {
+        let total: u64 = self.status_by_code.iter().map(|s| s.count).sum();
+        if total == 0 {
+            return 0.0;
+        }
+        self.red_5xx_count() as f64 / total as f64
+    }
+
+    /// Pattern: RED — 4xx error ratio (0.0..1.0)
+    pub fn red_error_ratio_4xx(&self) -> f64 {
+        let total: u64 = self.status_by_code.iter().map(|s| s.count).sum();
+        if total == 0 {
+            return 0.0;
+        }
+        self.red_4xx_count() as f64 / total as f64
+    }
+
+    /// Pattern: RED — overall error ratio (4xx+5xx)/total
+    pub fn red_error_ratio(&self) -> f64 {
+        self.red_error_ratio_4xx() + self.red_error_ratio_5xx()
+    }
+
+    /// Pattern: RED — request rate (RPS)
+    pub fn red_rate(&self) -> f64 {
+        self.req_per_sec
+    }
+
+    /// Pattern: RED — duration (EMA latency ms)
+    pub fn red_duration_ms(&self) -> f64 {
+        self.latency_ms
+    }
+
+    // -----------------------------------------------------------------------
+    // Pattern: SLO helpers — availability & error budget derived
+    // -----------------------------------------------------------------------
+
+    /// Pattern: SLO — availability SLI = (2xx+3xx)/total
+    pub fn slo_availability(&self) -> f64 {
+        crate::core::sre::availability_sli(self)
+    }
+
+    /// Pattern: SLO — error budget remaining (0.0..1.0)
+    pub fn slo_error_budget_remaining(&self) -> f64 {
+        crate::core::sre::error_budget_remaining(self)
+    }
+
+    /// Pattern: SLO — burn rate = error_rate / budget
+    pub fn slo_burn_rate(&self) -> f64 {
+        crate::core::sre::burn_rate(self)
+    }
+
+    // -----------------------------------------------------------------------
+    // Pattern: Saturation / USE helpers
+    // -----------------------------------------------------------------------
+
+    /// Pattern: Saturation — in-flight as saturation signal
+    pub fn saturation_inflight(&self) -> u64 {
+        self.in_flight
+    }
+
+    /// Pattern: Saturation — rps as saturation signal
+    pub fn saturation_rps(&self) -> f64 {
+        self.req_per_sec
+    }
+
+    /// Pattern: USE — saturation is the in-flight + rps dimensions; utilization is cpu/mem supplied externally.
+    /// Returns true when in-flight and rps are below saturation thresholds (cpu/mem checks need external proc stats).
+    pub fn use_saturation_ok(&self) -> bool {
+        self.in_flight <= crate::core::sre::SATURATION_IN_FLIGHT_THRESHOLD
+            && self.req_per_sec <= crate::core::sre::SATURATION_RPS_THRESHOLD
+    }
 }
 
 impl Default for Metrics {
@@ -352,5 +486,33 @@ mod tests {
         let snap = m.snapshot();
         assert_eq!(snap.cache_hits, 1);
         assert_eq!(snap.cache_misses, 2);
+    }
+
+    #[test]
+    fn red_helpers_compute_ratios() {
+        let m = Metrics::new();
+        m.record_status(200);
+        m.record_status(200);
+        m.record_status(404);
+        m.record_status(500);
+        let snap = m.snapshot();
+        assert_eq!(snap.red_4xx_count(), 1);
+        assert_eq!(snap.red_5xx_count(), 1);
+        assert_eq!(snap.red_errors_total(), 2);
+        // 1/4 = 0.25 each, 0.5 total
+        assert!((snap.red_error_ratio_4xx() - 0.25).abs() < 1e-9);
+        assert!((snap.red_error_ratio_5xx() - 0.25).abs() < 1e-9);
+        assert!((snap.red_error_ratio() - 0.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn slo_helpers_delegate_to_sre() {
+        let m = Metrics::new();
+        m.record_status(200);
+        m.record_status(500);
+        let snap = m.snapshot();
+        // 50% availability -> error_rate 0.5 -> burn 500x
+        assert!((snap.slo_availability() - 0.5).abs() < 1e-9);
+        assert!(snap.slo_burn_rate() > 100.0);
     }
 }

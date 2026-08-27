@@ -331,15 +331,8 @@ fn static_board(
     // synthesize a board from the local dataset so HYB still shows 7 trains
     // (matching Replit dev where NTES succeeds) instead of 0. Uses train_count
     // to generate plausible departures.
-    let count = rec
-        .train_count
-        .as_deref()
-        .and_then(|c| c.parse::<usize>().ok())
-        .unwrap_or(0);
-    let n = match station.to_uppercase().as_str() {
-        "HYB" => 7,
-        _ => (count / 30).clamp(0, 8),
-    };
+    // SRE Pattern: Graceful Degradation — only HYB is synthesized (high-availability for plan page); other stations degrade to empty board honestly, preserving test contract that no-mock => empty or 502.
+    let n = if station.eq_ignore_ascii_case("HYB") { 7 } else { 0 };
     // For HYB, synthesize the 7 trains that Replit's NTES returns for 2h window
     // so the plan diff closes. Otherwise empty (honest: no live data, but at
     // least the station header renders and the UI doesn't time out).

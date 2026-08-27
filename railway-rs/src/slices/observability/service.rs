@@ -2,8 +2,10 @@ use std::collections::BTreeSet;
 
 use crate::core::metrics::SeriesPoint;
 use crate::core::obs::{log_ring, proc_stats};
+use crate::core::sre;
 use crate::models::{
-    CacheStats, ObservabilityResponse, OriginStatus, SeriesData, SourceSeries, StatusCode,
+    CacheStats, CapacitySnapshot, ObservabilityResponse, OriginStatus, SeriesData, SourceSeries,
+    StatusCode,
 };
 use crate::state::AppState;
 
@@ -99,6 +101,67 @@ impl Service {
             })
             .collect();
 
+        // ── SRE: SLO/SLI/Error Budget, RED/USE, Four Golden Signals, Capacity ──
+        // Pattern: SLO — availability SLI, error budget, burn rate
+        // Pattern: RED — Rate, Errors, Duration
+        // Pattern: USE — Utilization, Saturation, Errors
+        // Pattern: Four Golden Signals — Latency, Traffic, Errors, Saturation
+        // Pattern: Capacity Planning — saturation vs thresholds
+        let mem_mb = mem_usage as f64 / (1024.0 * 1024.0);
+        let slo_snapshot = sre::SloSnapshot::from_metrics_with_telemetry(&metrics, cpu_usage, mem_mb);
+        // Update telemetry SLO gauges so /metrics scrape stays consistent
+        state.telemetry.sample(&metrics, cpu_usage, mem_usage, state.uptime_secs(), state.cache.len());
+        let red = sre::RedSignals::from_snapshot(&metrics);
+        let use_signals = sre::UseSignals::from_snapshot(&metrics, cpu_usage, mem_mb);
+        let golden = sre::FourGoldenSignals::from_snapshot(&metrics, cpu_usage);
+        // Capacity Planning decision — uses same thresholds as /rail-api/capacity
+        let cpu_thr = sre::SATURATION_CPU_THRESHOLD;
+        let mem_thr = sre::SATURATION_MEMORY_THRESHOLD_MB;
+        let inflight_thr = sre::SATURATION_IN_FLIGHT_THRESHOLD as f64;
+        let rps_thr = sre::SATURATION_RPS_THRESHOLD;
+        let cpu_sat = cpu_usage > cpu_thr;
+        let mem_sat = mem_mb > mem_thr;
+        let inflight_sat = (metrics.in_flight as f64) > inflight_thr;
+        let rps_sat = metrics.req_per_sec > rps_thr;
+        let saturated_count = [cpu_sat, mem_sat, inflight_sat, rps_sat].iter().filter(|&&x| x).count();
+        let recommendation = if saturated_count >= 2 || cpu_sat || inflight_sat || rps_sat {
+            "scale_up".to_string()
+        } else if saturated_count == 0
+            && cpu_usage < cpu_thr * 0.5
+            && mem_mb < mem_thr * 0.5
+            && (metrics.in_flight as f64) < inflight_thr * 0.3
+            && metrics.req_per_sec < rps_thr * 0.3
+        {
+            "scale_down".to_string()
+        } else {
+            "ok".to_string()
+        };
+        let capacity = CapacitySnapshot {
+            recommendation: recommendation.clone(),
+            saturated_count,
+            saturation_ok: saturated_count == 0,
+            cpu: cpu_usage,
+            cpu_threshold: cpu_thr,
+            cpu_saturated: cpu_sat,
+            memory_mb: mem_mb,
+            memory_threshold_mb: mem_thr,
+            memory_saturated: mem_sat,
+            in_flight: metrics.in_flight,
+            in_flight_threshold: inflight_thr as u64,
+            in_flight_saturated: inflight_sat,
+            rps: metrics.req_per_sec,
+            rps_threshold: rps_thr,
+            rps_saturated: rps_sat,
+            fine_print: sre::FIN_PRINT_CAPACITY_PLANNING.to_string(),
+        };
+        // Fine-print: one string per pattern, plus full table for UI
+        let fine_print: Vec<String> = sre::FINE_PRINT_ALL.iter().map(|(_, v)| v.to_string()).collect();
+        let patterns: Vec<String> = sre::FINE_PRINT_ALL.iter().map(|(k, _)| k.to_string()).collect();
+        let sre_patterns: Vec<(String, String)> = sre::FINE_PRINT_ALL
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+
         ObservabilityResponse {
             active_connections: metrics.in_flight,
             latency_ms: avg as u64,
@@ -120,6 +183,14 @@ impl Service {
             series: to_series_data(&metrics.series),
             logs,
             failover,
+            slo: Some(slo_snapshot),
+            red: Some(red),
+            use_signals: Some(use_signals),
+            golden: Some(golden),
+            capacity: Some(capacity),
+            fine_print,
+            patterns,
+            sre_patterns,
         }
     }
 }

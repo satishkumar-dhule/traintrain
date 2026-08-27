@@ -29,7 +29,7 @@ pub struct SourceHealth {
 }
 
 /// `GET /rail-api/pnr` (success)
-#[derive(Debug, Serialize, Default)]
+#[derive(Debug, Serialize, Deserialize, Default, Clone)]
 pub struct PnrResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pnr: Option<String>,
@@ -55,7 +55,7 @@ pub struct PnrResponse {
     pub data_source: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct PnrEndpoint {
     pub code: String,
     pub name: String,
@@ -63,7 +63,7 @@ pub struct PnrEndpoint {
     pub day: i64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct PnrPassenger {
     pub booking_status: String,
     pub coach: String,
@@ -638,6 +638,31 @@ pub struct ObservabilityResponse {
     /// Per-source circuit-breaker state for flip-flop failover.
     #[serde(default)]
     pub failover: Vec<FailoverStatus>,
+    // ── SRE — SLO/SLI/Error Budget, RED/USE, Four Golden Signals, Capacity, Fine-print ─
+    // Pattern: SLO — availability SLI, error budget, burn rate
+    #[serde(default)]
+    pub slo: Option<crate::core::sre::SloSnapshot>,
+    // Pattern: RED — Rate, Errors, Duration
+    #[serde(default)]
+    pub red: Option<crate::core::sre::RedSignals>,
+    // Pattern: USE — Utilization, Saturation, Errors
+    #[serde(default, rename = "use")]
+    pub use_signals: Option<crate::core::sre::UseSignals>,
+    // Pattern: Four Golden Signals
+    #[serde(default)]
+    pub golden: Option<crate::core::sre::FourGoldenSignals>,
+    // Pattern: Capacity Planning
+    #[serde(default)]
+    pub capacity: Option<CapacitySnapshot>,
+    // Fine-print: one per SRE pattern, suitable for footers/tooltips. Each begins with "SRE Pattern:"
+    #[serde(default)]
+    pub fine_print: Vec<String>,
+    // Machine-readable pattern keys present in this payload
+    #[serde(default)]
+    pub patterns: Vec<String>,
+    // Full table of pattern -> fine-print for UIs that want to render dynamically
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sre_patterns: Vec<(String, String)>,
 }
 
 #[derive(Debug, Serialize)]
@@ -690,6 +715,30 @@ pub struct SeriesData {
 pub struct SourceSeries {
     pub name: String,
     pub latency_ms: Vec<f64>,
+}
+
+/// Capacity Planning snapshot — USE-derived saturation vs thresholds
+/// Pattern: Capacity Planning
+#[derive(Debug, Clone, Serialize)]
+pub struct CapacitySnapshot {
+    /// Pattern: Capacity Planning — recommendation: scale_up / ok / scale_down
+    pub recommendation: String,
+    pub saturated_count: usize,
+    pub saturation_ok: bool,
+    pub cpu: f64,
+    pub cpu_threshold: f64,
+    pub cpu_saturated: bool,
+    pub memory_mb: f64,
+    pub memory_threshold_mb: f64,
+    pub memory_saturated: bool,
+    pub in_flight: u64,
+    pub in_flight_threshold: u64,
+    pub in_flight_saturated: bool,
+    pub rps: f64,
+    pub rps_threshold: f64,
+    pub rps_saturated: bool,
+    /// fine-print for capacity planning
+    pub fine_print: String,
 }
 
 /// `GET /rail-api/logs` query params.

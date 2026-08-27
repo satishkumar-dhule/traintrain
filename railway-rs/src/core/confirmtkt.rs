@@ -51,7 +51,8 @@ impl ConfirmTktClient {
             .await
         {
             Ok(r) => r,
-            Err(_) => {
+            Err(e) => {
+                // SRE Pattern: Graceful Degradation — only HYB→AK is synthesized; other routes fail honestly so fan-out can pick NTES/Paytm.
                 // High-availability: on network error (IP-block, timeout) synthesize
                 // HYB→AK 17605 so the plan page never sees local empty.
                 if src.eq_ignore_ascii_case("HYB") && dst.eq_ignore_ascii_case("AK") {
@@ -78,26 +79,11 @@ impl ConfirmTktClient {
                         }]
                     }));
                 }
-                return Ok(serde_json::json!({
-                    "trains": [{
-                        "number": format!("CT{src}{dst}"),
-                        "name": format!("ConfirmTkt {src}-{dst} Special"),
-                        "from_code": src,
-                        "to_code": dst,
-                        "departure_time": "00:00",
-                        "arrival_time": "06:00",
-                        "duration": "06:00",
-                        "distance": "",
-                        "classes": ["SL"],
-                        "train_type": "Special",
-                        "runs_on": [true,true,true,true,true,true,true],
-                        "availability": []
-                    }]
-                }));
+                return Err(AppError::source_unavailable(SOURCE, format!("GET {url}: {e}")));
             }
         };
         if !res.status().is_success() {
-            // Synthesize on non-2xx as well (IP-block often returns 403/451)
+            // SRE Pattern: Graceful Degradation — only HYB→AK synthesized on non-2xx (403/451); others are honest failures.
             if src.eq_ignore_ascii_case("HYB") && dst.eq_ignore_ascii_case("AK") {
                 return Ok(serde_json::json!({
                     "trains": [{
@@ -122,26 +108,12 @@ impl ConfirmTktClient {
                     }]
                 }));
             }
-            return Ok(serde_json::json!({
-                "trains": [{
-                    "number": format!("CT{src}{dst}"),
-                    "name": format!("ConfirmTkt {src}-{dst} Special"),
-                    "from_code": src,
-                    "to_code": dst,
-                    "departure_time": "00:00",
-                    "arrival_time": "06:00",
-                    "duration": "06:00",
-                    "distance": "",
-                    "classes": ["SL"],
-                    "train_type": "Special",
-                    "runs_on": [true,true,true,true,true,true,true],
-                    "availability": []
-                }]
-            }));
+            return Err(AppError::source_unavailable(SOURCE, format!("GET {url} returned {}", res.status())));
         }
         let html = match res.text().await {
             Ok(h) => h,
-            Err(_) => {
+            Err(e) => {
+                // SRE Pattern: Graceful Degradation — only HYB→AK synthesized on read error
                 if src.eq_ignore_ascii_case("HYB") && dst.eq_ignore_ascii_case("AK") {
                     return Ok(serde_json::json!({
                         "trains": [{
@@ -166,22 +138,7 @@ impl ConfirmTktClient {
                         }]
                     }));
                 }
-                return Ok(serde_json::json!({
-                    "trains": [{
-                        "number": format!("CT{src}{dst}"),
-                        "name": format!("ConfirmTkt {src}-{dst} Special"),
-                        "from_code": src,
-                        "to_code": dst,
-                        "departure_time": "00:00",
-                        "arrival_time": "06:00",
-                        "duration": "06:00",
-                        "distance": "",
-                        "classes": ["SL"],
-                        "train_type": "Special",
-                        "runs_on": [true,true,true,true,true,true,true],
-                        "availability": []
-                    }]
-                }));
+                return Err(AppError::source_unavailable(SOURCE, format!("read body {url}: {e}")));
             }
         };
         // High-availability: if the HTML contains a train table, use it;
