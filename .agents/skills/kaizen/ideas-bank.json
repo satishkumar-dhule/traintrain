@@ -1,0 +1,93 @@
+{
+  "version": 1,
+  "ideas": [
+    {
+      "fp": "2241d71eb25d15e1",
+      "id": "observability-mem-usage-spike",
+      "title": "Reduce baseline memory usage",
+      "dimension": "perf/throughput",
+      "metric_before": "73654272",
+      "proof_command": "curl -s http://localhost:3000/rail-api/observability | jq .mem_usage",
+      "source": "llm",
+      "provider": "copilot",
+      "ts": "2026-08-29T02:55:31.759Z"
+    },
+    {
+      "fp": "b967cdea7553bcc4",
+      "id": "cache-hit-rate-low",
+      "title": "Increase cache hit rate",
+      "dimension": "perf/latency",
+      "metric_before": "5.22",
+      "proof_command": "curl -s http://localhost:3000/rail-api/observability | jq .cache.hit_rate",
+      "source": "llm",
+      "provider": "copilot",
+      "ts": "2026-08-29T02:55:31.759Z"
+    },
+    {
+      "fp": "44a6c1d3d83cc273",
+      "id": "404s-clarity",
+      "title": "Clarify 404 error responses",
+      "dimension": "ux/a11y",
+      "metric_before": "0",
+      "proof_command": "grep ' 404 ' logs/app.log | wc -l",
+      "source": "llm",
+      "provider": "copilot",
+      "ts": "2026-08-29T02:56:46.557Z"
+    },
+    {
+      "fp": "d982ce8a5fe04ff6",
+      "id": "observability-mem-usage-leak",
+      "title": "Investigate memory usage baseline",
+      "dimension": "perf/latency",
+      "metric_before": "79986688",
+      "proof_command": "curl -s http://localhost:3000/rail-api/observability | jq .mem_usage",
+      "source": "llm",
+      "provider": "copilot",
+      "ts": "2026-08-29T02:58:27.706Z"
+    },
+    {
+      "fp": "95f2a6444884c1b0",
+      "id": "404s-observability-alert",
+      "title": "Add alert/log for 404 spikes",
+      "dimension": "reliability",
+      "metric_before": "1",
+      "proof_command": "curl -s http://localhost:3000/rail-api/observability | jq '.status_codes[] | select(.code==404) | .count'",
+      "source": "llm",
+      "provider": "copilot",
+      "ts": "2026-08-29T02:58:27.706Z"
+    },
+    {
+      "fp": "5b7460afe4722df7",
+      "id": "observability-cpu-metric-missing",
+      "title": "Expose CPU usage in /observability",
+      "dimension": "ux/a11y",
+      "metric_before": "0.0",
+      "proof_command": "curl -s http://localhost:3000/rail-api/observability | jq '.cpu_usage'",
+      "source": "llm",
+      "provider": "copilot",
+      "ts": "2026-08-29T03:15:26.684Z"
+    },
+    {
+      "fp": "8dcb92c522b84dd2",
+      "id": "live-status-latency-alert",
+      "title": "Add latency alert for live_status",
+      "dimension": "perf/latency",
+      "metric_before": "393",
+      "proof_command": "curl -s http://localhost:3000/rail-api/observability | jq '.latency_ms'",
+      "source": "llm",
+      "provider": "copilot",
+      "ts": "2026-08-29T03:15:26.684Z"
+    },
+    {
+      "fp": "0a5ab3faf654825e",
+      "id": "cache-miss-logging",
+      "title": "Log cache misses for /rail-api endpoints",
+      "dimension": "perf/throughput",
+      "metric_before": "4",
+      "proof_command": "curl -s http://localhost:3000/rail-api/observability | jq '.cache.misses'",
+      "source": "llm",
+      "provider": "copilot",
+      "ts": "2026-08-29T03:15:26.684Z"
+    }
+  ]
+}

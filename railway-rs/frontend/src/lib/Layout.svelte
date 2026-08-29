@@ -15,8 +15,10 @@
   import Package from 'lucide-svelte/icons/package'
   import Sparkles from 'lucide-svelte/icons/sparkles'
   import Info from 'lucide-svelte/icons/info'
+  import TrendingUp from 'lucide-svelte/icons/trending-up'
   import Search from 'lucide-svelte/icons/search'
   import XIcon from 'lucide-svelte/icons/x'
+  import BedDouble from 'lucide-svelte/icons/bed-double'
 import EllipsisIcon from 'lucide-svelte/icons/ellipsis'
 import SignalDot from '$lib/components/SignalDot.svelte'
 import SourceTrustChip from '$lib/components/SourceTrustChip.svelte'
@@ -35,7 +37,8 @@ import SourceTrustChip from '$lib/components/SourceTrustChip.svelte'
       items: [
         { href: '/train', label: 'Live Train', short: 'Track', icon: TrainFront },
         { href: '/station', label: 'Station Board', icon: Building2 },
-        { href: '/pnr', label: 'PNR Status', short: 'PNR', icon: Ticket }
+        { href: '/pnr', label: 'PNR Status', short: 'PNR', icon: Ticket },
+        { href: '/chart', label: 'Chart Vacancy', short: 'Chart', icon: BedDouble }
       ]
     },
     {
@@ -55,6 +58,7 @@ import SourceTrustChip from '$lib/components/SourceTrustChip.svelte'
     {
       label: 'App',
       items: [
+        { href: '/kaizen', label: 'Improvements', icon: TrendingUp },
         { href: '/system', label: 'System & Sources', icon: Activity },
         { href: '/about', label: 'About', icon: Info }
       ]

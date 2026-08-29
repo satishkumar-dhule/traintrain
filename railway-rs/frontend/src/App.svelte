@@ -10,7 +10,9 @@
   import Extras from '$lib/pages/Extras.svelte'
   import Assistant from '$lib/pages/Assistant.svelte'
   import System from '$lib/pages/System.svelte'
+  import Kaizen from '$lib/pages/Kaizen.svelte'
   import About from '$lib/pages/About.svelte'
+  import Chart from '$lib/pages/Chart.svelte'
 
   const segs = $derived(route.path.split('/').filter(Boolean))
 </script>
@@ -30,6 +32,8 @@
     <Plan src={segs[1] ?? ''} dst={segs[2] ?? ''} date={segs[3] ?? ''} tab="availability" />
   {:else if segs[0] === 'pnr'}
     <Pnr pnr={segs[1] ?? ''} />
+  {:else if segs[0] === 'chart'}
+    <Chart train={segs[1] ?? ''} date={segs[2] ?? ''} station={segs[3] ?? ''} />
   {:else if segs[0] === 'exceptions'}
     <Exceptions />
   {:else if segs[0] === 'extras'}
@@ -38,6 +42,8 @@
     <Assistant seed={segs[1] ? decodeURIComponent(segs[1]) : ''} />
   {:else if segs[0] === 'system'}
     <System />
+  {:else if segs[0] === 'kaizen'}
+    <Kaizen />
   {:else if segs[0] === 'about'}
     <About />
   {:else}
