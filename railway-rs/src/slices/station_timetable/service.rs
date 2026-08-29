@@ -1,7 +1,7 @@
 use serde_json::Value;
 
 use crate::core::error::AppError;
-use crate::core::fanout::{fanout_n2, Candidate};
+use crate::core::fanout::{fanout_n2_singleflight, Candidate};
 use crate::models::{StationTimetableResponse, StationTimetableTrain};
 use crate::state::AppState;
 
@@ -103,7 +103,8 @@ impl Service {
             }));
         }
 
-        let (metric, data) = fanout_n2(state, candidates, &format!("stn_tt:{station}")).await?;
+        let (metric, data) =
+            fanout_n2_singleflight(state, candidates, &format!("stn_tt:{station}")).await?;
         let mut resp = map_ntes(data, station, date.as_deref())?;
         if metric == crate::core::source::metric::RAILYATRI {
             resp.data_source = Some(crate::core::source::labels::RAILYATRI.to_string());

@@ -4,7 +4,7 @@ use serde_json::Value;
 
 use crate::core::cache::keys;
 use crate::core::error::AppError;
-use crate::core::fanout::{fanout_n2, Candidate};
+use crate::core::fanout::{fanout_n2_singleflight, Candidate};
 use crate::models::{ExceptionEntry, ExceptionalResponse, ExceptionalTrainDetail};
 use crate::state::AppState;
 
@@ -93,7 +93,9 @@ impl Service {
                 }
             }));
         }
-        let data = match fanout_n2(state, candidates, &format!("exceptional:{train}")).await {
+        let data = match fanout_n2_singleflight(state, candidates, &format!("exceptional:{train}"))
+            .await
+        {
             Ok((_, v)) => v,
             Err(e) if matches!(e, AppError::NotFound(_)) => return Err(e),
             Err(e) => {

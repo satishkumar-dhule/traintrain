@@ -1,7 +1,7 @@
 use serde_json::Value;
 
 use crate::core::error::AppError;
-use crate::core::fanout::{fanout_n2, Candidate};
+use crate::core::fanout::{fanout_n2_singleflight, Candidate};
 use crate::core::json::ValueExt;
 use crate::models::{AverageDelayResponse, AverageDelayStation};
 use crate::state::AppState;
@@ -107,7 +107,8 @@ impl Service {
             }));
         }
 
-        let (metric, data) = fanout_n2(state, candidates, &format!("avg_delay:{train}")).await?;
+        let (metric, data) =
+            fanout_n2_singleflight(state, candidates, &format!("avg_delay:{train}")).await?;
         let mut resp = map_ntes(data)?;
         if metric == crate::core::source::metric::RAILYATRI {
             resp.data_source = Some(crate::core::source::labels::RAILYATRI.to_string());

@@ -332,6 +332,39 @@ pub async fn fanout_n2(
     }
 }
 
+/// Single-flight coalesced fan-out — one in-flight fan-out per distinct query
+/// key, concurrent callers share the winner. Prevents N×2×2 stampede on
+/// hot cache-miss keys (e.g. `live_status:12951` right after TTL expiry).
+pub async fn fanout_n2_singleflight(
+    state: &AppState,
+    candidates: Vec<Candidate>,
+    query: &str,
+) -> Result<(String, Value), AppError> {
+    let key = query.to_string();
+    let state2 = state.clone();
+    // Candidates are moved into the single-flight closure; the closure is
+    // `FnOnce`, so the move is fine — only the winner executes it.
+    let res = state
+        .singleflight
+        .do_or_try(key.clone(), || async move {
+            let (metric, value) = fanout_n2(&state2, candidates, &key).await?;
+            // Pack metric+value into a single Value so the single-flight's
+            // `SharedResult = Result<Value, AppError>` can be cloned to waiters.
+            Ok::<Value, AppError>(serde_json::json!({
+                "metric": metric,
+                "value": value
+            }))
+        })
+        .await?;
+    let metric = res
+        .get("metric")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown")
+        .to_string();
+    let value = res.get("value").cloned().unwrap_or(Value::Null);
+    Ok((metric, value))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

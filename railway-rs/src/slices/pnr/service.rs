@@ -6,7 +6,7 @@ use serde_json::Value;
 
 use crate::core::cache::keys;
 use crate::core::error::{AppError, CaptchaRequiredError};
-use crate::core::fanout::{fanout_n2, Candidate};
+use crate::core::fanout::{fanout_n2_singleflight, Candidate};
 use crate::core::http::HttpClient;
 use crate::data::StationRecord;
 use crate::models::{PnrEndpoint, PnrPassenger, PnrResponse};
@@ -189,7 +189,7 @@ impl Service {
         ];
 
         let query = format!("pnr:challenge:{pnr_owned}");
-        match fanout_n2(state, candidates, &query).await {
+        match fanout_n2_singleflight(state, candidates, &query).await {
             Ok((metric, val)) => {
                 tracing::info!(
                     pnr = %pnr_owned,
@@ -506,7 +506,6 @@ async fn hedged_send_get(
     }
     let mut last_err: Option<AppError> = None;
     for attempt in 0..2 {
-        let started = Instant::now();
         let fut = {
             let mut req = state.http.inner().get(url).header(REFERER, ENQUIRY_REFERER);
             if let Some(c) = cookies {
@@ -533,21 +532,17 @@ async fn hedged_send_get(
                         SOURCE,
                         format!("{url} returned {}", r.status()),
                     );
-                    // Retry once on server errors (5xx) or transport-like failures
+                    // Retry once on server errors (5xx) or transport-like failures;
+                    // breaker accounting is left to the fan-out layer (one logical bump).
                     if attempt == 0 {
-                        state.failover.record_failure("indian-railways");
                         last_err = Some(e);
                         tokio::time::sleep(RETRY_DELAY).await;
                         continue;
                     } else {
-                        state.failover.record_failure("indian-railways");
                         return Err(e);
                     }
                 }
-                state.failover.record_success("indian-railways");
-                state
-                    .metrics
-                    .record_source_latency("indian-railways", started.elapsed());
+                // Success latency/breaker are accounted once by the fan-out winner path.
                 return Ok(r);
             }
             Err(e) => {
@@ -555,13 +550,10 @@ async fn hedged_send_get(
                     e,
                     AppError::SourceUnavailable { .. } | AppError::Internal(_)
                 );
-                if is_live_failure {
-                    state.failover.record_failure("indian-railways");
-                    if attempt == 0 {
-                        last_err = Some(e);
-                        tokio::time::sleep(RETRY_DELAY).await;
-                        continue;
-                    }
+                if is_live_failure && attempt == 0 {
+                    last_err = Some(e);
+                    tokio::time::sleep(RETRY_DELAY).await;
+                    continue;
                 }
                 return Err(e);
             }

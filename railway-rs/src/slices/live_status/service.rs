@@ -1,10 +1,8 @@
-use std::time::Instant;
-
 use serde_json::Value;
 
 use crate::core::cache::keys;
 use crate::core::error::AppError;
-use crate::core::fanout::{fanout_n2, Candidate};
+use crate::core::fanout::{fanout_n2_singleflight, Candidate};
 use crate::models::LiveStatusResponse;
 use crate::slices::live_status::mapping::{map_response, str_at};
 use crate::state::AppState;
@@ -112,7 +110,8 @@ impl Service {
             }));
         }
         let (_winning_metric, mut norm) =
-            fanout_n2(state, candidates, &format!("live_status:{train}")).await?;
+            fanout_n2_singleflight(state, candidates, &format!("live_status:{train}:{date}"))
+                .await?;
         // Ensure every live payload has 5 synthetic run dates so date switching
         // works even when the winning source is Erail/Etrain/IndiaRailInfo which
         // don't natively provide vInstanceList. This makes every option honest
@@ -245,7 +244,6 @@ async fn railyatri_norm(state: &AppState, train: &str) -> Result<Value, AppError
         &state.config.railyatri_base,
         &format!("/live-train-status/{train}"),
     );
-    let started = Instant::now();
     let res = state
         .http
         .inner()
@@ -274,9 +272,7 @@ async fn railyatri_norm(state: &AppState, train: &str) -> Result<Value, AppError
             other => AppError::source_unavailable("Railyatri", other.message()),
         }
     })?;
-    state
-        .metrics
-        .record_source_latency(crate::core::source::metric::RAILYATRI, started.elapsed());
+    // Latency is recorded once by the fan-out winner (fanout.rs:201).
     Ok(norm)
 }
 

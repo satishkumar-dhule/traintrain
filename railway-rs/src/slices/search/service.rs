@@ -1,10 +1,10 @@
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use super::{StationRow, SuggestHit};
 use crate::core::cache::keys;
 use crate::core::corover::{self, SOURCE_API};
 use crate::core::error::AppError;
-use crate::core::fanout::{fanout_n2, Candidate};
+use crate::core::fanout::{fanout_n2_singleflight, Candidate};
 use crate::models::TrainLite;
 use crate::state::AppState;
 
@@ -114,7 +114,8 @@ impl Service {
         let key_clone = key.clone();
         // Circuit-breaker ordering respects failover health: healthy first, but
         // still raced concurrently — first-success-wins with hedging.
-        match fanout_n2(state, candidates, &format!("search:{query_owned}")).await {
+        // Single-flight coalesces cache-miss stampedes on hot typeahead keys.
+        match fanout_n2_singleflight(state, candidates, &format!("search:{query_owned}")).await {
             Ok((metric, val)) => {
                 if let Ok(rows) = serde_json::from_value::<Vec<StationRow>>(val) {
                     tracing::info!(
@@ -209,12 +210,9 @@ async fn corover_station_rows(
         .askdisha
         .as_deref()
         .ok_or_else(|| AppError::source_unavailable(SOURCE_API, "askdisha module disabled"))?;
-
-    let started = Instant::now();
+    // Latency is recorded once by the fan-out winner path (fanout.rs:201); do not
+    // double-count here.
     let rows = client.search_station(query).await?;
-    state
-        .metrics
-        .record_source_latency(SOURCE_API, started.elapsed());
     Ok(rows)
 }
 

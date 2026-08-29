@@ -4,7 +4,7 @@ use serde_json::Value;
 
 use crate::core::cache::keys;
 use crate::core::error::AppError;
-use crate::core::fanout::{fanout_n2, Candidate};
+use crate::core::fanout::{fanout_n2_singleflight, Candidate};
 use crate::models::{
     MapCurrentStation, MapJourneyStation, RouteStation, TrackStation, TrainOnMapResponse,
 };
@@ -113,7 +113,8 @@ impl Service {
             }));
         }
         let (_metric, route_norm) =
-            fanout_n2(state, candidates, &format!("train_on_map:{train}:{date}")).await?;
+            fanout_n2_singleflight(state, candidates, &format!("train_on_map:{train}:{date}"))
+                .await?;
         let mut route: Vec<RouteStation> = route_entries(&route_norm, state);
         let track: Vec<TrackStation> = route_norm
             .get("track")
@@ -207,7 +208,7 @@ impl Service {
                     }
                 }));
             }
-            let spot_result = fanout_n2(
+            let spot_result = fanout_n2_singleflight(
                 state,
                 spot_candidates,
                 &format!("train_spot_map:{train}:{code}"),

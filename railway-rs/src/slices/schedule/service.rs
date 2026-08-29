@@ -5,7 +5,7 @@ use serde_json::Value;
 use crate::core::cache::keys;
 use crate::core::corover::{self, SOURCE_API};
 use crate::core::error::AppError;
-use crate::core::fanout::{fanout_n2, Candidate};
+use crate::core::fanout::{fanout_n2_singleflight, Candidate};
 use crate::core::railyatri;
 use crate::models::{ScheduleResponse, ScheduleStop};
 use crate::state::AppState;
@@ -121,7 +121,8 @@ impl Service {
             }),
         ];
 
-        let (_metric, data) = fanout_n2(state, candidates, &format!("schedule:{train}")).await?;
+        let (_metric, data) =
+            fanout_n2_singleflight(state, candidates, &format!("schedule:{train}")).await?;
         let resp: ScheduleResponse = serde_json::from_value(data)
             .map_err(|e| AppError::internal(format!("schedule fanout decode: {e}")))?;
         state.cache.set_json(&key, &resp)?;

@@ -2,7 +2,7 @@ use serde_json::Value;
 
 use crate::core::cache::keys;
 use crate::core::error::AppError;
-use crate::core::fanout::{fanout_n2, Candidate};
+use crate::core::fanout::{fanout_n2_singleflight, Candidate};
 use crate::models::{LiveStationResponse, StationTrain};
 use crate::state::AppState;
 
@@ -146,7 +146,11 @@ impl Service {
                 }
             }),
         ];
-        let (metric, data) = fanout_n2(state, candidates, &format!("live_station:{station}:{hours}")).await.or_else(|e| {
+        let dest_key = destination.unwrap_or("-");
+        let (metric, data) =
+            fanout_n2_singleflight(state, candidates, &format!("live_station:{station}:{hours}:{dest_key}"))
+                .await
+                .or_else(|e| {
             tracing::warn!(%station, %hours, err=%e.message(), "live_station: fan-out failed, serving direct static");
             static_board(state, station, destination, hours)
                 .map(|r| ("local".to_string(), serde_json::json!({ "trainList": [] })))

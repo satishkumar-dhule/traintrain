@@ -2,7 +2,7 @@ use serde_json::Value;
 
 use crate::core::cache::keys;
 use crate::core::error::AppError;
-use crate::core::fanout::{fanout_n2, Candidate};
+use crate::core::fanout::{fanout_n2_singleflight, Candidate};
 use crate::core::irctc;
 use crate::models::{ChartBerth, ChartCoach, ChartResponse};
 use crate::state::AppState;
@@ -82,7 +82,7 @@ impl Service {
                 }
             }),
         ];
-        let data = match fanout_n2(
+        let data = match fanout_n2_singleflight(
             state,
             candidates,
             &format!("chart:{train}:{date}:{station}"),

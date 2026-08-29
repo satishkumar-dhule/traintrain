@@ -1,7 +1,7 @@
 use serde_json::Value;
 
 use crate::core::error::AppError;
-use crate::core::fanout::{fanout_n2, Candidate};
+use crate::core::fanout::{fanout_n2_singleflight, Candidate};
 use crate::core::{irctc, paytm};
 use crate::models::{AvailabilityClass, AvailabilityResponse, AvailabilityTrain};
 use crate::slices::availability::SourcePref;
@@ -110,7 +110,7 @@ impl Service {
         if candidates.is_empty() {
             return Err(AppError::bad_request("no availability source selected"));
         }
-        let (metric, data) = match fanout_n2(
+        let (metric, data) = match fanout_n2_singleflight(
             state,
             candidates,
             &format!("availability:{src}:{dst}:{date}"),
@@ -187,7 +187,7 @@ impl Service {
                         }
                     }),
                 ];
-                if let Ok((tb_metric, tb_data)) = fanout_n2(
+                if let Ok((tb_metric, tb_data)) = fanout_n2_singleflight(
                     state,
                     tb_candidates,
                     &format!("availability_fallback:{src}:{dst}"),
@@ -276,7 +276,7 @@ async fn unreserved_fallback(
             let to = to1.clone();
             async move { s.ntes_web.trains_between(&src, &from, &dst, &to).await }
         }),
-        Candidate::new(crate::core::source::metric::NTES, move || {
+        Candidate::new("ntes:2", move || {
             let s = state2.clone();
             let src = src2.clone();
             let dst = dst2.clone();
@@ -285,7 +285,7 @@ async fn unreserved_fallback(
             async move { s.ntes_web.trains_between(&src, &from, &dst, &to).await }
         }),
     ];
-    let data = match fanout_n2(
+    let data = match fanout_n2_singleflight(
         state,
         candidates,
         &format!("availability_unreserved:{src}:{dst}"),

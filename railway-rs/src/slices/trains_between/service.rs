@@ -2,7 +2,7 @@ use serde_json::Value;
 
 use crate::core::cache::keys;
 use crate::core::error::AppError;
-use crate::core::fanout::{fanout_n2, Candidate};
+use crate::core::fanout::{fanout_n2_singleflight, Candidate};
 use crate::core::irctc;
 use crate::models::{BetweenTrain, TrainsBetweenResponse};
 use crate::state::AppState;
@@ -120,7 +120,8 @@ impl Service {
         ];
 
         let (metric, data) =
-            fanout_n2(state, candidates, &format!("trains_between:{src}:{dst}")).await?;
+            fanout_n2_singleflight(state, candidates, &format!("trains_between:{src}:{dst}"))
+                .await?;
 
         let resp = if metric == crate::core::source::metric::NTES
             || metric == crate::core::source::metric::ERAIL
