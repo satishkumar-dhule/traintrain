@@ -345,7 +345,7 @@
   const COMPACT_HERO_CARD = 'gap-1 py-2 lg:gap-2 lg:py-4'
   // section band headers share one micro-label treatment
   const MICRO_LABEL = 'text-xs font-semibold uppercase tracking-wider text-muted-foreground'
-  const COMPACT_HERO_TITLE = 'text-[10px] font-medium uppercase tracking-wide text-muted-foreground lg:text-xs'
+  const COMPACT_HERO_TITLE = 'text-xs font-medium uppercase tracking-wide text-muted-foreground lg:text-xs'
   const COMPACT_HERO_VALUE = 'data-num text-lg font-semibold tabular-nums lg:text-2xl'
 
   // ---- super n2 deep delegation: ONE handler fans out to N groups × M items = N·M elements ----
@@ -533,7 +533,7 @@
               </span>
             </Card.Content>
             <Card.Content class="px-3 lg:px-4">
-              <p class="text-[10px] leading-tight text-muted-foreground lg:text-[11px]">{t.sub}</p>
+              <p class="text-xs leading-tight text-muted-foreground lg:text-[11px]">{t.sub}</p>
             </Card.Content>
           </Card.Root>
         {/each}
@@ -555,7 +555,7 @@
               role="button"
               tabindex="0"
             >
-              <span class="text-[9px] font-medium uppercase tracking-wide text-muted-foreground lg:text-[10px]">{label}</span>
+              <span class="text-xs font-medium uppercase tracking-wide text-muted-foreground lg:text-xs">{label}</span>
               <span class="truncate data-num text-xs font-semibold lg:text-sm" title={value}>{value}</span>
             </div>
           {/each}
@@ -580,7 +580,7 @@
           {@const lastVal = latest(seriesArr)}
           {@const range = seriesRange(seriesArr)}
           <Card.Root class="gap-1 py-2 lg:gap-2 lg:py-4">
-            <Card.Title class="px-3 text-[10px] font-medium uppercase tracking-wide text-muted-foreground lg:px-4 lg:text-xs">{s.label}</Card.Title>
+            <Card.Title class="px-3 text-xs font-medium uppercase tracking-wide text-muted-foreground lg:px-4 lg:text-xs">{s.label}</Card.Title>
             <Card.Description class="px-3 data-num text-base font-semibold lg:px-4 lg:text-lg">{s.fmt(lastVal)}</Card.Description>
             <Card.Content class="px-3 lg:px-4">
               {#if pts.length}
@@ -592,7 +592,7 @@
                     ></div>
                   {/each}
                 </div>
-                <p class="mt-1 text-[9px] text-muted-foreground lg:mt-2 lg:text-[10px]">
+                <p class="mt-1 text-xs text-muted-foreground lg:mt-2 lg:text-xs">
                   {#if range}
                     min <span class="data-num">{s.rangeFmt(range.min)}</span> · max
                     <span class="data-num">{s.rangeFmt(range.max)}</span> · last
@@ -603,7 +603,7 @@
                   {/if}
                 </p>
               {:else}
-                <p class="py-2 text-center text-[10px] text-muted-foreground lg:py-4 lg:text-xs">no series data yet</p>
+                <p class="py-2 text-center text-xs text-muted-foreground lg:py-4 lg:text-xs">no series data yet</p>
               {/if}
             </Card.Content>
           </Card.Root>
@@ -733,7 +733,7 @@
             <dl class="grid gap-x-4 gap-y-1.5 sm:grid-cols-2 lg:gap-x-6 lg:gap-y-2 lg:grid-cols-3">
               {#each cacheEntries as e (e.key)}
                 <div class="flex items-baseline justify-between gap-2 border-b pb-1 lg:gap-3">
-                  <dt class="text-[10px] uppercase tracking-wide text-muted-foreground lg:text-xs">{e.label}</dt>
+                  <dt class="text-xs uppercase tracking-wide text-muted-foreground lg:text-xs">{e.label}</dt>
                   <dd class="truncate data-num text-xs font-medium max-lg:whitespace-normal max-lg:break-words lg:text-sm" title={e.value}>{e.value}</dd>
                 </div>
               {/each}

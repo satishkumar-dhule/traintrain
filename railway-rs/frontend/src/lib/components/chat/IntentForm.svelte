@@ -352,7 +352,7 @@
                 {/if}
               </label>
               {#if isCollected}
-                <span class="ml-auto shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground border">prefilled from your message</span>
+                <span class="ml-auto shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground border">prefilled from your message</span>
               {/if}
             </div>
             <input

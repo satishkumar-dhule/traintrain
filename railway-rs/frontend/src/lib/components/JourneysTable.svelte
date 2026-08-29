@@ -347,14 +347,14 @@ import CalendarClockIcon from 'lucide-svelte/icons/calendar-clock'
       <span class="flex min-w-0 items-baseline gap-1">
         <span class="data-num text-[11px] max-lg:text-xs font-semibold">{fmtDash(classCode(row))}</span>
         {#if quotaLabel(row)}
-          <span class="rounded border border-border bg-muted px-1 text-[10px] leading-tight font-medium tracking-wide uppercase text-muted-foreground" title={`${quotaLabel(row)} quota`}>
+          <span class="rounded border border-border bg-muted px-1 text-xs leading-tight font-medium tracking-wide uppercase text-muted-foreground" title={`${quotaLabel(row)} quota`}>
             {quotaLabel(row)}
           </span>
         {/if}
       </span>
       <span class="data-num text-[11px] max-lg:text-xs">{fare != null ? `₹${fare.toLocaleString('en-IN')}` : ''}</span>
     </div>
-    <div class="flex min-w-0 items-center gap-1 text-[10px] max-lg:text-sm max-lg:font-medium">
+    <div class="flex min-w-0 items-center gap-1 text-xs max-lg:text-sm max-lg:font-medium">
       <span class="size-1.5 shrink-0 rounded-full bg-current opacity-80"></span>
       <span class="min-w-0 truncate font-medium" title={asText(row?.status)}>{asText(row?.status) || '—'}</span>
     </div>

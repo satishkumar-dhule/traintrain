@@ -11,7 +11,7 @@
     slate: 'bg-muted text-muted-foreground'
   }
   const COMPACT_HERO_CARD = 'gap-1 py-2 lg:gap-2 lg:py-4'
-  const COMPACT_HERO_TITLE = 'text-[10px] font-medium uppercase tracking-wide text-muted-foreground lg:text-xs'
+  const COMPACT_HERO_TITLE = 'text-xs font-medium uppercase tracking-wide text-muted-foreground lg:text-xs'
   const COMPACT_HERO_VALUE = 'data-num text-lg font-semibold tabular-nums lg:text-2xl'
 </script>
 
@@ -27,7 +27,7 @@
   </Card.Content>
   {#if sub}
     <Card.Content class="px-3 lg:px-4">
-      <p class="text-[10px] leading-tight text-muted-foreground lg:text-[11px]">{sub}</p>
+      <p class="text-xs leading-tight text-muted-foreground lg:text-[11px]">{sub}</p>
     </Card.Content>
   {/if}
 </Card.Root>

@@ -277,7 +277,7 @@
         <div class="flex flex-wrap gap-1 px-4">
           {#each d?.origins ?? [] as o (o.name)}
             <span
-              class="data-num rounded border bg-muted/50 px-1.5 py-0.5 text-[10px] text-muted-foreground"
+              class="data-num rounded border bg-muted/50 px-1.5 py-0.5 text-xs text-muted-foreground"
             >
               {srcShort(o.name)}
             </span>

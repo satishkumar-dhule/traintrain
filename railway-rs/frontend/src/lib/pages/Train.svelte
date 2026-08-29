@@ -1259,7 +1259,7 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
                               {#each berths as b (b.number)}
                                 <div class={`flex flex-col items-center justify-center rounded border px-1 py-1.5 text-center ${chartBerthClass(b.status)}`}>
                                   <span class="data-num text-xs font-semibold leading-none">{b.number}</span>
-                                  <span class="mt-0.5 text-[10px] uppercase leading-none tracking-wide opacity-80">{asText(b.status) || 'unknown'}</span>
+                                  <span class="mt-0.5 text-xs uppercase leading-none tracking-wide opacity-80">{asText(b.status) || 'unknown'}</span>
                                 </div>
                               {/each}
                             </div>

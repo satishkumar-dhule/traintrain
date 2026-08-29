@@ -312,7 +312,7 @@ import { norm, todayISO, DATE_RE } from '$lib/format.js'
 <section class="grid gap-4 max-lg:gap-3">
   <div class="grid gap-2.5 max-lg:gap-2">
     <p class="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
-      <span class="rounded-sm bg-saffron px-1.5 py-px text-[10px] font-bold tracking-[0.12em] text-saffron-ink">
+      <span class="rounded-sm bg-saffron px-1.5 py-px text-xs font-bold tracking-[0.12em] text-saffron-ink">
         Indian Railways
       </span>
       <span class="lamp-pulse size-1.5 shrink-0 rounded-full bg-signal-go text-signal-go" aria-hidden="true"></span>

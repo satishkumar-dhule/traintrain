@@ -33,7 +33,7 @@
 
   const sizeClass = $derived(
     size === 'xs'
-      ? 'px-1.5 text-[10px] max-lg:min-w-10 max-lg:px-2 max-lg:text-xs'
+      ? 'px-1.5 text-xs max-lg:min-w-10 max-lg:px-2 max-lg:text-xs'
       : 'max-lg:min-w-10'
   );
 

@@ -84,7 +84,7 @@
     </div>
 
     {#if runsOn.length > 0}
-      <div class="mt-1 flex justify-center gap-1 text-[10px]">
+      <div class="mt-1 flex justify-center gap-1 text-xs">
         {#each DAY_LETTERS as d, i}
           <span class={cn('w-3 text-center', runsOn[i] ? 'font-semibold text-foreground' : 'text-muted-foreground/50')}>
             {d}
@@ -111,7 +111,7 @@
     {/if}
 
     {#if updatedAt}
-      <p class="mt-2 text-[10px] text-muted-foreground">Updated {updatedAt}</p>
+      <p class="mt-2 text-xs text-muted-foreground">Updated {updatedAt}</p>
     {/if}
   </div>
 </article>

@@ -319,7 +319,7 @@ import { asText, fmtDash, numOrNull, todayISO, DATE_RE } from '$lib/format.js'
         style={`width:${w}%`}
       ></div>
     </div>
-    <div class="data-num mt-0.5 text-right text-[10px] leading-none text-muted-foreground max-lg:text-[11px]">
+    <div class="data-num mt-0.5 text-right text-xs leading-none text-muted-foreground max-lg:text-[11px]">
       {Math.round(pct)}% confirm
     </div>
   {/if}
@@ -335,7 +335,7 @@ import { asText, fmtDash, numOrNull, todayISO, DATE_RE } from '$lib/format.js'
         <span class="data-num text-[11px] max-lg:text-xs font-semibold">{fmtDash(classCode(row))}</span>
         {#if quotaLabel(row)}
           <span
-            class="rounded border border-border bg-muted px-1 text-[10px] leading-tight font-medium tracking-wide uppercase text-muted-foreground"
+            class="rounded border border-border bg-muted px-1 text-xs leading-tight font-medium tracking-wide uppercase text-muted-foreground"
             title={`${quotaLabel(row)} quota`}
           >
             {quotaLabel(row)}
@@ -344,7 +344,7 @@ import { asText, fmtDash, numOrNull, todayISO, DATE_RE } from '$lib/format.js'
       </span>
       <span class="data-num text-[11px] max-lg:text-xs">{fare != null ? `₹${fare.toLocaleString('en-IN')}` : ''}</span>
     </div>
-    <div class="flex min-w-0 items-center gap-1.5 text-[10px] max-lg:text-sm max-lg:font-medium">
+    <div class="flex min-w-0 items-center gap-1.5 text-xs max-lg:text-sm max-lg:font-medium">
       <SignalDot
         tone={kind === 'available' ? 'go' : kind === 'waitlist' ? 'hold' : kind === 'closed' ? 'stop' : 'idle'}
         class={kind === 'rac' ? 'bg-primary text-primary' : undefined}
@@ -637,7 +637,7 @@ import { asText, fmtDash, numOrNull, todayISO, DATE_RE } from '$lib/format.js'
                   {#each matrixClasses as c (c)}
                     {@const row = visibleRows(tr).find((r) => classCode(r) === c)}
                     <div class="grid content-start gap-0.5">
-                      <span class="data-num text-[10px] leading-tight font-medium tracking-wide uppercase text-muted-foreground">
+                      <span class="data-num text-xs leading-tight font-medium tracking-wide uppercase text-muted-foreground">
                         {c}
                       </span>
                       {#if row}
@@ -681,7 +681,7 @@ import { asText, fmtDash, numOrNull, todayISO, DATE_RE } from '$lib/format.js'
                       <span class="max-w-36 truncate font-medium">{asText(tr?.name)}</span>
                       <TrainDelayBadge number={tr?.number} name={tr?.name} compact />
                     </div>
-                    <div class="data-num mt-0.5 text-[10px] text-muted-foreground">
+                    <div class="data-num mt-0.5 text-xs text-muted-foreground">
                       {fmtDash(tr?.departure_time)} → {fmtDash(tr?.arrival_time)} · {durationLabel(tr)}
                     </div>
                   </Table.Cell>
@@ -693,7 +693,7 @@ import { asText, fmtDash, numOrNull, todayISO, DATE_RE } from '$lib/format.js'
                           <AvailabilityStatusBadge status={row?.status} size="xs" class="max-w-28 truncate" />
                         </div>
                         {#if numOrNull(row?.fare) != null}
-                          <div class="data-num mt-0.5 text-[10px] text-muted-foreground">
+                          <div class="data-num mt-0.5 text-xs text-muted-foreground">
                             ₹{numOrNull(row?.fare).toLocaleString('en-IN')}
                           </div>
                         {/if}

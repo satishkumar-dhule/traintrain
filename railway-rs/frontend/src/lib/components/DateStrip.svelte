@@ -203,7 +203,7 @@
           }`}
         >
           <span
-            class={`text-[10px] leading-none font-medium uppercase tracking-wide ${active ? 'opacity-90' : 'text-muted-foreground'}`}
+            class={`text-xs leading-none font-medium uppercase tracking-wide ${active ? 'opacity-90' : 'text-muted-foreground'}`}
           >
             {iso === TODAY ? 'Today' : weekdayShort(iso)}
           </span>

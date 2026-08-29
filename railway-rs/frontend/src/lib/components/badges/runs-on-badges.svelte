@@ -89,7 +89,7 @@
       <Badge
         variant={resolved[i] ? 'secondary' : 'outline'}
         class={cn(
-          'h-5 min-w-5 justify-center px-1.5 font-medium text-[10px]',
+          'h-5 min-w-5 justify-center px-1.5 font-medium text-xs',
           !resolved[i] && 'text-muted-foreground opacity-40'
         )}
         title={`${DAY_NAMES[i]}: ${resolved[i] ? 'runs' : 'no run'}`}

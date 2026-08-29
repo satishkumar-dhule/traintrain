@@ -214,7 +214,7 @@ import SourceTrustChip from '$lib/components/SourceTrustChip.svelte'
       >
         <Search class="size-4" />
         <span>Search everything</span>
-        <kbd class="data-num ml-auto rounded border bg-muted px-1.5 text-[10px]">⌘K</kbd>
+        <kbd class="data-num ml-auto rounded border bg-muted px-1.5 text-xs">⌘K</kbd>
       </button>
       <DisplaySettings />
     </div>
@@ -346,7 +346,7 @@ import SourceTrustChip from '$lib/components/SourceTrustChip.svelte'
           href={item.href}
           onclick={(e) => go(e, item.href)}
           aria-current={isActive(item) ? 'page' : undefined}
-          class={`relative flex min-h-12 flex-col items-center justify-center gap-0.5 px-1 pt-0.5 text-[10px] font-medium transition-colors ${
+          class={`relative flex min-h-12 flex-col items-center justify-center gap-0.5 px-1 pt-0.5 text-xs font-medium transition-colors ${
             isActive(item) ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
           }`}
         >
@@ -362,7 +362,7 @@ import SourceTrustChip from '$lib/components/SourceTrustChip.svelte'
         onclick={() => (mobileOpen = true)}
         aria-expanded={mobileOpen}
         aria-haspopup="dialog"
-        class="flex min-h-11 flex-col items-center justify-center gap-0.5 px-1 pt-0.5 text-[10px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+        class="flex min-h-11 flex-col items-center justify-center gap-0.5 px-1 pt-0.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
       >
         <EllipsisIcon class="size-4.5" />
         More

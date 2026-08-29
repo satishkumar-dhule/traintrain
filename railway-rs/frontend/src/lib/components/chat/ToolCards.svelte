@@ -93,7 +93,7 @@
     <Icon class="size-3.5 shrink-0 text-muted-foreground" />
     <span class="truncate font-medium">{title}</span>
     {#if source}
-      <span class="ml-auto shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground">
+      <span class="ml-auto shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-xs leading-none text-muted-foreground">
         {source}
       </span>
     {/if}
@@ -319,7 +319,7 @@
     {#if list(d.running_days).length}
       <div class="mb-2 flex flex-wrap gap-1">
         {#each d.running_days as day, i (day + i)}
-          <Badge variant="secondary" class="text-[10px] max-lg:text-xs">{day}</Badge>
+          <Badge variant="secondary" class="text-xs max-lg:text-xs">{day}</Badge>
         {/each}
       </div>
     {/if}
