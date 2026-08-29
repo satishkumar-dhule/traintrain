@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_ts": "2026-08-29T05:07:45.808Z",
+  "updated_ts": "2026-08-29T05:08:39.972Z",
   "runs": [
     {
       "run": 1,
@@ -98,7 +98,27 @@
         "clippy": "pass",
         "imports": "pass"
       },
-      "commit": "4255b37"
+      "commit": "d264399"
+    },
+    {
+      "run": 5,
+      "ts": "2026-08-29T05:08:39.603Z",
+      "pick": "a11y-11px-font",
+      "dimension": "ux/a11y",
+      "source": "deterministic",
+      "delta_pct": 1.5,
+      "before": {
+        "raw": "66 11px font declarations"
+      },
+      "after": {
+        "raw": "0"
+      },
+      "gates": {
+        "fmt": "pass",
+        "clippy": "pass",
+        "imports": "pass"
+      },
+      "commit": "b594541"
     }
   ]
 }

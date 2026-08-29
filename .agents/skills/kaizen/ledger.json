@@ -97,7 +97,27 @@
         "clippy": "pass",
         "imports": "pass"
       },
-      "commit": "4255b37"
+      "commit": "d264399"
+    },
+    {
+      "ts": "2026-08-29T05:08:39.603Z",
+      "run": 5,
+      "pick": "a11y-11px-font",
+      "dimension": "ux/a11y",
+      "source": "deterministic",
+      "before": {
+        "raw": "66 11px font declarations"
+      },
+      "after": {
+        "raw": "0"
+      },
+      "delta_pct": 1.5,
+      "gates": {
+        "fmt": "pass",
+        "clippy": "pass",
+        "imports": "pass"
+      },
+      "commit": "b594541"
     }
   ]
 }

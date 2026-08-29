@@ -53,7 +53,7 @@
       type="button"
       onclick={onRefresh}
       disabled={refreshing}
-      class="mt-1 flex items-center gap-1 text-[11px] font-medium text-primary transition-colors hover:underline disabled:opacity-50"
+      class="mt-1 flex items-center gap-1 text-[12px] font-medium text-primary transition-colors hover:underline disabled:opacity-50"
     >
       {#if refreshing}
         <LoaderCircleIcon class="size-3 animate-spin" />
