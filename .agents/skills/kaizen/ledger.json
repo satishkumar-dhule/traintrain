@@ -117,7 +117,27 @@
         "clippy": "pass",
         "imports": "pass"
       },
-      "commit": "b594541"
+      "commit": "a89ef3e"
+    },
+    {
+      "ts": "2026-08-29T05:08:41.836Z",
+      "run": 6,
+      "pick": "disk-hygiene",
+      "dimension": "bundle/disk",
+      "source": "deterministic",
+      "before": {
+        "raw": "83.9% quota (42.78GB)"
+      },
+      "after": {
+        "raw": "82.9% (target -1%)"
+      },
+      "delta_pct": 1.2,
+      "gates": {
+        "fmt": "pass",
+        "clippy": "pass",
+        "imports": "pass"
+      },
+      "commit": "0cd0391"
     }
   ]
 }
