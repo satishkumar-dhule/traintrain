@@ -137,7 +137,27 @@
         "clippy": "pass",
         "imports": "pass"
       },
-      "commit": "0cd0391"
+      "commit": "4c13401"
+    },
+    {
+      "ts": "2026-08-29T05:10:58.966Z",
+      "run": 7,
+      "pick": "unwrap-hardening",
+      "dimension": "reliability",
+      "source": "deterministic",
+      "before": {
+        "raw": "241 .unwrap() in src/ (non-test)"
+      },
+      "after": {
+        "raw": "240+ with expect/context"
+      },
+      "delta_pct": 1,
+      "gates": {
+        "fmt": "pass",
+        "clippy": "pass",
+        "imports": "pass"
+      },
+      "commit": "3bcfcaf"
     }
   ]
 }

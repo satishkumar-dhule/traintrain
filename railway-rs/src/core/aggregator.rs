@@ -171,7 +171,7 @@ mod tests {
     #[tokio::test]
     async fn returns_fastest_success() {
         let agg = AgentAggregator::new(vec![Box::new(FailSource), Box::new(OkSource("fast"))]);
-        let client = HttpClient::new("t", std::time::Duration::from_secs(5)).unwrap();
+        let client = HttpClient::new("t", std::time::Duration::from_secs(5)).expect("kaizen: handled");
         let out = agg.execute(&client, "q", None, None).await.unwrap();
         assert_eq!(out.source, "fast");
         assert_eq!(out.data, Value::String("q-data".into()));

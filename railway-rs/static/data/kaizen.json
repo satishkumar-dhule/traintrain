@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_ts": "2026-08-29T05:08:41.979Z",
+  "updated_ts": "2026-08-29T05:10:59.210Z",
   "runs": [
     {
       "run": 1,
@@ -138,7 +138,27 @@
         "clippy": "pass",
         "imports": "pass"
       },
-      "commit": "0cd0391"
+      "commit": "4c13401"
+    },
+    {
+      "run": 7,
+      "ts": "2026-08-29T05:10:58.966Z",
+      "pick": "unwrap-hardening",
+      "dimension": "reliability",
+      "source": "deterministic",
+      "delta_pct": 1,
+      "before": {
+        "raw": "241 .unwrap() in src/ (non-test)"
+      },
+      "after": {
+        "raw": "240+ with expect/context"
+      },
+      "gates": {
+        "fmt": "pass",
+        "clippy": "pass",
+        "imports": "pass"
+      },
+      "commit": "3bcfcaf"
     }
   ]
 }
