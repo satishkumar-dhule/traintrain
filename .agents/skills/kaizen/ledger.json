@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "runs": [
+    {
+      "ts": "2026-08-29T02:44:37Z",
+      "run": 1,
+      "pick": "stale-assets-prune",
+      "dimension": "bundle/disk",
+      "before": {
+        "bytes": 3667324,
+        "gzip": 751121,
+        "assets": 3
+      },
+      "after": {
+        "bytes": 1933483,
+        "gzip": 250630,
+        "assets": 1
+      },
+      "delta_pct": -47.3,
+      "gates": {
+        "fmt": "pass",
+        "clippy": "pass",
+        "imports": "pass"
+      },
+      "commit": "8e04b4b"
+    }
+  ]
+}

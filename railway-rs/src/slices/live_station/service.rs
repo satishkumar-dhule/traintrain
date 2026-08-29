@@ -115,10 +115,30 @@ impl Service {
                 let d = dest_static.clone();
                 let h = hours_static;
                 async move {
+                    // Hedging: 800ms delay so live can win when healthy; static
+                    // guarantees <1s liveness when NTES IP-blocked in Singapore.
+                    // Availability hedging across different hosts (NTES vs Railyatri vs local).
                     tokio::time::sleep(std::time::Duration::from_millis(800)).await;
                     let resp = static_board(&s, &st, d.as_deref(), h)
                         .ok_or_else(|| AppError::not_found(format!("Station {st} not found")))?;
-                    Ok(serde_json::json!({ "trainList": [] }))
+                    // Serialize actual synthetic board into NTES trainList shape
+                    // so build_response can reuse same mapper; honest data_source.
+                    let train_list: Vec<Value> = resp
+                        .trains
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|t| {
+                            serde_json::json!({
+                                "trainNo": t.number,
+                                "trainName": t.name,
+                                "scheduledTime": t.sta,
+                                "expectedTime": t.eta,
+                                "delayArr": t.delay_arr,
+                                "platformNo": t.platform
+                            })
+                        })
+                        .collect();
+                    Ok(serde_json::json!({ "trainList": train_list }))
                 }
             }),
         ];
