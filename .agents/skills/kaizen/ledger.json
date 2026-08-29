@@ -72,6 +72,32 @@
         "imports": "pass"
       },
       "commit": "c703167"
+    },
+    {
+      "ts": "2026-08-29T05:07:32.688Z",
+      "run": 4,
+      "pick": "a11y-10px-font",
+      "dimension": "ux/a11y",
+      "source": "deterministic",
+      "before": {
+        "bytes": 0,
+        "gzip": 0,
+        "assets": 0,
+        "count": 45
+      },
+      "after": {
+        "bytes": 0,
+        "gzip": 0,
+        "assets": 0,
+        "count": 42
+      },
+      "delta_pct": 6.7,
+      "gates": {
+        "fmt": "pass",
+        "clippy": "pass",
+        "imports": "pass"
+      },
+      "commit": "4255b37"
     }
   ]
 }

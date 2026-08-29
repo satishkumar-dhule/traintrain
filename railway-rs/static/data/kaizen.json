@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_ts": "2026-08-29T03:20:03.570Z",
+  "updated_ts": "2026-08-29T05:07:45.808Z",
   "runs": [
     {
       "run": 1,
@@ -73,6 +73,32 @@
         "imports": "pass"
       },
       "commit": "c703167"
+    },
+    {
+      "run": 4,
+      "ts": "2026-08-29T05:07:32.688Z",
+      "pick": "a11y-10px-font",
+      "dimension": "ux/a11y",
+      "source": "deterministic",
+      "delta_pct": 6.7,
+      "before": {
+        "bytes": 0,
+        "gzip": 0,
+        "assets": 0,
+        "count": 45
+      },
+      "after": {
+        "bytes": 0,
+        "gzip": 0,
+        "assets": 0,
+        "count": 42
+      },
+      "gates": {
+        "fmt": "pass",
+        "clippy": "pass",
+        "imports": "pass"
+      },
+      "commit": "4255b37"
     }
   ]
 }

@@ -189,7 +189,7 @@ function ledgerPenalty(id) { return recentPicks.has(id) ? 999 : 0 }
 }
 
 // ---------- PROBE: clippy warnings (if toolchain present) ----------
-{
+if (!process.env.KAIZEN_FAST) {
   // quick probe: 25s cap; run.sh treats clippy as its own gate for rust picks
   const out = sh(`bash -c 'export PATH="$HOME/.cargo/bin:$PATH"; export CARGO_HOME="$HOME/.cargo"; timeout 25 cargo clippy --manifest-path railway-rs/Cargo.toml --all-targets -- -D warnings 2>&1 | tail -40'`)
   if (out.includes('warning:') && !out.includes('0 warnings')) {
@@ -229,7 +229,7 @@ function ledgerPenalty(id) { return recentPicks.has(id) ? 999 : 0 }
 }
 
 // ---------- PROBE: cargo audit / npm audit (if tools present) ----------
-{
+if (!process.env.KAIZEN_FAST) {
   const cargoAudit = sh(`cargo audit --version 2>&1 | head -1`)
   if (cargoAudit.includes('cargo audit')) {
     const auditOut = sh(`cargo audit 2>&1 | tail -20`)

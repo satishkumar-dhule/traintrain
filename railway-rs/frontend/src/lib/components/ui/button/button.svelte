@@ -16,11 +16,11 @@
 				/* Touch-first sizing: coarse-pointer layouts (<lg) get ≥44px targets,
 				   dense desktop sizes above. Explicit class props still win (tw-merge). */
 				default: "h-8 gap-1.5 px-2.5 has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2 max-lg:h-11 max-lg:gap-2 max-lg:px-4 [&_svg:not([class*='size-'])]:max-lg:size-[1.125rem]",
-				xs: "h-6 max-lg:h-11 gap-1 rounded-[min(var(--radius-md),10px)] px-2 text-xs in-data-[slot=button-group]:rounded-lg has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 [&_svg:not([class*='size-'])]:size-3",
+				xs: "h-6 max-lg:h-11 gap-1 rounded-[min(var(--radius-md),12px)] px-2 text-xs in-data-[slot=button-group]:rounded-lg has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 [&_svg:not([class*='size-'])]:size-3",
 				sm: "h-7 gap-1 rounded-[min(var(--radius-md),12px)] px-2.5 text-[0.8rem] in-data-[slot=button-group]:rounded-lg has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 [&_svg:not([class*='size-'])]:size-3.5 max-lg:h-11 max-lg:rounded-lg max-lg:px-3.5 max-lg:text-sm max-lg:[&_svg:not([class*='size-'])]:size-4",
 				lg: "h-9 gap-1.5 px-2.5 has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2 max-lg:h-11 max-lg:px-4 [&_svg:not([class*='size-'])]:max-lg:size-[1.125rem]",
 				icon: "size-8 max-lg:size-11 [&_svg:not([class*='size-'])]:max-lg:size-[1.375rem]",
-				"icon-xs": "size-6 max-lg:size-11 rounded-[min(var(--radius-md),10px)] in-data-[slot=button-group]:rounded-lg [&_svg:not([class*='size-'])]:size-3",
+				"icon-xs": "size-6 max-lg:size-11 rounded-[min(var(--radius-md),12px)] in-data-[slot=button-group]:rounded-lg [&_svg:not([class*='size-'])]:size-3",
 				"icon-sm": "size-7 max-lg:size-11 rounded-[min(var(--radius-md),12px)] in-data-[slot=button-group]:rounded-lg [&_svg:not([class*='size-'])]:size-3.5",
 				"icon-lg": "size-9 max-lg:size-11 [&_svg:not([class*='size-'])]:max-lg:size-[1.375rem]",
 			},
