@@ -10,6 +10,8 @@ use std::time::Duration;
 /// - `RAILWAY_HTTP_TIMEOUT`  seconds (default `15`)
 /// - `RAILWAY_CACHE_TTL`     seconds (default `120`)
 /// - `RAILWAY_USER_AGENT`    (default realistic browser UA)
+/// - `RAILWAY_NTES_PROXY_BASE` (optional) India proxy base for NTES hedged delegates
+/// - `RAILWAY_FANOUT_CONCURRENCY` (default `48`) bounded fan-out parallelism
 /// - `RAILWAY_SOURCE_RAILYATRI_BASE` (default `https://www.railyatri.in`)
 /// - `RAILWAY_SOURCE_ETRAIN_BASE`    (default `https://etrain.info`)
 /// - `RAILWAY_SOURCE_NTES_BASE`      (default `https://enquiry.indianrail.gov.in`)
@@ -85,6 +87,14 @@ pub struct Config {
     pub request_timeout_secs: u64,
     /// Graceful shutdown drain seconds (`RAILWAY_SHUTDOWN_GRACE_SECS`, default `10`).
     pub shutdown_grace_secs: u64,
+    /// Optional India proxy base for NTES hedged delegates
+    /// (`RAILWAY_NTES_PROXY_BASE`, e.g. `https://ntes-proxy.fly.dev`).
+    /// When set, `live_status` + `average_delay` add a hedged proxy candidate
+    /// raced via `fanout_n2` (4s timeout). Unset = direct-only (current).
+    pub ntes_proxy_base: Option<String>,
+    /// Max concurrent hedged upstream fetches across all fan-outs
+    /// (`RAILWAY_FANOUT_CONCURRENCY`, default `48`). Bounds N×2×2 amplification.
+    pub fanout_concurrency: usize,
 }
 
 impl Default for Config {
@@ -122,6 +132,8 @@ impl Default for Config {
             load_shed_threshold: 800,
             request_timeout_secs: 30,
             shutdown_grace_secs: 10,
+            ntes_proxy_base: None,
+            fanout_concurrency: 48,
         }
     }
 }
@@ -188,26 +200,18 @@ impl Config {
                 d.failover_cooldown.as_secs(),
             )),
             rate_limit_rps: env_u64("RAILWAY_RATE_LIMIT_RPS", u64::from(d.rate_limit_rps)) as u32,
-            rate_limit_burst: env_u64(
-                "RAILWAY_RATE_LIMIT_BURST",
-                u64::from(d.rate_limit_burst),
-            ) as u32,
-            concurrency_limit: env_u64(
-                "RAILWAY_CONCURRENCY_LIMIT",
-                d.concurrency_limit as u64,
-            ) as usize,
-            load_shed_threshold: env_u64(
-                "RAILWAY_LOAD_SHED_THRESHOLD",
-                d.load_shed_threshold,
-            ),
-            request_timeout_secs: env_u64(
-                "RAILWAY_REQUEST_TIMEOUT_SECS",
-                d.request_timeout_secs,
-            ),
-            shutdown_grace_secs: env_u64(
-                "RAILWAY_SHUTDOWN_GRACE_SECS",
-                d.shutdown_grace_secs,
-            ),
+            rate_limit_burst: env_u64("RAILWAY_RATE_LIMIT_BURST", u64::from(d.rate_limit_burst))
+                as u32,
+            concurrency_limit: env_u64("RAILWAY_CONCURRENCY_LIMIT", d.concurrency_limit as u64)
+                as usize,
+            load_shed_threshold: env_u64("RAILWAY_LOAD_SHED_THRESHOLD", d.load_shed_threshold),
+            request_timeout_secs: env_u64("RAILWAY_REQUEST_TIMEOUT_SECS", d.request_timeout_secs),
+            shutdown_grace_secs: env_u64("RAILWAY_SHUTDOWN_GRACE_SECS", d.shutdown_grace_secs),
+            ntes_proxy_base: std::env::var("RAILWAY_NTES_PROXY_BASE")
+                .ok()
+                .filter(|v| !v.trim().is_empty()),
+            fanout_concurrency: env_u64("RAILWAY_FANOUT_CONCURRENCY", d.fanout_concurrency as u64)
+                as usize,
         }
     }
 

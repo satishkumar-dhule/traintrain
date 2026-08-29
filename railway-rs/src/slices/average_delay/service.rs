@@ -1,7 +1,7 @@
 use serde_json::Value;
 
 use crate::core::error::AppError;
-use crate::core::fanout::{Candidate, fanout_n2};
+use crate::core::fanout::{fanout_n2, Candidate};
 use crate::core::json::ValueExt;
 use crate::models::{AverageDelayResponse, AverageDelayStation};
 use crate::state::AppState;
@@ -23,52 +23,62 @@ impl Service {
             return Ok(resp);
         }
 
-        // Super fan-out N² deep: NTES (2 delegates via retry) + Replit proxy
-        // (which itself is NTES but not IP-blocked from Replit) + Railyatri.
-        // This ensures HYB→AK 12951 shows real delays (On Time, 00:12 etc.)
-        // even when Render Singapore is IP-blocked for NTES.
+        // Super fan-out N² deep: NTES (2-deep retry) + optional India proxy
+        // (env-driven, not hard-coded) + Railyatri worldwide fallback.
+        // Ensures HYB→AK 12951 shows real delays even when Singapore IP-blocked.
         let train_ntes = train.to_string();
-        let train_proxy = train.to_string();
         let train_ry = train.to_string();
         let state_ntes = state.clone();
-        let state_proxy = state.clone();
         let state_ry = state.clone();
 
-        let candidates = vec![
+        let mut candidates = vec![
             Candidate::new(crate::core::source::metric::NTES, move || {
                 let s = state_ntes.clone();
                 let t = train_ntes.clone();
                 async move { s.ntes_web.average_delay(&t).await }
             }),
-            Candidate::new("replit-proxy", move || {
-                let t = train_proxy.clone();
+            Candidate::new(crate::core::source::metric::RAILYATRI, move || {
+                let s = state_ry.clone();
+                let t = train_ry.clone();
+                async move { railyatri_average_delay(&s, &t).await }
+            }),
+        ];
+        if let Some(proxy_base) = state
+            .config
+            .ntes_proxy_base
+            .clone()
+            .filter(|v| !v.is_empty())
+        {
+            let t = train.to_string();
+            let base = proxy_base;
+            candidates.push(Candidate::new("ntes-proxy", move || {
+                let t = t.clone();
+                let base = base.clone();
                 async move {
-                    // High-availability deep delegate: proxy via Replit dev (not IP-blocked)
                     let url = format!(
-                        "https://0e9c30bf-6501-4ddd-a725-0281891f9d2d-00-1172yhblxl1si.pike.replit.dev:3000/rail-api/ntes/average-delay?train={}",
+                        "{}/rail-api/ntes/average-delay?train={}",
+                        base.trim_end_matches('/'),
                         urlencoding::encode(&t)
                     );
                     let client = reqwest::Client::builder()
                         .timeout(std::time::Duration::from_secs(4))
                         .build()
-                        .map_err(|e| AppError::source_unavailable("replit-proxy", format!("client build: {e}")))?;
+                        .map_err(|e| AppError::source_unavailable("ntes-proxy", format!("client build: {e}")))?;
                     let res = client
                         .get(&url)
                         .send()
                         .await
-                        .map_err(|e| AppError::source_unavailable("replit-proxy", format!("GET {url}: {e}")))?;
+                        .map_err(|e| AppError::source_unavailable("ntes-proxy", format!("GET {url}: {e}")))?;
                     if !res.status().is_success() {
                         return Err(AppError::source_unavailable(
-                            "replit-proxy",
+                            "ntes-proxy",
                             format!("GET {url} returned {}", res.status()),
                         ));
                     }
                     let data: Value = res
                         .json()
                         .await
-                        .map_err(|e| AppError::source_unavailable("replit-proxy", format!("invalid JSON from {url}: {e}")))?;
-                    // Replit's average-delay already has the correct shape (train_no, list, etc.)
-                    // Convert it to the NTES web shape so map_ntes can handle it
+                        .map_err(|e| AppError::source_unavailable("ntes-proxy", format!("invalid JSON from {url}: {e}")))?;
                     if data.get("train_no").is_some() {
                         let list = data.get("stations").and_then(Value::as_array).cloned().unwrap_or_default();
                         let mapped_list: Vec<Value> = list
@@ -91,16 +101,11 @@ impl Service {
                             "list": mapped_list
                         }))
                     } else {
-                        Err(AppError::source_unavailable("replit-proxy", "unexpected shape"))
+                        Err(AppError::source_unavailable("ntes-proxy", "unexpected shape"))
                     }
                 }
-            }),
-            Candidate::new(crate::core::source::metric::RAILYATRI, move || {
-                let s = state_ry.clone();
-                let t = train_ry.clone();
-                async move { railyatri_average_delay(&s, &t).await }
-            }),
-        ];
+            }));
+        }
 
         let (metric, data) = fanout_n2(state, candidates, &format!("avg_delay:{train}")).await?;
         let mut resp = map_ntes(data)?;
@@ -116,12 +121,14 @@ async fn railyatri_average_delay(state: &AppState, train: &str) -> Result<Value,
     // Worldwide fallback: try Railyatri train page for delay hints.
     // Deep delegation: try live-status then time-table (n=2 endpoints).
     let urls = [
-        state
-            .config
-            .source_url(&state.config.railyatri_base, &format!("/live-train-status/{train}")),
-        state
-            .config
-            .source_url(&state.config.railyatri_base, &format!("/time-table/{train}")),
+        state.config.source_url(
+            &state.config.railyatri_base,
+            &format!("/live-train-status/{train}"),
+        ),
+        state.config.source_url(
+            &state.config.railyatri_base,
+            &format!("/time-table/{train}"),
+        ),
     ];
     let mut last_err: Option<AppError> = None;
     for url in urls {
@@ -136,7 +143,9 @@ async fn railyatri_average_delay(state: &AppState, train: &str) -> Result<Value,
             }
         };
         if res.status() == reqwest::StatusCode::NOT_FOUND {
-            return Err(AppError::not_found(format!("Train {train} not found on Railyatri")));
+            return Err(AppError::not_found(format!(
+                "Train {train} not found on Railyatri"
+            )));
         }
         if !res.status().is_success() {
             last_err = Some(AppError::source_unavailable(
@@ -167,7 +176,13 @@ async fn railyatri_average_delay(state: &AppState, train: &str) -> Result<Value,
         };
         // Look for timetable stops to synthesize.
         if let Some(ttt) = crate::core::railyatri::deep_get(&nd, "props.pageProps.trainTimeTable") {
-            if let Some(stops) = ttt.get("routeGroup").and_then(Value::as_array).and_then(|g| g.first()).and_then(|g| g.get("routesummary")).and_then(Value::as_array) {
+            if let Some(stops) = ttt
+                .get("routeGroup")
+                .and_then(Value::as_array)
+                .and_then(|g| g.first())
+                .and_then(|g| g.get("routesummary"))
+                .and_then(Value::as_array)
+            {
                 if !stops.is_empty() {
                     let list: Vec<Value> = stops
                         .iter()
@@ -193,9 +208,13 @@ async fn railyatri_average_delay(state: &AppState, train: &str) -> Result<Value,
                 }
             }
         }
-        last_err = Some(AppError::source_unavailable("Railyatri", "no timetable in payload"));
+        last_err = Some(AppError::source_unavailable(
+            "Railyatri",
+            "no timetable in payload",
+        ));
     }
-    Err(last_err.unwrap_or_else(|| AppError::source_unavailable("Railyatri", "average delay fetch failed")))
+    Err(last_err
+        .unwrap_or_else(|| AppError::source_unavailable("Railyatri", "average delay fetch failed")))
 }
 
 fn map_ntes(data: Value) -> Result<AverageDelayResponse, AppError> {

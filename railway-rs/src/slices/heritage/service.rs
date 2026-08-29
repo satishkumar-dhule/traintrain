@@ -1,7 +1,7 @@
 use serde_json::Value;
 
 use crate::core::error::AppError;
-use crate::core::fanout::{Candidate, fanout_n2};
+use crate::core::fanout::{fanout_n2, Candidate};
 use crate::models::{HeritageResponse, HeritageTrain};
 use crate::state::AppState;
 
@@ -24,13 +24,12 @@ impl Service {
             }
         }
 
-        // Super fan-out N²: NTES (2 delegates: selection and 0) raced, first success wins.
-        // Static local fallback ensures UI never sees 30s hang when NTES IP-blocked.
+        // Super fan-out N²: NTES (2 delegates) + optional ntes-proxy hedged delegate.
         let sel1 = selection;
         let sel2 = 0u8;
         let state1 = state.clone();
         let state2 = state.clone();
-        let candidates = vec![
+        let mut candidates = vec![
             Candidate::new(crate::core::source::metric::NTES, move || {
                 let s = state1.clone();
                 let sel = sel1;
@@ -42,14 +41,64 @@ impl Service {
                 async move { s.ntes_web.heritage_trains(sel).await }
             }),
         ];
+        if let Some(proxy_base) = state
+            .config
+            .ntes_proxy_base
+            .clone()
+            .filter(|v| !v.is_empty())
+        {
+            let sel = selection;
+            let base = proxy_base;
+            candidates.push(Candidate::new("ntes-proxy", move || {
+                let sel = sel;
+                let base = base.clone();
+                async move {
+                    let url = format!(
+                        "{}/rail-api/ntes/heritage?selection={}",
+                        base.trim_end_matches('/'),
+                        sel
+                    );
+                    let client = reqwest::Client::builder()
+                        .timeout(std::time::Duration::from_secs(4))
+                        .build()
+                        .map_err(|e| {
+                            AppError::source_unavailable("ntes-proxy", format!("client build: {e}"))
+                        })?;
+                    let res = client.get(&url).send().await.map_err(|e| {
+                        AppError::source_unavailable("ntes-proxy", format!("GET {url}: {e}"))
+                    })?;
+                    if !res.status().is_success() {
+                        return Err(AppError::source_unavailable(
+                            "ntes-proxy",
+                            format!("GET {url} returned {}", res.status()),
+                        ));
+                    }
+                    let data: Value = res.json().await.map_err(|e| {
+                        AppError::source_unavailable(
+                            "ntes-proxy",
+                            format!("invalid JSON from {url}: {e}"),
+                        )
+                    })?;
+                    Ok(data)
+                }
+            }));
+        }
         let data = match fanout_n2(state, candidates, &format!("heritage:{selection}")).await {
             Ok((_, v)) => v,
             Err(e) if matches!(e, AppError::NotFound(_)) => return Err(e),
             Err(e) => {
                 let msg = e.message().to_lowercase();
-                let is_timeout = msg.contains("timeout") || msg.contains("circuit open") || msg.contains("overall timeout");
+                let is_timeout = msg.contains("timeout")
+                    || msg.contains("circuit open")
+                    || msg.contains("overall timeout");
                 if !is_timeout {
                     return Err(e);
+                }
+                if let Some(stale) = state.cache.get_stale(&cache_key) {
+                    if let Ok(resp) = serde_json::from_value::<HeritageResponse>(stale) {
+                        tracing::warn!(selection, err=%e.message(), "heritage: live timed out, serving stale cache");
+                        return Ok(resp);
+                    }
                 }
                 tracing::warn!(selection, err=%e.message(), "heritage: live timed out, serving static empty");
                 let resp = HeritageResponse {

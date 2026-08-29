@@ -288,7 +288,7 @@
   </div>
 
   <div class="grid gap-3">
-    <h2 class="signage text-xs text-muted-foreground">
+    <h2 class="text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
       Everything, one tap away
     </h2>
     <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">

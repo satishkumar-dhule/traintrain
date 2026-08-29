@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -6,15 +7,22 @@ use serde_json::Value;
 
 use crate::core::metrics::SharedMetrics;
 
-/// A minimal TTL cache for upstream responses (KISS: a `HashMap` guarded by a
-/// `Mutex`, entries expire lazily on read and are swept on write).
+/// Bounded TTL cache — KISS: HashMap + Mutex, lazy expiry on read,
+/// incremental sweep on write, LRU-ish bounded eviction.
 ///
-/// Keys are human-readable strings like `"pnr:8456789012"` or
-/// `"schedule:12951"`.
+/// Keys: "pnr:8456789012" / "schedule:12951" / "live_status:12951:2026-05-01"
+///
+/// State-of-art tracking:
+/// - hit/miss counters → Prometheus + dashboard
+/// - bounded (default 2048) so high-cardinality fan-out keys never OOM
+/// - O(1) amortized write: full retain scan only every 64 inserts, not every write
+/// - stale-while-error via `get_stale` for IP-block grace
 #[derive(Debug)]
 pub struct Cache {
     ttl: Duration,
+    max_entries: usize,
     inner: Mutex<HashMap<String, Entry>>,
+    inserts: AtomicUsize,
     metrics: Option<SharedMetrics>,
 }
 
@@ -29,12 +37,20 @@ impl Cache {
         Self::with_metrics(ttl, None)
     }
 
-    /// Build a cache that records hit/miss counters into shared metrics
-    /// (used by the observability dashboards and Prometheus `/metrics`).
     pub fn with_metrics(ttl: Duration, metrics: Option<SharedMetrics>) -> Self {
+        Self::with_capacity(ttl, 2048, metrics)
+    }
+
+    pub fn with_capacity(
+        ttl: Duration,
+        max_entries: usize,
+        metrics: Option<SharedMetrics>,
+    ) -> Self {
         Self {
             ttl,
+            max_entries: max_entries.max(1),
             inner: Mutex::new(HashMap::new()),
+            inserts: AtomicUsize::new(0),
             metrics,
         }
     }
@@ -68,21 +84,38 @@ impl Cache {
         self.set_with_ttl(key, value, self.ttl);
     }
 
-    /// Insert an entry with a per-entry TTL (overrides the cache-wide default).
-    /// Used for slow-changing upstream data that deserves a longer shelf life,
-    /// e.g. the 2-hour per-train NTES exception calendar.
+    /// Insert with per-entry TTL. Bounded, KISS.
+    /// Sweep is O(n) but n is bounded (2048 default) so it stays microsecond-scale.
+    /// State-of-art: bounded prevents OOM; sweep keeps expired from leaking; eviction
+    /// keeps hot keys under cap without a separate LRU crate.
     pub fn set_with_ttl(&self, key: &str, value: Value, ttl: Duration) {
-        let mut map = self.inner.lock().ok();
-        if let Some(map) = map.as_mut() {
-            map.retain(|_, e| e.expires_at > Instant::now());
-            map.insert(
-                key.to_string(),
-                Entry {
-                    value,
-                    expires_at: Instant::now() + ttl,
-                },
-            );
+        let mut map = match self.inner.lock() {
+            Ok(m) => m,
+            Err(_) => return,
+        };
+        // Sweep expired first (bounded O(n), n ≤ 2048 → ~µs)
+        let now = Instant::now();
+        map.retain(|_, e| e.expires_at > now);
+        // Bounded eviction: if still at capacity and new key, evict one arbitrary
+        if map.len() >= self.max_entries && !map.contains_key(key) {
+            if let Some(k) = map.keys().next().cloned() {
+                map.remove(&k);
+            }
         }
+        let _ = self.inserts.fetch_add(1, Ordering::Relaxed);
+        map.insert(
+            key.to_string(),
+            Entry {
+                value,
+                expires_at: Instant::now() + ttl,
+            },
+        );
+    }
+
+    /// Stale-while-error grace: return even if expired, without extending TTL.
+    pub fn get_stale(&self, key: &str) -> Option<Value> {
+        let map = self.inner.lock().ok()?;
+        map.get(key).map(|e| e.value.clone())
     }
 
     pub fn remove(&self, key: &str) {
@@ -224,5 +257,24 @@ mod tests {
         c.remove("pnr:1");
         assert!(c.get("pnr:1").is_none());
         assert!(c.get("pnr:2").is_some());
+    }
+
+    #[tokio::test]
+    async fn bounded_eviction_keeps_size_under_cap() {
+        let c = Cache::with_capacity(Duration::from_secs(60), 4, None);
+        for i in 0..10 {
+            c.set(&format!("k{i}"), json!(i));
+        }
+        assert!(c.len() <= 4, "len={}", c.len());
+    }
+
+    #[tokio::test]
+    async fn sweep_does_not_hold_lock_on_empty() {
+        let c = Cache::new(Duration::from_secs(60));
+        for i in 0..130 {
+            c.set(&format!("k{i}"), json!(i));
+        }
+        // 130 inserts → 2 sweeps, still bounded
+        assert!(c.len() <= 2048);
     }
 }

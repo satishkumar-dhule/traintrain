@@ -6,7 +6,14 @@ use super::error::{AppError, CaptchaContext, CaptchaRequiredError};
 use super::http::HttpClient;
 use super::source::{DataSource, SourceOutcome};
 
-/// Fan-out aggregator ("sub-agent swarm").
+/// Fan-out aggregator ("sub-agent swarm") — legacy engine.
+///
+/// **DRY / KISS note:** the canonical hedged fan-out is now
+/// `crate::core::fanout::fanout_n2` (N×2 deep delegation, bounded
+/// concurrency, jitter, circuit-breaker, state-of-art metrics).
+/// `AgentAggregator` is kept only for backward compatibility and for the
+/// hermetic unit tests that inject a custom `HttpClient`. New code must use
+/// `fanout::FanoutBuilder` / `fanout::hedge` — one engine, one truth.
 ///
 /// Executes every registered source concurrently and returns the first
 /// successful result. If all sources fail, it surfaces a CAPTCHA challenge if

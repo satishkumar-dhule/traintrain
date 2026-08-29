@@ -79,7 +79,10 @@ impl ConfirmTktClient {
                         }]
                     }));
                 }
-                return Err(AppError::source_unavailable(SOURCE, format!("GET {url}: {e}")));
+                return Err(AppError::source_unavailable(
+                    SOURCE,
+                    format!("GET {url}: {e}"),
+                ));
             }
         };
         if !res.status().is_success() {
@@ -108,7 +111,10 @@ impl ConfirmTktClient {
                     }]
                 }));
             }
-            return Err(AppError::source_unavailable(SOURCE, format!("GET {url} returned {}", res.status())));
+            return Err(AppError::source_unavailable(
+                SOURCE,
+                format!("GET {url} returned {}", res.status()),
+            ));
         }
         let html = match res.text().await {
             Ok(h) => h,
@@ -138,7 +144,10 @@ impl ConfirmTktClient {
                         }]
                     }));
                 }
-                return Err(AppError::source_unavailable(SOURCE, format!("read body {url}: {e}")));
+                return Err(AppError::source_unavailable(
+                    SOURCE,
+                    format!("read body {url}: {e}"),
+                ));
             }
         };
         // High-availability: if the HTML contains a train table, use it;

@@ -5,7 +5,7 @@ use serde_json::Value;
 use crate::core::cache::keys;
 use crate::core::corover::{self, SOURCE_API};
 use crate::core::error::AppError;
-use crate::core::fanout::{Candidate, fanout_n2};
+use crate::core::fanout::{fanout_n2, Candidate};
 use crate::core::railyatri;
 use crate::models::{ScheduleResponse, ScheduleStop};
 use crate::state::AppState;
@@ -53,11 +53,19 @@ impl Service {
                 let exp = expected_corover.clone();
                 async move {
                     let resp = corover_schedule(&s, &t).await?;
-                    let stop_codes: Vec<&str> = resp.stops.iter().flatten().map(|s| s.code.as_str()).collect();
+                    let stop_codes: Vec<&str> = resp
+                        .stops
+                        .iter()
+                        .flatten()
+                        .map(|s| s.code.as_str())
+                        .collect();
                     if route_reaches_expected(&exp, &stop_codes) {
                         Ok(serde_json::to_value(&resp).unwrap())
                     } else {
-                        Err(AppError::source_unavailable("CoRover", route_conflict_message("CoRover", &exp, &stop_codes)))
+                        Err(AppError::source_unavailable(
+                            "CoRover",
+                            route_conflict_message("CoRover", &exp, &stop_codes),
+                        ))
                     }
                 }
             }),
@@ -68,11 +76,19 @@ impl Service {
                 async move {
                     let data = s.ntes.schedule(&t, "").await?;
                     let resp = ntes_schedule_response(&t, &data, s.config.cache_ttl.as_secs())?;
-                    let stop_codes: Vec<&str> = resp.stops.iter().flatten().map(|s| s.code.as_str()).collect();
+                    let stop_codes: Vec<&str> = resp
+                        .stops
+                        .iter()
+                        .flatten()
+                        .map(|s| s.code.as_str())
+                        .collect();
                     if route_reaches_expected(&exp, &stop_codes) {
                         Ok(serde_json::to_value(&resp).unwrap())
                     } else {
-                        Err(AppError::source_unavailable("NTES", route_conflict_message("NTES", &exp, &stop_codes)))
+                        Err(AppError::source_unavailable(
+                            "NTES",
+                            route_conflict_message("NTES", &exp, &stop_codes),
+                        ))
                     }
                 }
             }),
@@ -82,7 +98,12 @@ impl Service {
                 let exp = expected_ry.clone();
                 async move {
                     let mut resp = railyatri_schedule(&s, &t).await?;
-                    let stop_codes: Vec<&str> = resp.stops.iter().flatten().map(|s| s.code.as_str()).collect();
+                    let stop_codes: Vec<&str> = resp
+                        .stops
+                        .iter()
+                        .flatten()
+                        .map(|s| s.code.as_str())
+                        .collect();
                     if !route_reaches_expected(&exp, &stop_codes) {
                         let mut notice = resp.notice.take().unwrap_or_default();
                         if !notice.is_empty() {
@@ -101,7 +122,8 @@ impl Service {
         ];
 
         let (_metric, data) = fanout_n2(state, candidates, &format!("schedule:{train}")).await?;
-        let resp: ScheduleResponse = serde_json::from_value(data).map_err(|e| AppError::internal(format!("schedule fanout decode: {e}")))?;
+        let resp: ScheduleResponse = serde_json::from_value(data)
+            .map_err(|e| AppError::internal(format!("schedule fanout decode: {e}")))?;
         state.cache.set_json(&key, &resp)?;
         Ok(resp)
     }

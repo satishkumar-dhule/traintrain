@@ -1,7 +1,7 @@
 use serde_json::Value;
 
 use crate::core::error::AppError;
-use crate::core::fanout::{Candidate, fanout_n2};
+use crate::core::fanout::{fanout_n2, Candidate};
 use crate::models::{StationTimetableResponse, StationTimetableTrain};
 use crate::state::AppState;
 
@@ -40,7 +40,7 @@ impl Service {
         let state_ntes = state.clone();
         let state_ry = state.clone();
 
-        let candidates = vec![
+        let mut candidates = vec![
             Candidate::new(crate::core::source::metric::NTES, move || {
                 let s = state_ntes.clone();
                 let st = station_ntes.clone();
@@ -55,6 +55,53 @@ impl Service {
                 async move { railyatri_station_timetable(&s, &st, d.as_deref()).await }
             }),
         ];
+        if let Some(proxy_base) = state
+            .config
+            .ntes_proxy_base
+            .clone()
+            .filter(|v| !v.is_empty())
+        {
+            let st = station.to_string();
+            let d = date.clone();
+            let base = proxy_base;
+            candidates.push(Candidate::new("ntes-proxy", move || {
+                let st = st.clone();
+                let d = d.clone();
+                let base = base.clone();
+                async move {
+                    let mut url = format!(
+                        "{}/rail-api/ntes/station-timetable?station={}",
+                        base.trim_end_matches('/'),
+                        urlencoding::encode(&st)
+                    );
+                    if let Some(date) = d.as_deref() {
+                        url.push_str(&format!("&date={}", urlencoding::encode(date)));
+                    }
+                    let client = reqwest::Client::builder()
+                        .timeout(std::time::Duration::from_secs(4))
+                        .build()
+                        .map_err(|e| {
+                            AppError::source_unavailable("ntes-proxy", format!("client build: {e}"))
+                        })?;
+                    let res = client.get(&url).send().await.map_err(|e| {
+                        AppError::source_unavailable("ntes-proxy", format!("GET {url}: {e}"))
+                    })?;
+                    if !res.status().is_success() {
+                        return Err(AppError::source_unavailable(
+                            "ntes-proxy",
+                            format!("GET {url} returned {}", res.status()),
+                        ));
+                    }
+                    let data: Value = res.json().await.map_err(|e| {
+                        AppError::source_unavailable(
+                            "ntes-proxy",
+                            format!("invalid JSON from {url}: {e}"),
+                        )
+                    })?;
+                    Ok(data)
+                }
+            }));
+        }
 
         let (metric, data) = fanout_n2(state, candidates, &format!("stn_tt:{station}")).await?;
         let mut resp = map_ntes(data, station, date.as_deref())?;
@@ -86,21 +133,32 @@ async fn railyatri_station_timetable(
         let res = match state.http.inner().get(&url).send().await {
             Ok(r) => r,
             Err(e) => {
-                last_err = Some(AppError::source_unavailable("Railyatri", format!("GET {url}: {e}")));
+                last_err = Some(AppError::source_unavailable(
+                    "Railyatri",
+                    format!("GET {url}: {e}"),
+                ));
                 continue;
             }
         };
         if res.status() == reqwest::StatusCode::NOT_FOUND {
-            return Err(AppError::not_found(format!("Station {station} not found on Railyatri")));
+            return Err(AppError::not_found(format!(
+                "Station {station} not found on Railyatri"
+            )));
         }
         if !res.status().is_success() {
-            last_err = Some(AppError::source_unavailable("Railyatri", format!("GET {url} returned {}", res.status())));
+            last_err = Some(AppError::source_unavailable(
+                "Railyatri",
+                format!("GET {url} returned {}", res.status()),
+            ));
             continue;
         }
         let html = match res.text().await {
             Ok(h) => h,
             Err(e) => {
-                last_err = Some(AppError::source_unavailable("Railyatri", format!("read body {url}: {e}")));
+                last_err = Some(AppError::source_unavailable(
+                    "Railyatri",
+                    format!("read body {url}: {e}"),
+                ));
                 continue;
             }
         };
@@ -130,15 +188,25 @@ async fn railyatri_station_timetable(
                         })
                     })
                     .collect();
-                if !trains.is_empty() && trains.iter().any(|t| !t["trainNo"].as_str().unwrap_or("").is_empty()) {
+                if !trains.is_empty()
+                    && trains
+                        .iter()
+                        .any(|t| !t["trainNo"].as_str().unwrap_or("").is_empty())
+                {
                     let _ = date;
-                    return Ok(serde_json::json!({ "list": trains, "station": station, "total": trains.len() }));
+                    return Ok(
+                        serde_json::json!({ "list": trains, "station": station, "total": trains.len() }),
+                    );
                 }
             }
         }
-        last_err = Some(AppError::source_unavailable("Railyatri", "no trains in board payload"));
+        last_err = Some(AppError::source_unavailable(
+            "Railyatri",
+            "no trains in board payload",
+        ));
     }
-    Err(last_err.unwrap_or_else(|| AppError::source_unavailable("Railyatri", "station board fetch failed")))
+    Err(last_err
+        .unwrap_or_else(|| AppError::source_unavailable("Railyatri", "station board fetch failed")))
 }
 
 fn find_trains(v: &Value) -> Option<Vec<Value>> {

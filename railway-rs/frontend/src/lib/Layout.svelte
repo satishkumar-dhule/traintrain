@@ -13,8 +13,8 @@
   import Activity from 'lucide-svelte/icons/activity'
   import CalendarDays from 'lucide-svelte/icons/calendar-days'
   import Package from 'lucide-svelte/icons/package'
-  import Sparkles from 'lucide-svelte/icons/sparkles'
-  import Info from 'lucide-svelte/icons/info'
+import Sparkles from 'lucide-svelte/icons/sparkles'
+import Info from 'lucide-svelte/icons/info'
   import TrendingUp from 'lucide-svelte/icons/trending-up'
   import Search from 'lucide-svelte/icons/search'
   import XIcon from 'lucide-svelte/icons/x'
@@ -152,8 +152,8 @@ import SourceTrustChip from '$lib/components/SourceTrustChip.svelte'
 </script>
 
 <div class="min-h-screen bg-background">
-  <!-- Livery stripe: coach indigo / saffron / signal green, as on rolling stock. -->
-  <div aria-hidden="true" class="fixed inset-x-0 top-0 z-50 hidden h-1 lg:flex">
+  <!-- Livery stripe: coach indigo / saffron / signal green — now visible on all viewports (paper warmth anchor). -->
+  <div aria-hidden="true" class="fixed inset-x-0 top-0 z-50 flex h-0.5">
     <span class="flex-1 bg-primary"></span><span class="w-24 bg-saffron"></span
     ><span class="w-12 bg-signal-go"></span>
   </div>

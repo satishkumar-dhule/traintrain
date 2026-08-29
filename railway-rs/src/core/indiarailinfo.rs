@@ -56,7 +56,10 @@ impl IndiaRailInfoClient {
                 "stops": [{"code": "NDLS", "name": "NEW DELHI", "arrival": "00:00", "departure": "00:05", "day": 1}]
             }))
         } else {
-            Err(AppError::source_unavailable(SOURCE, "no live data in IndiaRailInfo response"))
+            Err(AppError::source_unavailable(
+                SOURCE,
+                "no live data in IndiaRailInfo response",
+            ))
         }
     }
 }

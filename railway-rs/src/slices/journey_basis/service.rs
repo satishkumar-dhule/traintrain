@@ -2,7 +2,7 @@ use serde_json::Value;
 
 use crate::core::cache::keys;
 use crate::core::error::AppError;
-use crate::core::fanout::{Candidate, fanout_n2};
+use crate::core::fanout::{fanout_n2, Candidate};
 use crate::models::{JourneyBasisResponse, JourneyStationInfo, JourneyStationsResponse};
 use crate::slices::live_status::mapping::map_response;
 use crate::state::AppState;
@@ -21,14 +21,12 @@ impl Service {
             return Ok(cached);
         }
 
-        // Super fan-out N²: NTES journey_stations (2 delegates: same train, duplicated for N=2)
-        // raced concurrently, each retried. First success wins; static local fallback
-        // guarantees the UI never sees a 30s hang when NTES is IP-blocked in Singapore.
+        // Super fan-out N²: NTES journey_stations (2 delegates) + optional ntes-proxy.
         let train1 = train.to_string();
         let train2 = train.to_string();
         let state1 = state.clone();
         let state2 = state.clone();
-        let candidates = vec![
+        let mut candidates = vec![
             Candidate::new(crate::core::source::metric::NTES, move || {
                 let s = state1.clone();
                 let t = train1.clone();
@@ -40,12 +38,56 @@ impl Service {
                 async move { s.ntes_web.journey_stations(&t).await }
             }),
         ];
+        if let Some(proxy_base) = state
+            .config
+            .ntes_proxy_base
+            .clone()
+            .filter(|v| !v.is_empty())
+        {
+            let t = train.to_string();
+            let base = proxy_base;
+            candidates.push(Candidate::new("ntes-proxy", move || {
+                let t = t.clone();
+                let base = base.clone();
+                async move {
+                    let url = format!(
+                        "{}/rail-api/ntes/journey-stations?train={}",
+                        base.trim_end_matches('/'),
+                        urlencoding::encode(&t)
+                    );
+                    let client = reqwest::Client::builder()
+                        .timeout(std::time::Duration::from_secs(4))
+                        .build()
+                        .map_err(|e| {
+                            AppError::source_unavailable("ntes-proxy", format!("client build: {e}"))
+                        })?;
+                    let res = client.get(&url).send().await.map_err(|e| {
+                        AppError::source_unavailable("ntes-proxy", format!("GET {url}: {e}"))
+                    })?;
+                    if !res.status().is_success() {
+                        return Err(AppError::source_unavailable(
+                            "ntes-proxy",
+                            format!("GET {url} returned {}", res.status()),
+                        ));
+                    }
+                    let data: Value = res.json().await.map_err(|e| {
+                        AppError::source_unavailable(
+                            "ntes-proxy",
+                            format!("invalid JSON from {url}: {e}"),
+                        )
+                    })?;
+                    Ok(data)
+                }
+            }));
+        }
         let data = match fanout_n2(state, candidates, &format!("journey_stations:{train}")).await {
             Ok((_, v)) => v,
             Err(e) if matches!(e, AppError::NotFound(_)) => return Err(e),
             Err(e) => {
                 let msg = e.message().to_lowercase();
-                let is_timeout = msg.contains("timeout") || msg.contains("circuit open") || msg.contains("overall timeout");
+                let is_timeout = msg.contains("timeout")
+                    || msg.contains("circuit open")
+                    || msg.contains("overall timeout");
                 if !is_timeout {
                     return Err(e);
                 }
@@ -98,13 +140,12 @@ impl Service {
             return Ok(cached);
         }
 
-        // First NTES call: journey_stations (fan-out N², 2 delegates). If it fails,
-        // return a synthetic response with data_source "local" so the UI never hangs.
+        // First NTES call: journey_stations (fan-out N², 2 delegates + optional proxy).
         let train_a1 = train.to_string();
         let train_a2 = train.to_string();
         let state_a1 = state.clone();
         let state_a2 = state.clone();
-        let candidates_a = vec![
+        let mut candidates_a = vec![
             Candidate::new(crate::core::source::metric::NTES, move || {
                 let s = state_a1.clone();
                 let t = train_a1.clone();
@@ -116,12 +157,62 @@ impl Service {
                 async move { s.ntes_web.journey_stations(&t).await }
             }),
         ];
-        let list = match fanout_n2(state, candidates_a, &format!("journey_basis_stations:{train}")).await {
+        if let Some(proxy_base) = state
+            .config
+            .ntes_proxy_base
+            .clone()
+            .filter(|v| !v.is_empty())
+        {
+            let t = train.to_string();
+            let base = proxy_base;
+            candidates_a.push(Candidate::new("ntes-proxy", move || {
+                let t = t.clone();
+                let base = base.clone();
+                async move {
+                    let url = format!(
+                        "{}/rail-api/ntes/journey-stations?train={}",
+                        base.trim_end_matches('/'),
+                        urlencoding::encode(&t)
+                    );
+                    let client = reqwest::Client::builder()
+                        .timeout(std::time::Duration::from_secs(4))
+                        .build()
+                        .map_err(|e| {
+                            AppError::source_unavailable("ntes-proxy", format!("client build: {e}"))
+                        })?;
+                    let res = client.get(&url).send().await.map_err(|e| {
+                        AppError::source_unavailable("ntes-proxy", format!("GET {url}: {e}"))
+                    })?;
+                    if !res.status().is_success() {
+                        return Err(AppError::source_unavailable(
+                            "ntes-proxy",
+                            format!("GET {url} returned {}", res.status()),
+                        ));
+                    }
+                    let data: Value = res.json().await.map_err(|e| {
+                        AppError::source_unavailable(
+                            "ntes-proxy",
+                            format!("invalid JSON from {url}: {e}"),
+                        )
+                    })?;
+                    Ok(data)
+                }
+            }));
+        }
+        let list = match fanout_n2(
+            state,
+            candidates_a,
+            &format!("journey_basis_stations:{train}"),
+        )
+        .await
+        {
             Ok((_, v)) => v,
             Err(e) if matches!(e, AppError::NotFound(_)) => return Err(e),
             Err(e) => {
                 let msg = e.message().to_lowercase();
-                let is_timeout = msg.contains("timeout") || msg.contains("circuit open") || msg.contains("overall timeout");
+                let is_timeout = msg.contains("timeout")
+                    || msg.contains("circuit open")
+                    || msg.contains("overall timeout");
                 if !is_timeout {
                     return Err(e);
                 }
@@ -146,14 +237,14 @@ impl Service {
         })?;
         let j_station_value = format!("{}#{}#{}", info.code, info.day_change, info.seq);
 
-        // Second NTES call: journey_station_basis (fan-out N², 2 delegates with same jStation value).
+        // Second NTES call: journey_station_basis (2 delegates + optional proxy).
         let train_b1 = train.to_string();
         let train_b2 = train.to_string();
         let js1 = j_station_value.clone();
         let js2 = j_station_value.clone();
         let state_b1 = state.clone();
         let state_b2 = state.clone();
-        let candidates_b = vec![
+        let mut candidates_b = vec![
             Candidate::new(crate::core::source::metric::NTES, move || {
                 let s = state_b1.clone();
                 let t = train_b1.clone();
@@ -167,12 +258,65 @@ impl Service {
                 async move { s.ntes_web.journey_station_basis(&t, &js).await }
             }),
         ];
-        let norm = match fanout_n2(state, candidates_b, &format!("journey_basis:{train}:{station}")).await {
+        if let Some(proxy_base) = state
+            .config
+            .ntes_proxy_base
+            .clone()
+            .filter(|v| !v.is_empty())
+        {
+            let t = train.to_string();
+            let st = station.to_string();
+            let base = proxy_base;
+            candidates_b.push(Candidate::new("ntes-proxy", move || {
+                let t = t.clone();
+                let st = st.clone();
+                let base = base.clone();
+                async move {
+                    let url = format!(
+                        "{}/rail-api/ntes/journey-basis?train={}&station={}",
+                        base.trim_end_matches('/'),
+                        urlencoding::encode(&t),
+                        urlencoding::encode(&st)
+                    );
+                    let client = reqwest::Client::builder()
+                        .timeout(std::time::Duration::from_secs(4))
+                        .build()
+                        .map_err(|e| {
+                            AppError::source_unavailable("ntes-proxy", format!("client build: {e}"))
+                        })?;
+                    let res = client.get(&url).send().await.map_err(|e| {
+                        AppError::source_unavailable("ntes-proxy", format!("GET {url}: {e}"))
+                    })?;
+                    if !res.status().is_success() {
+                        return Err(AppError::source_unavailable(
+                            "ntes-proxy",
+                            format!("GET {url} returned {}", res.status()),
+                        ));
+                    }
+                    let data: Value = res.json().await.map_err(|e| {
+                        AppError::source_unavailable(
+                            "ntes-proxy",
+                            format!("invalid JSON from {url}: {e}"),
+                        )
+                    })?;
+                    Ok(data)
+                }
+            }));
+        }
+        let norm = match fanout_n2(
+            state,
+            candidates_b,
+            &format!("journey_basis:{train}:{station}"),
+        )
+        .await
+        {
             Ok((_, v)) => v,
             Err(e) if matches!(e, AppError::NotFound(_)) => return Err(e),
             Err(e) => {
                 let msg = e.message().to_lowercase();
-                let is_timeout = msg.contains("timeout") || msg.contains("circuit open") || msg.contains("overall timeout");
+                let is_timeout = msg.contains("timeout")
+                    || msg.contains("circuit open")
+                    || msg.contains("overall timeout");
                 if !is_timeout {
                     return Err(e);
                 }

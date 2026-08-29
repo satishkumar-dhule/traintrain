@@ -10,9 +10,9 @@
   import Extras from '$lib/pages/Extras.svelte'
   import Assistant from '$lib/pages/Assistant.svelte'
   import System from '$lib/pages/System.svelte'
-  import Kaizen from '$lib/pages/Kaizen.svelte'
-  import About from '$lib/pages/About.svelte'
-  import Chart from '$lib/pages/Chart.svelte'
+import Kaizen from '$lib/pages/Kaizen.svelte'
+import About from '$lib/pages/About.svelte'
+import Chart from '$lib/pages/Chart.svelte'
 
   const segs = $derived(route.path.split('/').filter(Boolean))
 </script>

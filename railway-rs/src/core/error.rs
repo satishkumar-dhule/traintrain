@@ -35,7 +35,7 @@ impl CaptchaRequiredError {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum AppError {
     /// Client supplied a bad query. HTTP 400.
     BadRequest(String),

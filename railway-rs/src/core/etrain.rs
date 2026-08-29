@@ -58,7 +58,10 @@ impl EtrainClient {
                 "instances": []
             }))
         } else {
-            Err(AppError::source_unavailable(SOURCE, "no live data in Etrain response"))
+            Err(AppError::source_unavailable(
+                SOURCE,
+                "no live data in Etrain response",
+            ))
         }
     }
 }

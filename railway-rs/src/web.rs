@@ -161,8 +161,17 @@ async fn request_id_mw(mut req: Request, next: Next) -> Response {
 
 /// Helper: extract client IP for rate limiting (X-Forwarded-For first entry, else X-Real-IP, else unknown).
 fn client_ip(req: &Request) -> String {
-    if let Some(forwarded) = req.headers().get("x-forwarded-for").and_then(|v| v.to_str().ok()) {
-        if let Some(first) = forwarded.split(',').next().map(|s| s.trim()).filter(|s| !s.is_empty()) {
+    if let Some(forwarded) = req
+        .headers()
+        .get("x-forwarded-for")
+        .and_then(|v| v.to_str().ok())
+    {
+        if let Some(first) = forwarded
+            .split(',')
+            .next()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+        {
             return first.to_string();
         }
     }
@@ -279,7 +288,12 @@ async fn load_shed_mw(State(state): State<AppState>, req: Request, next: Next) -
                 res.headers_mut().insert("x-request-id", v);
             }
         }
-        tracing::warn!(in_flight, threshold, mem_bytes, "load shed: in_flight > threshold");
+        tracing::warn!(
+            in_flight,
+            threshold,
+            mem_bytes,
+            "load shed: in_flight > threshold"
+        );
         return res;
     }
     next.run(req).await

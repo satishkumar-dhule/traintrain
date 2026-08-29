@@ -27,6 +27,12 @@ pub struct Metrics {
     request_latency: Mutex<f64>,
     cache_hits: AtomicU64,
     cache_misses: AtomicU64,
+    /// Pattern: Hedging — fan-out tracking
+    fanout_total: AtomicU64,
+    fanout_overall_timeouts: AtomicU64,
+    fanout_wins: Mutex<HashMap<String, u64>>,
+    /// per-source hard failures (SourceUnavailable/Internal) — Pattern: Hedging + RED Errors
+    source_failures: Mutex<HashMap<String, u64>>,
     /// rolling time-series, newest at the back
     series: Mutex<VecDeque<SeriesPoint>>,
     last_total: AtomicU64,
@@ -56,6 +62,10 @@ pub struct MetricsSnapshot {
     pub source_latency: Vec<SourceLatency>,
     pub cache_hits: u64,
     pub cache_misses: u64,
+    pub fanout_total: u64,
+    pub fanout_overall_timeouts: u64,
+    pub fanout_wins: Vec<FanoutWin>,
+    pub source_failures: Vec<SourceFailure>,
     pub latency_ms: f64,
     pub uptime_secs: u64,
     pub req_per_sec: f64,
@@ -79,6 +89,18 @@ pub struct SourceLatency {
     pub source: String,
     pub avg_latency_ms: f64,
     pub samples: u64,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct FanoutWin {
+    pub source: String,
+    pub wins: u64,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SourceFailure {
+    pub source: String,
+    pub failures: u64,
 }
 
 /// One row of the dashboard's time-series charts.
@@ -229,6 +251,10 @@ impl Metrics {
             request_latency: Mutex::new(0.0),
             cache_hits: AtomicU64::new(0),
             cache_misses: AtomicU64::new(0),
+            fanout_total: AtomicU64::new(0),
+            fanout_overall_timeouts: AtomicU64::new(0),
+            fanout_wins: Mutex::new(HashMap::new()),
+            source_failures: Mutex::new(HashMap::new()),
             series: Mutex::new(VecDeque::with_capacity(MAX_SERIES)),
             last_total: AtomicU64::new(0),
             last_sample_at: Mutex::new(None),
@@ -267,6 +293,24 @@ impl Metrics {
 
     pub fn add_bytes(&self, n: u64) {
         self.bytes_out.fetch_add(n, Ordering::Relaxed);
+    }
+
+    /// Pattern: Hedging — record that a fan-out was executed.
+    pub fn record_fanout(&self) {
+        self.fanout_total.fetch_add(1, Ordering::Relaxed);
+    }
+    pub fn record_fanout_win(&self, source: &str) {
+        if let Ok(mut m) = self.fanout_wins.lock() {
+            *m.entry(source.to_string()).or_insert(0) += 1;
+        }
+    }
+    pub fn record_fanout_overall_timeout(&self) {
+        self.fanout_overall_timeouts.fetch_add(1, Ordering::Relaxed);
+    }
+    pub fn record_source_failure(&self, source: &str) {
+        if let Ok(mut m) = self.source_failures.lock() {
+            *m.entry(source.to_string()).or_insert(0) += 1;
+        }
     }
 
     /// Record the latency of a successful upstream fetch from `source`.
@@ -399,6 +443,34 @@ impl Metrics {
             .map(|s| s.iter().cloned().collect::<Vec<_>>())
             .unwrap_or_default();
 
+        let mut fanout_wins = self
+            .fanout_wins
+            .lock()
+            .map(|m| {
+                m.iter()
+                    .map(|(s, n)| FanoutWin {
+                        source: s.clone(),
+                        wins: *n,
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        fanout_wins.sort_by(|a, b| a.source.cmp(&b.source));
+
+        let mut source_failures = self
+            .source_failures
+            .lock()
+            .map(|m| {
+                m.iter()
+                    .map(|(s, n)| SourceFailure {
+                        source: s.clone(),
+                        failures: *n,
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        source_failures.sort_by(|a, b| a.source.cmp(&b.source));
+
         MetricsSnapshot {
             requests_total: total,
             in_flight: self.in_flight.load(Ordering::Relaxed),
@@ -408,6 +480,10 @@ impl Metrics {
             source_latency: latency,
             cache_hits: self.cache_hits.load(Ordering::Relaxed),
             cache_misses: self.cache_misses.load(Ordering::Relaxed),
+            fanout_total: self.fanout_total.load(Ordering::Relaxed),
+            fanout_overall_timeouts: self.fanout_overall_timeouts.load(Ordering::Relaxed),
+            fanout_wins,
+            source_failures,
             latency_ms: self.request_latency_ms(),
             uptime_secs: uptime,
             req_per_sec,

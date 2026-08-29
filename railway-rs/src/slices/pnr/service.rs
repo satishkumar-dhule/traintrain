@@ -6,7 +6,7 @@ use serde_json::Value;
 
 use crate::core::cache::keys;
 use crate::core::error::{AppError, CaptchaRequiredError};
-use crate::core::fanout::{Candidate, fanout_n2};
+use crate::core::fanout::{fanout_n2, Candidate};
 use crate::core::http::HttpClient;
 use crate::data::StationRecord;
 use crate::models::{PnrEndpoint, PnrPassenger, PnrResponse};
@@ -70,7 +70,11 @@ impl Service {
                         // Ensure SRE notice is present even on cache hit for observability
                         if !r.notice.as_deref().unwrap_or("").contains("SRE:") {
                             let base = r.notice.unwrap_or_default();
-                            r.notice = Some(format!("{} {}", base, SRE_HEDGING_NOTICE).trim().to_string());
+                            r.notice = Some(
+                                format!("{} {}", base, SRE_HEDGING_NOTICE)
+                                    .trim()
+                                    .to_string(),
+                            );
                         }
                         return Ok(r);
                     }
@@ -150,8 +154,11 @@ impl Service {
                         }
                         if !resp.notice.as_deref().unwrap_or("").contains("SRE:") {
                             let base = resp.notice.unwrap_or_default();
-                            resp.notice =
-                                Some(format!("{} {}", base, SRE_HEDGING_NOTICE).trim().to_string());
+                            resp.notice = Some(
+                                format!("{} {}", base, SRE_HEDGING_NOTICE)
+                                    .trim()
+                                    .to_string(),
+                            );
                         }
                         resp.freshness = Some("stale-hedge".to_string());
                         tracing::info!(pnr=%p, source="pnr-cache-hedge", "pnr cache hedge hit");
@@ -193,8 +200,11 @@ impl Service {
                     .map_err(|e| AppError::internal(format!("pnr fanout decode: {e}")))?;
                 if !resp.notice.as_deref().unwrap_or("").contains("SRE:") {
                     let base = resp.notice.unwrap_or_default();
-                    resp.notice =
-                        Some(format!("{} {}", base, SRE_HEDGING_NOTICE).trim().to_string());
+                    resp.notice = Some(
+                        format!("{} {}", base, SRE_HEDGING_NOTICE)
+                            .trim()
+                            .to_string(),
+                    );
                 }
                 // Cache the hedged win so subsequent answer_hedged can stale-hedge it
                 let _ = state
@@ -217,7 +227,9 @@ impl Service {
         //    TS*, f5 cookies, IR_APP). Pattern: Deep Delegation with per-step timeout.
         let page = hedged_send_get(
             state,
-            &state.config.source_url(base, "/enquiry/PNR/PnrEnquiry.html?locale=en"),
+            &state
+                .config
+                .source_url(base, "/enquiry/PNR/PnrEnquiry.html?locale=en"),
             None,
         )
         .await?;
@@ -240,7 +252,9 @@ impl Service {
             .unwrap_or_default();
         let img_res = hedged_send_get(
             state,
-            &state.config.source_url(base, &format!("/enquiry/captchaDraw.png?{ts}")),
+            &state
+                .config
+                .source_url(base, &format!("/enquiry/captchaDraw.png?{ts}")),
             Some(&cookie_str(&cookies)),
         )
         .await?;
@@ -326,23 +340,12 @@ impl Service {
             }
         };
 
-        // Build hedged candidates for the answer path
+        // Build hedged answer path: authoritative Indian Railways first,
+        // then stale-cache hedge on SourceUnavailable (availability hedging).
         let pnr_owned = pnr.to_string();
         let text_owned = captcha.text.trim().to_string();
-        let cookies_str = cookie_str(&cookies);
         let state_ir = state.clone();
-        let pnr_ir = pnr_owned.clone();
-        let text_ir = text_owned.clone();
         let cookies_ir = cookies.clone();
-        let state_ry = state.clone();
-        let pnr_ry = pnr_owned.clone();
-        let state_cache = state.clone();
-        let pnr_cache = pnr_owned.clone();
-
-        // SRE Pattern: Hedging with authoritative NotFound — Indian Railways NotFound is definitive, so we try it directly first; only on SourceUnavailable do we hedge to stale cache. This preserves 404 for invalid PNR and 502 for unreachable, while still hedging for high availability.
-        let _ = (&state_ry, &pnr_ry, &state_cache, &pnr_cache); // suppress unused warnings for hedged path refactor (kept for challenge_hedged reuse)
-        // Suppress unused warning for cookies_str captured via clone above (used in direct path)
-        let _ = &cookies_str;
         // Direct hedged call to Indian Railways (authoritative for PNR)
         let indian_res: Result<Value, AppError> = async {
             let start = Instant::now();
@@ -378,10 +381,14 @@ impl Service {
             if !error_message.is_empty() || flag.eq_ignore_ascii_case("NO") {
                 match error_message {
                     "Captcha not matched" => {
-                        return Self::challenge_inner(&state_ir, &pnr_owned).await.map(|_| Value::Null)
+                        return Self::challenge_inner(&state_ir, &pnr_owned)
+                            .await
+                            .map(|_| Value::Null)
                     }
                     "Session out or Invalid Request" => {
-                        return Self::challenge_inner(&state_ir, &pnr_owned).await.map(|_| Value::Null)
+                        return Self::challenge_inner(&state_ir, &pnr_owned)
+                            .await
+                            .map(|_| Value::Null)
                     }
                     "PNR No. is not valid" | "Invalid PNR" => {
                         return Err(AppError::not_found(format!(
@@ -409,18 +416,19 @@ impl Service {
             Ok(val) => {
                 // Captcha re-issue case returns Value::Null which should be surfaced as CaptchaRequired via challenge_inner
                 if val.is_null() {
-                    return Err(AppError::CaptchaRequired(crate::core::error::CaptchaRequiredError::new(
-                        SOURCE,
-                        "",
-                        "",
-                    )));
+                    return Err(AppError::CaptchaRequired(
+                        crate::core::error::CaptchaRequiredError::new(SOURCE, "", ""),
+                    ));
                 }
                 let mut resp: PnrResponse = serde_json::from_value(val)
                     .map_err(|e| AppError::internal(format!("pnr answer decode: {e}")))?;
                 if !resp.notice.as_deref().unwrap_or("").contains("SRE:") {
                     let base = resp.notice.unwrap_or_default();
-                    resp.notice =
-                        Some(format!("{} {}", base, SRE_HEDGING_NOTICE).trim().to_string());
+                    resp.notice = Some(
+                        format!("{} {}", base, SRE_HEDGING_NOTICE)
+                            .trim()
+                            .to_string(),
+                    );
                 }
                 state
                     .cache
@@ -431,20 +439,28 @@ impl Service {
             Err(AppError::CaptchaRequired(e)) => Err(AppError::CaptchaRequired(e)),
             Err(e) => {
                 // Hedging: try stale cache on SourceUnavailable/Internal
-                let is_live_failure = matches!(e, AppError::SourceUnavailable { .. } | AppError::Internal(_));
+                let is_live_failure = matches!(
+                    e,
+                    AppError::SourceUnavailable { .. } | AppError::Internal(_)
+                );
                 if is_live_failure {
                     let key = keys::pnr(&pnr_owned);
                     if let Some(v) = state.cache.get(&key) {
                         if let Ok(mut resp) = serde_json::from_value::<PnrResponse>(v.clone()) {
                             if resp.pnr.is_none() && resp.train_number.is_none() {
-                                if let Ok(mapped) = map_response(&pnr_owned, &v, &state.datasets.stations) {
+                                if let Ok(mapped) =
+                                    map_response(&pnr_owned, &v, &state.datasets.stations)
+                                {
                                     resp = mapped;
                                 }
                             }
                             if !resp.notice.as_deref().unwrap_or("").contains("SRE:") {
                                 let base = resp.notice.unwrap_or_default();
-                                resp.notice =
-                                    Some(format!("{} {}", base, SRE_HEDGING_NOTICE).trim().to_string());
+                                resp.notice = Some(
+                                    format!("{} {}", base, SRE_HEDGING_NOTICE)
+                                        .trim()
+                                        .to_string(),
+                                );
                             }
                             resp.freshness = Some("stale-hedge".to_string());
                             tracing::info!(pnr=%pnr_owned, source="pnr-cache-hedge", "pnr stale hedge hit after indian-railways failure");
@@ -501,13 +517,13 @@ async fn hedged_send_get(
         let res = tokio::time::timeout(PER_SOURCE_TIMEOUT, fut).await;
         let res = match res {
             Ok(Ok(r)) => Ok(r),
-            Ok(Err(e)) => Err(AppError::source_unavailable(
-                SOURCE,
-                format!("{url}: {e}"),
-            )),
+            Ok(Err(e)) => Err(AppError::source_unavailable(SOURCE, format!("{url}: {e}"))),
             Err(_) => Err(AppError::source_unavailable(
                 SOURCE,
-                format!("timeout after {}ms for {url}", PER_SOURCE_TIMEOUT.as_millis()),
+                format!(
+                    "timeout after {}ms for {url}",
+                    PER_SOURCE_TIMEOUT.as_millis()
+                ),
             )),
         };
         match res {
@@ -628,12 +644,14 @@ async fn railyatri_pnr_direct(state: &AppState, pnr: &str) -> Result<Value, AppE
     // Deep delegation: 2 Railyatri endpoints, sequentially hedged inside this candidate.
     // Fan-out already provides 2-deep retry, so this is N=2 deep delegation.
     let urls = [
-        state
-            .config
-            .source_url(&state.config.railyatri_base, &format!("/get-status/{}", urlencoding::encode(pnr))),
-        state
-            .config
-            .source_url(&state.config.railyatri_base, &format!("/pnr-status?pnr={}", urlencoding::encode(pnr))),
+        state.config.source_url(
+            &state.config.railyatri_base,
+            &format!("/get-status/{}", urlencoding::encode(pnr)),
+        ),
+        state.config.source_url(
+            &state.config.railyatri_base,
+            &format!("/pnr-status?pnr={}", urlencoding::encode(pnr)),
+        ),
     ];
     let mut last_err: Option<AppError> = None;
     for url in &urls {
@@ -656,7 +674,9 @@ async fn railyatri_pnr_direct(state: &AppState, pnr: &str) -> Result<Value, AppE
             }
         };
         if res.status() == reqwest::StatusCode::NOT_FOUND {
-            return Err(AppError::not_found(format!("PNR {pnr} not found on Railyatri")));
+            return Err(AppError::not_found(format!(
+                "PNR {pnr} not found on Railyatri"
+            )));
         }
         if !res.status().is_success() {
             last_err = Some(AppError::source_unavailable(
@@ -687,7 +707,11 @@ async fn railyatri_pnr_direct(state: &AppState, pnr: &str) -> Result<Value, AppE
                     match crate::core::railyatri::extract_next_data(&body_str) {
                         Ok(nd) => {
                             // Best effort: look for pnr-like object inside next data
-                            if let Some(obj) = nd.get("props").and_then(|p| p.get("pageProps")).and_then(|pp| pp.get("pnrData")) {
+                            if let Some(obj) = nd
+                                .get("props")
+                                .and_then(|p| p.get("pageProps"))
+                                .and_then(|pp| pp.get("pnrData"))
+                            {
                                 obj.clone()
                             } else {
                                 last_err = Some(AppError::source_unavailable(
@@ -739,8 +763,11 @@ async fn railyatri_pnr_direct(state: &AppState, pnr: &str) -> Result<Value, AppE
                 resp.data_source = Some("Railyatri".to_string());
                 if !resp.notice.as_deref().unwrap_or("").contains("SRE:") {
                     let base = resp.notice.unwrap_or_default();
-                    resp.notice =
-                        Some(format!("{} {}", base, SRE_HEDGING_NOTICE).trim().to_string());
+                    resp.notice = Some(
+                        format!("{} {}", base, SRE_HEDGING_NOTICE)
+                            .trim()
+                            .to_string(),
+                    );
                 }
                 state.failover.record_success("railyatri");
                 state

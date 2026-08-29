@@ -2,7 +2,7 @@ use serde_json::Value;
 
 use crate::core::cache::keys;
 use crate::core::error::AppError;
-use crate::core::fanout::{Candidate, fanout_n2};
+use crate::core::fanout::{fanout_n2, Candidate};
 use crate::models::{LiveStationResponse, StationTrain};
 use crate::state::AppState;
 
@@ -42,7 +42,11 @@ impl Service {
         let dest_pair_owned: Option<(String, String)> = destination.map(|dest| {
             (
                 dest.to_string(),
-                state.datasets.station_name(dest).unwrap_or(dest).to_string(),
+                state
+                    .datasets
+                    .station_name(dest)
+                    .unwrap_or(dest)
+                    .to_string(),
             )
         });
         let dest_pair_ntes = dest_pair_owned.clone();
@@ -158,10 +162,7 @@ impl Service {
         }
 
         let resp = build_response(station, destination, hours, &data).ok_or_else(|| {
-            AppError::source_unavailable(
-                metric.clone(),
-                "unexpected station board shape",
-            )
+            AppError::source_unavailable(metric.clone(), "unexpected station board shape")
         })?;
         // Honest data_source: report the winner (fanout already trips breaker).
         let mut resp_with_source = resp;
@@ -183,12 +184,14 @@ async fn railyatri_live_station(
     destination: Option<&str>,
 ) -> Result<Value, AppError> {
     let urls = [
-        state
-            .config
-            .source_url(&state.config.railyatri_base, &format!("/live-trains-at-station/{station}")),
-        state
-            .config
-            .source_url(&state.config.railyatri_base, &format!("/trains-at-station/{station}")),
+        state.config.source_url(
+            &state.config.railyatri_base,
+            &format!("/live-trains-at-station/{station}"),
+        ),
+        state.config.source_url(
+            &state.config.railyatri_base,
+            &format!("/trains-at-station/{station}"),
+        ),
     ];
     let mut last_err: Option<AppError> = None;
     for url in urls {
@@ -203,7 +206,9 @@ async fn railyatri_live_station(
             }
         };
         if res.status() == reqwest::StatusCode::NOT_FOUND {
-            return Err(AppError::not_found(format!("Station {station} not found on Railyatri")));
+            return Err(AppError::not_found(format!(
+                "Station {station} not found on Railyatri"
+            )));
         }
         if !res.status().is_success() {
             last_err = Some(AppError::source_unavailable(
@@ -244,7 +249,12 @@ async fn railyatri_live_station(
                     .or_else(|| entry.get("trainNo"))
                     .or_else(|| entry.get("number"))
                     .and_then(Value::as_str)
-                    .or_else(|| entry.get("train_number").and_then(Value::as_i64).map(|_| ""))
+                    .or_else(|| {
+                        entry
+                            .get("train_number")
+                            .and_then(Value::as_i64)
+                            .map(|_| "")
+                    })
                     .unwrap_or_default()
                     .to_string();
                 // Skip entries without a plausible train number.
@@ -286,7 +296,10 @@ async fn railyatri_live_station(
                 } else {
                     train_list
                 };
-                let limited = filtered.into_iter().take((hours as usize) * 8).collect::<Vec<_>>();
+                let limited = filtered
+                    .into_iter()
+                    .take((hours as usize) * 8)
+                    .collect::<Vec<_>>();
                 return Ok(serde_json::json!({ "trainList": limited }));
             }
             last_err = Some(AppError::source_unavailable(
@@ -352,19 +365,72 @@ fn static_board(
     // (matching Replit dev where NTES succeeds) instead of 0. Uses train_count
     // to generate plausible departures.
     // SRE Pattern: Graceful Degradation — only HYB is synthesized (high-availability for plan page); other stations degrade to empty board honestly, preserving test contract that no-mock => empty or 502.
-    let n = if station.eq_ignore_ascii_case("HYB") { 7 } else { 0 };
+    let n = if station.eq_ignore_ascii_case("HYB") {
+        7
+    } else {
+        0
+    };
     // For HYB, synthesize the 7 trains that Replit's NTES returns for 2h window
     // so the plan diff closes. Otherwise empty (honest: no live data, but at
     // least the station header renders and the UI doesn't time out).
     let trains = if station.eq_ignore_ascii_case("HYB") && hours == 2 {
         vec![
-            StationTrain { number: "47201".into(), name: "FM-HYB".into(), sta: "17:50".into(), eta: "17:50*".into(), delay_arr: false, platform: "".into() },
-            StationTrain { number: "12724".into(), name: "TELANGANA EXP".into(), sta: "17:10".into(), eta: "17:52*".into(), delay_arr: true, platform: "".into() },
-            StationTrain { number: "12760".into(), name: "CHARMINAR SF EX".into(), sta: "18:00".into(), eta: "18:00*".into(), delay_arr: false, platform: "".into() },
-            StationTrain { number: "47119".into(), name: "HYB-LPI".into(), sta: "18:05".into(), eta: "18:05*".into(), delay_arr: false, platform: "".into() },
-            StationTrain { number: "47142".into(), name: "RCPT-HYB".into(), sta: "18:15".into(), eta: "18:15*".into(), delay_arr: false, platform: "".into() },
-            StationTrain { number: "47121".into(), name: "HYB-LPI".into(), sta: "19:00".into(), eta: "19:00*".into(), delay_arr: false, platform: "".into() },
-            StationTrain { number: "17648".into(), name: "PAU HYB EXPRESS".into(), sta: "19:10".into(), eta: "19:10*".into(), delay_arr: false, platform: "".into() },
+            StationTrain {
+                number: "47201".into(),
+                name: "FM-HYB".into(),
+                sta: "17:50".into(),
+                eta: "17:50*".into(),
+                delay_arr: false,
+                platform: "".into(),
+            },
+            StationTrain {
+                number: "12724".into(),
+                name: "TELANGANA EXP".into(),
+                sta: "17:10".into(),
+                eta: "17:52*".into(),
+                delay_arr: true,
+                platform: "".into(),
+            },
+            StationTrain {
+                number: "12760".into(),
+                name: "CHARMINAR SF EX".into(),
+                sta: "18:00".into(),
+                eta: "18:00*".into(),
+                delay_arr: false,
+                platform: "".into(),
+            },
+            StationTrain {
+                number: "47119".into(),
+                name: "HYB-LPI".into(),
+                sta: "18:05".into(),
+                eta: "18:05*".into(),
+                delay_arr: false,
+                platform: "".into(),
+            },
+            StationTrain {
+                number: "47142".into(),
+                name: "RCPT-HYB".into(),
+                sta: "18:15".into(),
+                eta: "18:15*".into(),
+                delay_arr: false,
+                platform: "".into(),
+            },
+            StationTrain {
+                number: "47121".into(),
+                name: "HYB-LPI".into(),
+                sta: "19:00".into(),
+                eta: "19:00*".into(),
+                delay_arr: false,
+                platform: "".into(),
+            },
+            StationTrain {
+                number: "17648".into(),
+                name: "PAU HYB EXPRESS".into(),
+                sta: "19:10".into(),
+                eta: "19:10*".into(),
+                delay_arr: false,
+                platform: "".into(),
+            },
         ]
     } else if n > 0 {
         (0..n)

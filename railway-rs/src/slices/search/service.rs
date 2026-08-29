@@ -4,7 +4,7 @@ use super::{StationRow, SuggestHit};
 use crate::core::cache::keys;
 use crate::core::corover::{self, SOURCE_API};
 use crate::core::error::AppError;
-use crate::core::fanout::{Candidate, fanout_n2};
+use crate::core::fanout::{fanout_n2, Candidate};
 use crate::models::TrainLite;
 use crate::state::AppState;
 
@@ -84,8 +84,11 @@ impl Service {
                             "upstream answered no rows",
                         ));
                     }
-                    let mapped: Vec<StationRow> =
-                        rows.into_iter().map(StationRow::from).take(limit_c).collect();
+                    let mapped: Vec<StationRow> = rows
+                        .into_iter()
+                        .map(StationRow::from)
+                        .take(limit_c)
+                        .collect();
                     // Serialize to Value so fanout can race heterogenous sources
                     Ok(serde_json::to_value(&mapped).unwrap())
                 }
@@ -265,7 +268,10 @@ mod tests {
         let state = AppState::for_test(cfg);
         // With AskDISHA disabled, corover candidate fast-fails, dataset hedge (150ms delayed) should win
         let rows = Service::search_stations(&state, "NDLS", 5).await;
-        assert!(!rows.is_empty(), "hedged fallback must return local stations");
+        assert!(
+            !rows.is_empty(),
+            "hedged fallback must return local stations"
+        );
         assert!(rows.iter().any(|r| r.code == "NDLS"));
     }
 
@@ -294,7 +300,11 @@ mod tests {
         assert!(rows.iter().any(|r| r.code == "NDLS"));
         let key = keys::search_stations("ndls_test");
         cache_rows(&state, &key, &rows);
-        let cached: Vec<StationRow> = state.cache.get(&key).and_then(|v| serde_json::from_value(v).ok()).unwrap();
+        let cached: Vec<StationRow> = state
+            .cache
+            .get(&key)
+            .and_then(|v| serde_json::from_value(v).ok())
+            .unwrap();
         assert_eq!(cached.len(), rows.len());
     }
 }

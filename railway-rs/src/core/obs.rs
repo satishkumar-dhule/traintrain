@@ -172,11 +172,20 @@ pub struct Telemetry {
     railway_capacity_recommendation: Gauge,
     /// Pattern: Capacity Planning — saturated count
     railway_capacity_saturated: Gauge,
+    /// Pattern: Hedging — fan-out observability
+    fanout_total: IntCounter,
+    fanout_overall_timeouts_total: IntCounter,
+    fanout_wins_total: IntCounterVec,
+    source_failures_total: IntCounterVec,
     /// last-seen totals so `sample` can inc counters by delta (safe to call on
     /// every scrape AND from the background sampler without double counting)
     last_cache_hits: std::sync::atomic::AtomicU64,
     last_cache_misses: std::sync::atomic::AtomicU64,
     last_source_samples: Mutex<HashMap<String, u64>>,
+    last_fanout_total: std::sync::atomic::AtomicU64,
+    last_fanout_timeouts: std::sync::atomic::AtomicU64,
+    last_fanout_wins: Mutex<HashMap<String, u64>>,
+    last_source_failures: Mutex<HashMap<String, u64>>,
 }
 
 impl Telemetry {
@@ -377,6 +386,29 @@ impl Telemetry {
             "railway_capacity_saturated",
             "Number of saturated signals (0..4), Pattern: Capacity Planning",
         )?;
+        // Pattern: Hedging — fan-out N×2 observability
+        let fanout_total = IntCounter::new(
+            "railway_fanout_total",
+            "Total fan-out N×2 hedged requests, Pattern: Hedging",
+        )?;
+        let fanout_overall_timeouts_total = IntCounter::new(
+            "railway_fanout_overall_timeouts_total",
+            "Total fan-out overall timeouts (10.5s), Pattern: Hedging",
+        )?;
+        let fanout_wins_total = IntCounterVec::new(
+            Opts::new(
+                "railway_fanout_wins_total",
+                "Fan-out wins by source, Pattern: Hedging",
+            ),
+            &["source"],
+        )?;
+        let source_failures_total = IntCounterVec::new(
+            Opts::new(
+                "railway_source_failures_total",
+                "Source hard failures (SourceUnavailable/Internal) by source, Pattern: Hedging + RED",
+            ),
+            &["source"],
+        )?;
 
         // initialize SLO target const
         slo_availability_target.set(crate::core::sre::SLO_AVAILABILITY_TARGET);
@@ -428,6 +460,10 @@ impl Telemetry {
             Box::new(railway_ready.clone()),
             Box::new(railway_capacity_recommendation.clone()),
             Box::new(railway_capacity_saturated.clone()),
+            Box::new(fanout_total.clone()),
+            Box::new(fanout_overall_timeouts_total.clone()),
+            Box::new(fanout_wins_total.clone()),
+            Box::new(source_failures_total.clone()),
         ] {
             registry.register(c)?;
         }
@@ -477,9 +513,17 @@ impl Telemetry {
             railway_ready,
             railway_capacity_recommendation,
             railway_capacity_saturated,
+            fanout_total,
+            fanout_overall_timeouts_total,
+            fanout_wins_total,
+            source_failures_total,
             last_cache_hits: std::sync::atomic::AtomicU64::new(0),
             last_cache_misses: std::sync::atomic::AtomicU64::new(0),
             last_source_samples: Mutex::new(HashMap::new()),
+            last_fanout_total: std::sync::atomic::AtomicU64::new(0),
+            last_fanout_timeouts: std::sync::atomic::AtomicU64::new(0),
+            last_fanout_wins: Mutex::new(HashMap::new()),
+            last_source_failures: Mutex::new(HashMap::new()),
         })
     }
 
@@ -602,15 +646,13 @@ impl Telemetry {
         self.red_error_ratio.set(ratio_4xx + ratio_5xx);
 
         // Pattern: SLO — derived via sre helpers (pure over snapshot)
-        let slo = crate::core::sre::SloSnapshot::from_metrics_with_telemetry(
-            snap,
-            cpu_fraction,
-            mem_mb,
-        );
+        let slo =
+            crate::core::sre::SloSnapshot::from_metrics_with_telemetry(snap, cpu_fraction, mem_mb);
         self.slo_availability.set(slo.availability_sli);
         self.slo_error_budget_remaining
             .set(slo.error_budget_remaining);
-        self.slo_error_budget_consumed.set(slo.error_budget_consumed);
+        self.slo_error_budget_consumed
+            .set(slo.error_budget_consumed);
         self.slo_burn_rate.set(slo.burn_rate);
 
         let delta = |last: &std::sync::atomic::AtomicU64, total: u64| {
@@ -633,6 +675,30 @@ impl Telemetry {
                 self.source_samples_total
                     .with_label_values(&[&s.source])
                     .inc_by(s.samples.saturating_sub(prev));
+            }
+        }
+
+        // Pattern: Hedging — fan-out wins + overall timeouts + failures (state-of-art)
+        self.fanout_total
+            .inc_by(delta(&self.last_fanout_total, snap.fanout_total));
+        self.fanout_overall_timeouts_total.inc_by(delta(
+            &self.last_fanout_timeouts,
+            snap.fanout_overall_timeouts,
+        ));
+        if let Ok(mut last) = self.last_fanout_wins.lock() {
+            for w in &snap.fanout_wins {
+                let prev = last.insert(w.source.clone(), w.wins).unwrap_or(0);
+                self.fanout_wins_total
+                    .with_label_values(&[&w.source])
+                    .inc_by(w.wins.saturating_sub(prev));
+            }
+        }
+        if let Ok(mut last) = self.last_source_failures.lock() {
+            for f in &snap.source_failures {
+                let prev = last.insert(f.source.clone(), f.failures).unwrap_or(0);
+                self.source_failures_total
+                    .with_label_values(&[&f.source])
+                    .inc_by(f.failures.saturating_sub(prev));
             }
         }
     }

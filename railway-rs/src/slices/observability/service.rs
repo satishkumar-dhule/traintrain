@@ -108,9 +108,16 @@ impl Service {
         // Pattern: Four Golden Signals — Latency, Traffic, Errors, Saturation
         // Pattern: Capacity Planning — saturation vs thresholds
         let mem_mb = mem_usage as f64 / (1024.0 * 1024.0);
-        let slo_snapshot = sre::SloSnapshot::from_metrics_with_telemetry(&metrics, cpu_usage, mem_mb);
+        let slo_snapshot =
+            sre::SloSnapshot::from_metrics_with_telemetry(&metrics, cpu_usage, mem_mb);
         // Update telemetry SLO gauges so /metrics scrape stays consistent
-        state.telemetry.sample(&metrics, cpu_usage, mem_usage, state.uptime_secs(), state.cache.len());
+        state.telemetry.sample(
+            &metrics,
+            cpu_usage,
+            mem_usage,
+            state.uptime_secs(),
+            state.cache.len(),
+        );
         let red = sre::RedSignals::from_snapshot(&metrics);
         let use_signals = sre::UseSignals::from_snapshot(&metrics, cpu_usage, mem_mb);
         let golden = sre::FourGoldenSignals::from_snapshot(&metrics, cpu_usage);
@@ -123,7 +130,10 @@ impl Service {
         let mem_sat = mem_mb > mem_thr;
         let inflight_sat = (metrics.in_flight as f64) > inflight_thr;
         let rps_sat = metrics.req_per_sec > rps_thr;
-        let saturated_count = [cpu_sat, mem_sat, inflight_sat, rps_sat].iter().filter(|&&x| x).count();
+        let saturated_count = [cpu_sat, mem_sat, inflight_sat, rps_sat]
+            .iter()
+            .filter(|&&x| x)
+            .count();
         let recommendation = if saturated_count >= 2 || cpu_sat || inflight_sat || rps_sat {
             "scale_up".to_string()
         } else if saturated_count == 0
@@ -155,8 +165,14 @@ impl Service {
             fine_print: sre::FIN_PRINT_CAPACITY_PLANNING.to_string(),
         };
         // Fine-print: one string per pattern, plus full table for UI
-        let fine_print: Vec<String> = sre::FINE_PRINT_ALL.iter().map(|(_, v)| v.to_string()).collect();
-        let patterns: Vec<String> = sre::FINE_PRINT_ALL.iter().map(|(k, _)| k.to_string()).collect();
+        let fine_print: Vec<String> = sre::FINE_PRINT_ALL
+            .iter()
+            .map(|(_, v)| v.to_string())
+            .collect();
+        let patterns: Vec<String> = sre::FINE_PRINT_ALL
+            .iter()
+            .map(|(k, _)| k.to_string())
+            .collect();
         let sre_patterns: Vec<(String, String)> = sre::FINE_PRINT_ALL
             .iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))

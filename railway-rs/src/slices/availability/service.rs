@@ -1,7 +1,7 @@
 use serde_json::Value;
 
 use crate::core::error::AppError;
-use crate::core::fanout::{Candidate, fanout_n2};
+use crate::core::fanout::{fanout_n2, Candidate};
 use crate::core::{irctc, paytm};
 use crate::models::{AvailabilityClass, AvailabilityResponse, AvailabilityTrain};
 use crate::slices::availability::SourcePref;
@@ -110,13 +110,24 @@ impl Service {
         if candidates.is_empty() {
             return Err(AppError::bad_request("no availability source selected"));
         }
-        let (metric, data) = match fanout_n2(state, candidates, &format!("availability:{src}:{dst}:{date}")).await {
+        let (metric, data) = match fanout_n2(
+            state,
+            candidates,
+            &format!("availability:{src}:{dst}:{date}"),
+        )
+        .await
+        {
             Ok(v) => v,
             Err(e) if matches!(e, AppError::NotFound(_)) => {
                 // No reservable trains — try unreserved NTES fallback
                 return unreserved_fallback(state, &cache_key, src, dst, date, e).await;
             }
-            Err(e) if matches!(e, AppError::SourceUnavailable { .. } | AppError::Internal(_)) => {
+            Err(e)
+                if matches!(
+                    e,
+                    AppError::SourceUnavailable { .. } | AppError::Internal(_)
+                ) =>
+            {
                 let msg = e.message();
                 // Definitive "no direct trains" is surfaced by Paytm as NotFound but may be
                 // aggregated as SourceUnavailable when mixed with an IRCTC failure.
@@ -133,7 +144,9 @@ impl Service {
                 // timeout / circuit open. Honest upstream 4xx/5xx (e.g. 400, 404 mock miss)
                 // should remain a 502 so tests and observability stay truthful.
                 let lower = msg.to_lowercase();
-                let is_timeout_like = lower.contains("timeout") || lower.contains("circuit open") || lower.contains("overall timeout");
+                let is_timeout_like = lower.contains("timeout")
+                    || lower.contains("circuit open")
+                    || lower.contains("overall timeout");
                 if !is_timeout_like {
                     return Err(e);
                 }
@@ -166,16 +179,34 @@ impl Service {
                             async move {
                                 // IndiaRailInfo doesn't have trains_between, synthesize via live_status
                                 // by checking if both stations are on a known train's route (fallback)
-                                Err::<Value, AppError>(AppError::source_unavailable("IndiaRailInfo", "no trains_between"))
+                                Err::<Value, AppError>(AppError::source_unavailable(
+                                    "IndiaRailInfo",
+                                    "no trains_between",
+                                ))
                             }
                         }
                     }),
                 ];
-                if let Ok((tb_metric, tb_data)) = fanout_n2(state, tb_candidates, &format!("availability_fallback:{src}:{dst}")).await {
-                    if let Some(resp) = map_ntes_unreserved(&tb_data, src, &src.to_string(), dst, &dst.to_string(), date) {
+                if let Ok((tb_metric, tb_data)) = fanout_n2(
+                    state,
+                    tb_candidates,
+                    &format!("availability_fallback:{src}:{dst}"),
+                )
+                .await
+                {
+                    if let Some(resp) = map_ntes_unreserved(
+                        &tb_data,
+                        src,
+                        &src.to_string(),
+                        dst,
+                        &dst.to_string(),
+                        date,
+                    ) {
                         let mut r = resp;
                         r.data_source = Some(format!("{}-via-Erail", tb_metric));
-                        let _ = state.cache.set(&cache_key, serde_json::to_value(&r).unwrap());
+                        let _ = state
+                            .cache
+                            .set(&cache_key, serde_json::to_value(&r).unwrap());
                         return Ok(r);
                     }
                 }
@@ -188,7 +219,9 @@ impl Service {
                     data_source: Some("local".to_string()),
                     notice: Some("Live availability unavailable — serving static empty (sources geofenced or temporarily unreachable).".to_string()),
                 };
-                let _ = state.cache.set(&cache_key, serde_json::to_value(&resp).unwrap());
+                let _ = state
+                    .cache
+                    .set(&cache_key, serde_json::to_value(&resp).unwrap());
                 return Ok(resp);
             }
             Err(e) => return Err(e),
@@ -252,7 +285,13 @@ async fn unreserved_fallback(
             async move { s.ntes_web.trains_between(&src, &from, &dst, &to).await }
         }),
     ];
-    let data = match fanout_n2(state, candidates, &format!("availability_unreserved:{src}:{dst}")).await {
+    let data = match fanout_n2(
+        state,
+        candidates,
+        &format!("availability_unreserved:{src}:{dst}"),
+    )
+    .await
+    {
         Ok((_, v)) => v,
         Err(e) => {
             tracing::debug!(%src, %dst, error = %e.message(), "NTES unreserved lookup failed");

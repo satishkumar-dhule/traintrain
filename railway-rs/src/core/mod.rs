@@ -17,12 +17,13 @@ pub mod json;
 pub mod metrics;
 pub mod ntes;
 pub mod obs;
-pub mod sre;
 pub mod paytm;
 pub mod railyatri;
 pub mod resilience;
 pub mod retrieval;
+pub mod singleflight;
 pub mod source;
+pub mod sre;
 pub mod time;
 pub mod validate;
 

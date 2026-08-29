@@ -14,9 +14,9 @@
 :root {
   color-scheme: light;
   --radius: 0.625rem;
-  --background: oklch(0.975 0.005 255);
+  --background: oklch(0.97 0.007 85);
   --foreground: oklch(0.235 0.028 265);
-  --card: oklch(0.995 0.003 255);
+  --card: oklch(0.995 0.003 85);
   --card-foreground: oklch(0.235 0.028 265);
   --popover: oklch(0.99 0.004 255);
   --popover-foreground: oklch(0.235 0.028 265);

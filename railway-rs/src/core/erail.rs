@@ -52,7 +52,10 @@ impl ErailClient {
                 "stops": [{"code": "NDLS", "name": "NEW DELHI", "arrival": "", "departure": "00:00", "day": 1}]
             }))
         } else {
-            Err(AppError::source_unavailable(SOURCE, "no train data in Erail response"))
+            Err(AppError::source_unavailable(
+                SOURCE,
+                "no train data in Erail response",
+            ))
         }
     }
 
@@ -92,7 +95,10 @@ impl ErailClient {
                 }]
             }))
         } else {
-            Err(AppError::source_unavailable(SOURCE, "no trains in Erail response"))
+            Err(AppError::source_unavailable(
+                SOURCE,
+                "no trains in Erail response",
+            ))
         }
     }
 }

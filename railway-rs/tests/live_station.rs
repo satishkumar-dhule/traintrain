@@ -161,7 +161,8 @@ async fn destination_flows_to_upstream_form_and_response() {
     // With N² fan-out, two delegates race: one with destination, one without.
     // At least one must carry the filtered destination.
     let has_filtered = calls.iter().any(|(p, body)| {
-        p == "/mntes/q" && form_field(body, "jToStationInput").as_deref() == Some("BCT - Mumbai Central")
+        p == "/mntes/q"
+            && form_field(body, "jToStationInput").as_deref() == Some("BCT - Mumbai Central")
     });
     assert!(
         has_filtered,

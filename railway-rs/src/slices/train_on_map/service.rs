@@ -4,7 +4,7 @@ use serde_json::Value;
 
 use crate::core::cache::keys;
 use crate::core::error::AppError;
-use crate::core::fanout::{Candidate, fanout_n2};
+use crate::core::fanout::{fanout_n2, Candidate};
 use crate::models::{
     MapCurrentStation, MapJourneyStation, RouteStation, TrackStation, TrainOnMapResponse,
 };
@@ -46,7 +46,7 @@ impl Service {
         let state_ry = state.clone();
         let state_static = state.clone();
         let train_static = train.to_string();
-        let candidates = vec![
+        let mut candidates = vec![
             Candidate::new(crate::core::source::metric::NTES, move || {
                 let s = state_ntes.clone();
                 let t = train_ntes.clone();
@@ -67,7 +67,53 @@ impl Service {
                 }
             }),
         ];
-        let (_metric, route_norm) = fanout_n2(state, candidates, &format!("train_on_map:{train}:{date}")).await?;
+        if let Some(proxy_base) = state
+            .config
+            .ntes_proxy_base
+            .clone()
+            .filter(|v| !v.is_empty())
+        {
+            let t = train.to_string();
+            let d = date.clone();
+            let base = proxy_base;
+            candidates.push(Candidate::new("ntes-proxy", move || {
+                let t = t.clone();
+                let d = d.clone();
+                let base = base.clone();
+                async move {
+                    let url = format!(
+                        "{}/rail-api/ntes/train-on-map?train={}&date={}",
+                        base.trim_end_matches('/'),
+                        urlencoding::encode(&t),
+                        urlencoding::encode(&d)
+                    );
+                    let client = reqwest::Client::builder()
+                        .timeout(std::time::Duration::from_secs(4))
+                        .build()
+                        .map_err(|e| {
+                            AppError::source_unavailable("ntes-proxy", format!("client build: {e}"))
+                        })?;
+                    let res = client.get(&url).send().await.map_err(|e| {
+                        AppError::source_unavailable("ntes-proxy", format!("GET {url}: {e}"))
+                    })?;
+                    if !res.status().is_success() {
+                        return Err(AppError::source_unavailable(
+                            "ntes-proxy",
+                            format!("GET {url} returned {}", res.status()),
+                        ));
+                    }
+                    let data: Value = res.json().await.map_err(|e| {
+                        AppError::source_unavailable(
+                            "ntes-proxy",
+                            format!("invalid JSON from {url}: {e}"),
+                        )
+                    })?;
+                    Ok(data)
+                }
+            }));
+        }
+        let (_metric, route_norm) =
+            fanout_n2(state, candidates, &format!("train_on_map:{train}:{date}")).await?;
         let mut route: Vec<RouteStation> = route_entries(&route_norm, state);
         let track: Vec<TrackStation> = route_norm
             .get("track")
@@ -95,11 +141,80 @@ impl Service {
 
         if let Some(code) = station {
             let code = code.to_ascii_uppercase();
-            match state
-                .ntes_web
-                .train_spot_map(train, &code, &date, "A")
-                .await
+            // Hedged spot: NTES direct + optional ntes-proxy (when env set). Best-effort.
+            let t = train.to_string();
+            let c = code.clone();
+            let d = date.clone();
+            let state_spot = state.clone();
+            let mut spot_candidates = vec![Candidate::new(
+                crate::core::source::metric::NTES,
+                move || {
+                    let s = state_spot.clone();
+                    let t = t.clone();
+                    let c = c.clone();
+                    let d = d.clone();
+                    async move { s.ntes_web.train_spot_map(&t, &c, &d, "A").await }
+                },
+            )];
+            if let Some(proxy_base) = state
+                .config
+                .ntes_proxy_base
+                .clone()
+                .filter(|v| !v.is_empty())
             {
+                let t = train.to_string();
+                let c = code.clone();
+                let d = date.clone();
+                let base = proxy_base;
+                spot_candidates.push(Candidate::new("ntes-proxy", move || {
+                    let t = t.clone();
+                    let c = c.clone();
+                    let d = d.clone();
+                    let base = base.clone();
+                    async move {
+                        let url = format!(
+                            "{}/rail-api/ntes/train-on-map?train={}&station={}&date={}",
+                            base.trim_end_matches('/'),
+                            urlencoding::encode(&t),
+                            urlencoding::encode(&c),
+                            urlencoding::encode(&d)
+                        );
+                        let client = reqwest::Client::builder()
+                            .timeout(std::time::Duration::from_secs(4))
+                            .build()
+                            .map_err(|e| {
+                                AppError::source_unavailable(
+                                    "ntes-proxy",
+                                    format!("client build: {e}"),
+                                )
+                            })?;
+                        let res = client.get(&url).send().await.map_err(|e| {
+                            AppError::source_unavailable("ntes-proxy", format!("GET {url}: {e}"))
+                        })?;
+                        if !res.status().is_success() {
+                            return Err(AppError::source_unavailable(
+                                "ntes-proxy",
+                                format!("GET {url} returned {}", res.status()),
+                            ));
+                        }
+                        let data: Value = res.json().await.map_err(|e| {
+                            AppError::source_unavailable(
+                                "ntes-proxy",
+                                format!("invalid JSON from {url}: {e}"),
+                            )
+                        })?;
+                        Ok(data)
+                    }
+                }));
+            }
+            let spot_result = fanout_n2(
+                state,
+                spot_candidates,
+                &format!("train_spot_map:{train}:{code}"),
+            )
+            .await
+            .map(|(_, v)| v);
+            match spot_result {
                 Ok(spot) => {
                     merge_spot(&mut route, &spot);
                     resp.route = Some(route);
@@ -141,15 +256,7 @@ impl Service {
                     }
                 }
                 Err(e) => {
-                    if matches!(
-                        e,
-                        AppError::SourceUnavailable { .. } | AppError::Internal(_)
-                    ) {
-                        state
-                            .failover
-                            .record_failure(crate::core::source::metric::NTES);
-                    }
-                    tracing::warn!(%train, %code, err = %e.message(), "train-spot-map unavailable; returning route-only map")
+                    tracing::warn!(%train, %code, err = %e.message(), "train-spot-map unavailable (all hedges failed); returning route-only map")
                 }
             }
         }
@@ -159,9 +266,10 @@ impl Service {
 }
 
 async fn railyatri_route_map(state: &AppState, train: &str) -> Result<Value, AppError> {
-    let url = state
-        .config
-        .source_url(&state.config.railyatri_base, &format!("/time-table/{train}"));
+    let url = state.config.source_url(
+        &state.config.railyatri_base,
+        &format!("/time-table/{train}"),
+    );
     let res = state
         .http
         .inner()
@@ -170,7 +278,9 @@ async fn railyatri_route_map(state: &AppState, train: &str) -> Result<Value, App
         .await
         .map_err(|e| AppError::source_unavailable("Railyatri", format!("GET {url}: {e}")))?;
     if res.status() == reqwest::StatusCode::NOT_FOUND {
-        return Err(AppError::not_found(format!("Train {train} not found on Railyatri")));
+        return Err(AppError::not_found(format!(
+            "Train {train} not found on Railyatri"
+        )));
     }
     if !res.status().is_success() {
         return Err(AppError::source_unavailable(
@@ -209,7 +319,10 @@ async fn railyatri_route_map(state: &AppState, train: &str) -> Result<Value, App
         })
         .collect();
     if stops.is_empty() {
-        return Err(AppError::source_unavailable("Railyatri", "no stops in timetable"));
+        return Err(AppError::source_unavailable(
+            "Railyatri",
+            "no stops in timetable",
+        ));
     }
     Ok(serde_json::json!({
         "trainNo": ttt.get("train_number").and_then(|v| v.as_str()).unwrap_or(train),

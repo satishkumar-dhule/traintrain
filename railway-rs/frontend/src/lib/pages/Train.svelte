@@ -42,6 +42,10 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
   import ChartColumnIcon from 'lucide-svelte/icons/chart-no-axes-column'
   import MapIcon from 'lucide-svelte/icons/map'
   import SparklesIcon from 'lucide-svelte/icons/sparkles'
+  import BedDoubleIcon from 'lucide-svelte/icons/bed-double'
+  import LayoutGridIcon from 'lucide-svelte/icons/layout-grid'
+  import { Input } from '$lib/components/ui/input/index.js'
+  import { todayISO, DATE_RE } from '$lib/format.js'
 
   let { number = '', view = '' } = $props()
 
@@ -85,6 +89,21 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
   let excData = $state(null)
   let excFor = null
 
+  let chartPhase = $state('idle')
+  let chartErr = $state(null)
+  let chartData = $state(null)
+  let chartFor = null
+  let chartDate = $state(todayISO())
+  let chartStation = $state('')
+  let chartExpanded = $state({})
+  const chartFriendlyErr = $derived.by(() => {
+    const msg = asText(chartErr)
+    if (!msg) return ''
+    if (/geofenced|Akamai|403 Forbidden/i.test(msg)) return 'IRCTC is IP-geofenced to India — chart unavailable from this network. Try again from an Indian residential IP or near departure (~4h before, previous evening for early trains).'
+    if (msg.length > 400) return msg.slice(0, 400) + '…'
+    return msg
+  })
+
   /* Run-instance selection (the NTES "start date" tabs): index into
      data.instances, plus whether the user manually picked one so a 30s
      auto-refresh doesn't yank them back to the active run. */
@@ -127,7 +146,7 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
     )
   }
 
-  const VIEW_TO_TAB = { status: 'status', schedule: 'schedule', delay: 'avg', map: 'map', exceptions: 'exceptions' }
+  const VIEW_TO_TAB = { status: 'status', schedule: 'schedule', delay: 'avg', map: 'map', exceptions: 'exceptions', chart: 'chart' }
   const TAB_TO_VIEW = Object.fromEntries(Object.entries(VIEW_TO_TAB).map(([v, t]) => [t, v]))
   const RUN_MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
 
@@ -220,6 +239,46 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
     }
   }
 
+  async function loadChart(t) {
+    const d = asText(chartDate).trim()
+    const st = asText(chartStation).trim().toUpperCase()
+    if (!t || !DATE_RE.test(d)) {
+      chartPhase = 'error'
+      chartErr = 'Enter a valid journey date (YYYY-MM-DD).'
+      return
+    }
+    chartFor = `${t}|${d}|${st}`
+    chartPhase = 'loading'
+    chartErr = null
+    const qs = `/rail-api/irctc/chart?train=${encodeURIComponent(t)}&date=${encodeURIComponent(d)}${st ? `&station=${encodeURIComponent(st)}` : ''}`
+    const res = await api(qs)
+    if (chartFor !== `${t}|${d}|${st}`) return
+    if (res.ok) {
+      chartData = res.data
+      chartPhase = 'ok'
+    } else {
+      chartErr = res.error || `HTTP ${res.status}`
+      chartPhase = 'error'
+    }
+  }
+
+  function chartToggleCoach(code) {
+    chartExpanded = { ...chartExpanded, [code]: !chartExpanded[code] }
+  }
+  function chartBerthTone(s) {
+    const v = String(s ?? '').toLowerCase()
+    if (v === 'vacant') return 'go'
+    if (v === 'occupied') return 'stop'
+    return 'idle'
+  }
+  function chartBerthClass(s) {
+    const v = String(s ?? '').toLowerCase()
+    if (v === 'vacant') return 'bg-signal-go text-white border-signal-go'
+    if (v === 'occupied') return 'bg-muted text-muted-foreground'
+    if (v === 'not_reserved' || v === 'notreserved') return 'bg-amber-100 text-amber-800 border-amber-200'
+    return 'bg-card border'
+  }
+
   /* Station-code spot lookup from the map tab's input. */
   function applyMapStation() {
     if (!committed) return
@@ -272,6 +331,8 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
       if (!String(mapFor ?? '').startsWith(`${t}|`)) loadMap(t)
     } else if (tab === 'exceptions') {
       if (`${excFor}` !== `${t}`) loadExceptions(t)
+    } else if (tab === 'chart') {
+      if (`${chartFor}` !== `${t}|${chartDate}|${asText(chartStation).toUpperCase()}`) loadChart(t)
     }
   })
 
@@ -704,12 +765,13 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
   {/if}
 
   <Tabs.Root class="min-w-0" bind:value={activeTab} onValueChange={onTabChange}>
-    <TabBar cols={5}>
+    <TabBar cols={6}>
       <Tabs.Trigger value="status" title="Status" aria-label="Live status" class="max-lg:justify-center max-lg:px-1 max-lg:py-2.5 max-lg:h-9"><ActivityIcon class="size-4 max-lg:size-5 shrink-0" /><span class="max-lg:hidden">Status</span></Tabs.Trigger>
       <Tabs.Trigger value="schedule" title="Schedule" aria-label="Schedule" class="max-lg:justify-center max-lg:px-1 max-lg:py-2.5 max-lg:h-9"><CalendarClockIcon class="size-4 max-lg:size-5 shrink-0" /><span class="max-lg:hidden">Schedule</span></Tabs.Trigger>
       <Tabs.Trigger value="avg" title="Avg delay" aria-label="Avg delay" class="max-lg:justify-center max-lg:px-1 max-lg:py-2.5 max-lg:h-9"><ChartColumnIcon class="size-4 max-lg:size-5 shrink-0" /><span class="max-lg:hidden">Avg delay</span></Tabs.Trigger>
       <Tabs.Trigger value="map" title="Map" aria-label="Map" class="max-lg:justify-center max-lg:px-1 max-lg:py-2.5 max-lg:h-9"><MapIcon class="size-4 max-lg:size-5 shrink-0" /><span class="max-lg:hidden">Map</span></Tabs.Trigger>
       <Tabs.Trigger value="exceptions" title="Exceptions" aria-label="Exceptions" class="max-lg:justify-center max-lg:px-1 max-lg:py-2.5 max-lg:h-9"><CalendarX2Icon class="size-4 max-lg:size-5 shrink-0" /><span class="max-lg:hidden">Exceptions</span></Tabs.Trigger>
+      <Tabs.Trigger value="chart" title="Chart" aria-label="Chart vacancy" class="max-lg:justify-center max-lg:px-1 max-lg:py-2.5 max-lg:h-9"><BedDoubleIcon class="size-4 max-lg:size-5 shrink-0" /><span class="max-lg:hidden">Chart</span></Tabs.Trigger>
     </TabBar>
 
     <Tabs.Content value="status" class="mt-3 grid gap-4">
@@ -1085,6 +1147,134 @@ import ActivityIcon from 'lucide-svelte/icons/activity'
           title="No exceptions loaded"
           hint="Track a train first, then its cancelled / rescheduled / diverted dates appear here."
         />
+      {/if}
+    </Tabs.Content>
+
+    <Tabs.Content value="chart" class="mt-3 grid gap-4">
+      {#if !committed}
+        <EmptyState
+          icon={BedDoubleIcon}
+          title="No chart loaded"
+          hint="Enter a train number above to see its vacant berths."
+        />
+      {:else}
+        <Card.Root>
+          <Card.Content class="flex flex-wrap items-end gap-3 max-lg:p-3">
+            <div class="grid min-w-0 sm:min-w-40 flex-1">
+              <label for="train-chart-date" class="text-xs font-medium text-muted-foreground">Journey date</label>
+              <Input id="train-chart-date" type="date" bind:value={chartDate} aria-label="Journey date" class="h-9" />
+            </div>
+            <div class="grid min-w-0 sm:min-w-40 flex-1" onkeydown={(e) => { if (e.key === 'Enter' && !e.defaultPrevented) loadChart(committed) }}>
+              <label for="train-chart-station" class="text-xs font-medium text-muted-foreground">Boarding station (optional)</label>
+              <AutoCompleteInput
+                id="train-chart-station"
+                kind="station"
+                bind:value={chartStation}
+                placeholder="e.g. NDLS"
+                aria-label="Boarding station"
+                onpick={(item) => { if (asText(item?.code)) chartStation = asText(item.code).toUpperCase() }}
+              />
+            </div>
+            <Button type="button" onclick={() => loadChart(committed)} disabled={chartPhase === 'loading'} class="shrink-0 max-lg:min-h-11 max-lg:w-full sm:w-auto">
+              {chartPhase === 'loading' ? 'Loading…' : 'Get chart'}
+            </Button>
+            <Button type="button" variant="outline" onclick={() => navigate(`/chart/${encodeURIComponent(committed)}/${encodeURIComponent(chartDate)}${asText(chartStation) ? `/${encodeURIComponent(asText(chartStation).toUpperCase())}` : ''}`)} title="Open full chart page" class="shrink-0 max-lg:w-full">
+              <LayoutGridIcon class="size-4" /> Full chart
+            </Button>
+          </Card.Content>
+        </Card.Root>
+
+        {#if chartPhase === 'loading'}
+          <div class="grid gap-2" aria-busy="true">
+            {#each [0,1,2] as i (i)}<Skeleton class="h-20 w-full" />{/each}
+          </div>
+        {:else if chartPhase === 'error'}
+          <Alert.Root variant="destructive" role="alert">
+            <Alert.Title>Could not load chart</Alert.Title>
+            <Alert.Description class="[overflow-wrap:anywhere]">{chartFriendlyErr || chartErr}</Alert.Description>
+          </Alert.Root>
+        {:else if chartPhase === 'ok' && chartData}
+          {@const coaches = Array.isArray(chartData.coaches) ? chartData.coaches : []}
+          {@const isLocal = String(chartData.data_source ?? '').toLowerCase() === 'local'}
+          {@const notice = asText(chartData.notice)}
+          <Card.Root>
+            <Card.Header class="gap-3 space-y-0">
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <Card.Title class="flex flex-wrap items-center gap-2">
+                  <EntityChip type="train" code={chartData.train_number} name={chartData.train_name} />
+                  <span>{chartData.train_name ?? ''}</span>
+                </Card.Title>
+                <ResultMeta source={chartData.data_source} />
+              </div>
+              <Card.Description class="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+                <span>Date <span class="data-num font-medium">{chartData.journey_date ?? chartDate}</span></span>
+                {#if chartData.boarding_station}<span>Boarding <span class="data-num font-medium">{chartData.boarding_station}</span></span>{/if}
+                <span><span class="data-num font-semibold">{coaches.length}</span> coaches</span>
+              </Card.Description>
+              {#if notice}
+                <Alert.Root variant={isLocal ? 'default' : undefined} class="mt-1">
+                  <Alert.Title>{isLocal ? 'Static empty (IRCTC unavailable)' : 'Notice'}</Alert.Title>
+                  <Alert.Description class="[overflow-wrap:anywhere]">{notice}</Alert.Description>
+                </Alert.Root>
+              {/if}
+            </Card.Header>
+            <Card.Content class="grid gap-3">
+              {#if isLocal && coaches.length === 0}
+                <EmptyState icon={LayoutGridIcon} title="Chart not available" hint={notice || 'IRCTC is geofenced to India or chart not yet published (~4h before departure).'} />
+              {:else if coaches.length === 0}
+                <EmptyState icon={LayoutGridIcon} title="No coaches returned" hint="IRCTC returned no coach list — chart may not be prepared yet." />
+              {:else}
+                <div class="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                  <span class="inline-flex items-center gap-1"><span class="size-3 rounded-sm bg-signal-go border"></span> Vacant</span>
+                  <span class="inline-flex items-center gap-1"><span class="size-3 rounded-sm bg-muted border"></span> Occupied</span>
+                  <span class="inline-flex items-center gap-1"><span class="size-3 rounded-sm bg-amber-100 border border-amber-200"></span> Other</span>
+                </div>
+                <div class="grid gap-2.5">
+                  {#each coaches as coach (coach.code)}
+                    {@const berths = Array.isArray(coach.berths) ? coach.berths : []}
+                    {@const total = berths.length}
+                    {@const vacant = berths.filter((b) => String(b?.status ?? '').toLowerCase() === 'vacant').length}
+                    {@const occupied = berths.filter((b) => String(b?.status ?? '').toLowerCase() === 'occupied').length}
+                    {@const isOpen = !!chartExpanded[coach.code]}
+                    <div class="rounded-lg border bg-card overflow-hidden">
+                      <button
+                        type="button"
+                        class="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left hover:bg-accent/50 transition-colors"
+                        onclick={() => chartToggleCoach(coach.code)}
+                        aria-expanded={isOpen}
+                      >
+                        <div class="flex flex-wrap items-center gap-2 min-w-0">
+                          <span class="data-num font-semibold">{coach.code || '—'}</span>
+                          <span class="rounded border bg-muted px-1.5 py-0.5 text-xs">{coach.class_code || '—'}</span>
+                          <span class="text-xs text-muted-foreground"><span class="data-num font-medium text-signal-go">{vacant}</span> vacant · <span class="data-num">{occupied}</span> occupied · <span class="data-num">{total}</span> berths</span>
+                        </div>
+                        <span class="text-xs text-muted-foreground shrink-0">{isOpen ? 'Hide' : 'Show'} berths</span>
+                      </button>
+                      {#if isOpen}
+                        <div class="border-t px-3 py-2.5">
+                          {#if total === 0}
+                            <p class="text-xs text-muted-foreground">No berths in this coach.</p>
+                          {:else}
+                            <div class="grid grid-cols-[repeat(auto-fill,minmax(3.25rem,1fr))] gap-1.5">
+                              {#each berths as b (b.number)}
+                                <div class={`flex flex-col items-center justify-center rounded border px-1 py-1.5 text-center ${chartBerthClass(b.status)}`}>
+                                  <span class="data-num text-xs font-semibold leading-none">{b.number}</span>
+                                  <span class="mt-0.5 text-[10px] uppercase leading-none tracking-wide opacity-80">{asText(b.status) || 'unknown'}</span>
+                                </div>
+                              {/each}
+                            </div>
+                          {/if}
+                        </div>
+                      {/if}
+                    </div>
+                  {/each}
+                </div>
+              {/if}
+            </Card.Content>
+          </Card.Root>
+        {:else}
+          <EmptyState icon={BedDoubleIcon} title="Chart vacancy" hint="Pick a journey date and boarding station (optional) and press Get chart. Live from IRCTC online-charts; chart appears only after preparation (~4h before, previous evening for early trains). IP-geofenced to India." />
+        {/if}
       {/if}
     </Tabs.Content>
   </Tabs.Root>

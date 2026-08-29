@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE, REFERER, USER_AGENT};
+use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
 use serde_json::Value;
 
 use super::error::AppError;
@@ -18,16 +18,15 @@ pub struct HttpClient {
 
 impl HttpClient {
     pub fn new(user_agent: impl Into<String>, timeout: Duration) -> Result<Self, AppError> {
+        // Single source of truth for UA: the configured browser UA, not the
+        // hard-coded "railway-rs" override (review 2.3). Content-Type and
+        // Referer are per-request, not defaults — GEFs must not leak
+        // enquiry.indianrail.gov.in as Referer to Paytm/Ixigo.
         let mut headers = HeaderMap::new();
         headers.insert(
             USER_AGENT,
             HeaderValue::from_str(&user_agent.into())
                 .unwrap_or_else(|_| HeaderValue::from_static("railway-rs")),
-        );
-        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-        headers.insert(
-            REFERER,
-            HeaderValue::from_static("https://enquiry.indianrail.gov.in/"),
         );
 
         let client = reqwest::Client::builder()
@@ -38,7 +37,6 @@ impl HttpClient {
             .brotli(true)
             .deflate(true)
             .redirect(reqwest::redirect::Policy::limited(5))
-            .user_agent("railway-rs")
             .build()
             .map_err(|e| AppError::internal(format!("failed to build http client: {e}")))?;
 
@@ -51,22 +49,32 @@ impl HttpClient {
         &self.inner
     }
 
-    /// GET with one retry on transport errors. Returns the raw response.
+    /// GET with jittered retry — only on transport errors or 5xx, never on 4xx.
+    /// KISS: 2 attempts, 200ms + up to 100ms jitter (avoids thundering retry).
     pub async fn get(&self, url: &str) -> Result<reqwest::Response, AppError> {
         let mut last: Option<AppError> = None;
         for attempt in 0..2 {
             let res = self.inner.get(url).send().await;
             match res {
                 Ok(r) => {
-                    if r.status().is_success() {
+                    let status = r.status();
+                    if status.is_success() {
                         return Ok(r);
+                    }
+                    if status.is_client_error() {
+                        // 4xx: honest NotFound/BadRequest — don't retry, don't jitter
+                        return Err(AppError::source_unavailable(
+                            "HTTP",
+                            format!("GET {url} returned {}", status),
+                        ));
                     }
                     last = Some(AppError::source_unavailable(
                         "HTTP",
-                        format!("GET {url} returned {}", r.status()),
+                        format!("GET {url} returned {}", status),
                     ));
                 }
                 Err(e) => {
+                    // Transport error — retryable
                     last = Some(AppError::source_unavailable(
                         "HTTP",
                         format!("GET {url}: {e}"),
@@ -74,7 +82,15 @@ impl HttpClient {
                 }
             }
             if attempt == 0 {
-                tokio::time::sleep(Duration::from_millis(400)).await;
+                // Jittered backoff: 200ms + hash(url) % 100ms (deterministic per URL, KISS)
+                let jitter = {
+                    use std::collections::hash_map::DefaultHasher;
+                    use std::hash::{Hash, Hasher};
+                    let mut h = DefaultHasher::new();
+                    url.hash(&mut h);
+                    h.finish() % 100
+                };
+                tokio::time::sleep(Duration::from_millis(200 + jitter)).await;
             }
         }
         Err(last.unwrap_or_else(|| AppError::internal("GET failed")))

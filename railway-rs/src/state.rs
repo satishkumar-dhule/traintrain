@@ -53,6 +53,10 @@ pub struct AppState {
     pub rate_limiter: Arc<RateLimiter>,
     /// Pattern: Bulkhead — concurrency semaphore
     pub bulkhead: Arc<tokio::sync::Semaphore>,
+    /// Pattern: Hedging — fan-out concurrency limiter (bounds N×2 amplification globally)
+    pub fanout_limiter: Arc<tokio::sync::Semaphore>,
+    /// Single-flight coalescing for cache-miss stampedes (KISS, unbounded keys but bounded in-flight)
+    pub singleflight: Arc<crate::core::singleflight::SingleFlight<String>>,
     pub started_at: Instant,
 }
 
@@ -94,9 +98,11 @@ impl AppState {
             config.rate_limit_rps,
             config.rate_limit_burst,
         ));
-        let bulkhead = Arc::new(tokio::sync::Semaphore::new(
-            config.concurrency_limit.max(1),
+        let bulkhead = Arc::new(tokio::sync::Semaphore::new(config.concurrency_limit.max(1)));
+        let fanout_limiter = Arc::new(tokio::sync::Semaphore::new(
+            config.fanout_concurrency.max(8),
         ));
+        let singleflight = Arc::new(crate::core::singleflight::SingleFlight::<String>::new());
         Ok(Self {
             cache: Arc::new(Cache::with_metrics(config.cache_ttl, Some(metrics.clone()))),
             metrics,
@@ -119,6 +125,8 @@ impl AppState {
             failover,
             rate_limiter,
             bulkhead,
+            fanout_limiter,
+            singleflight,
             started_at: Instant::now(),
         })
     }

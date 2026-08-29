@@ -340,14 +340,14 @@ import { norm, todayISO, DATE_RE } from '$lib/format.js'
     </div>
   </div>
 
-  <Card.Root class="border-primary/30 shadow-md transition-colors hover:border-primary/60">
+  <Card.Root class="border-primary/30 transition-colors hover:border-primary/60">
     <form class="grid grid-cols-[minmax(0,1fr)] gap-4 max-lg:gap-2.5 p-5 max-lg:p-3.5" onsubmit={submitPlan}>
       <div class="flex items-start gap-2 max-lg:gap-1.5">
         <span class="flex size-9 max-lg:size-7 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
           <MapPinIcon class="size-5 max-lg:size-3.5" />
         </span>
         <div class="grid gap-0.5">
-          <h2 class="signage text-base leading-none sm:text-lg">Plan from where you are</h2>
+          <h2 class="text-base font-semibold leading-none sm:text-lg">Plan from where you are</h2>
           <p class="max-lg:hidden pt-1 text-xs text-muted-foreground">
             Pick a start station, then choose a destination and journey date.
           </p>
@@ -412,42 +412,41 @@ import { norm, todayISO, DATE_RE } from '$lib/format.js'
     </form>
   </Card.Root>
 
-  <TrackRule />
+  <TrackRule label="Quick access" />
 
   <section class="grid gap-2 max-lg:gap-1.5" aria-label="Quick access">
-    <p class="text-[11px] uppercase tracking-widest text-muted-foreground">Quick access</p>
     <div class="flex flex-wrap items-center gap-2 max-lg:gap-1.5">
       <button
         type="button"
-        class="inline-flex h-10 items-center gap-2 rounded-full border bg-card px-4 transition-all hover:-translate-y-0.5 hover:border-primary/50 hover:bg-muted/60 hover:shadow-md"
+        class="inline-flex h-10 items-center gap-2 rounded-full border bg-card px-4 text-xs font-semibold uppercase tracking-wide transition-all hover:-translate-y-0.5 hover:border-primary/50 hover:bg-muted/60 hover:shadow-md"
         onclick={() => navigate('/train')}
       >
         <TrainFront class="size-4 shrink-0 text-primary" />
-        <span class="signage text-xs leading-none">Live Train</span>
+        Live Train
       </button>
       <button
         type="button"
-        class="inline-flex h-10 items-center gap-2 rounded-full border bg-card px-4 transition-all hover:-translate-y-0.5 hover:border-primary/50 hover:bg-muted/60 hover:shadow-md"
+        class="inline-flex h-10 items-center gap-2 rounded-full border bg-card px-4 text-xs font-semibold uppercase tracking-wide transition-all hover:-translate-y-0.5 hover:border-primary/50 hover:bg-muted/60 hover:shadow-md"
         onclick={() => navigate('/pnr')}
       >
         <Ticket class="size-4 shrink-0 text-primary" />
-        <span class="signage text-xs leading-none">PNR Status</span>
+        PNR Status
       </button>
       <button
         type="button"
-        class="inline-flex h-10 items-center gap-2 rounded-full border bg-card px-4 transition-all hover:-translate-y-0.5 hover:border-primary/50 hover:bg-muted/60 hover:shadow-md"
+        class="inline-flex h-10 items-center gap-2 rounded-full border bg-card px-4 text-xs font-semibold uppercase tracking-wide transition-all hover:-translate-y-0.5 hover:border-primary/50 hover:bg-muted/60 hover:shadow-md"
         onclick={() => navigate('/station')}
       >
         <Building2 class="size-4 shrink-0 text-primary" />
-        <span class="signage text-xs leading-none">Station Board</span>
+        Station Board
       </button>
       <button
         type="button"
-        class="inline-flex h-10 items-center gap-2 rounded-full border bg-card px-4 transition-all hover:-translate-y-0.5 hover:border-primary/50 hover:bg-muted/60 hover:shadow-md"
+        class="inline-flex h-10 items-center gap-2 rounded-full border bg-card px-4 text-xs font-semibold uppercase tracking-wide transition-all hover:-translate-y-0.5 hover:border-primary/50 hover:bg-muted/60 hover:shadow-md"
         onclick={() => navigate('/exceptions')}
       >
         <TriangleAlert class="size-4 shrink-0 text-primary" />
-        <span class="signage text-xs leading-none">Service Alerts</span>
+        Service Alerts
       </button>
     </div>
   </section>

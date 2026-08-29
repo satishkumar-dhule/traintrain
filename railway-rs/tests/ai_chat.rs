@@ -68,8 +68,9 @@ async fn happy_path_relays_sse_events_with_prepended_persona() {
     assert_eq!(calls.len(), 1, "exactly one upstream POST");
     let (path, sent) = &calls[0];
     assert_eq!(path, "/chat/completions");
+    let expected_model = Config::default().ai_model;
     assert!(
-        sent.contains("\"model\":\"x-preview-f-free\""),
+        sent.contains(&format!("\"model\":\"{expected_model}\"")),
         "upstream model must match config default, sent: {sent}"
     );
     assert!(sent.contains("\"stream\":true"), "sent: {sent}");
@@ -164,7 +165,7 @@ async fn status_reports_configuration_truth() {
     let (status, body) = app.get("/rail-api/ai/status").await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["enabled"], true);
-    assert_eq!(body["model"], "x-preview-f-free");
+    assert_eq!(body["model"], Config::default().ai_model);
     assert_eq!(body["keyed"], false);
 
     let off = TestApp::spawn_with_config(Config {

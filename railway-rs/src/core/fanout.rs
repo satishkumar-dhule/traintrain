@@ -1,3 +1,6 @@
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::Arc;
 use std::time::Duration;
 
 use futures::future::select_all;
@@ -6,33 +9,44 @@ use serde_json::Value;
 use crate::core::error::AppError;
 use crate::state::AppState;
 
-/// Fool-proof super fan-out N² deep delegation.
+/// State-of-art super fan-out N² deep delegation — DRY, KISS, hedged.
 ///
-/// Pattern: Request Hedging — fan-out N×2 race N upstreams, cancel losers; p95 hedged
-/// Pattern: Timeout Budget — per-source 5s, overall 10.5s deadline propagation
-/// For `N` logical sources we fan-out to `N×2` delegates concurrently:
-/// each source contributes 2 delegates (e.g. NTES `ntes_web` vs `ntes`
-/// API, Railyatri SSR vs API, or two param variants), and each delegate
-/// is retried once on `SourceUnavailable`/`Internal` (2-deep). Total
-/// `N×2×2` attempts raced, first success wins. Circuit-open sources are
-/// skipped via `Failover::should_skip` (no timeout paid). Per-delegate
-/// timeout is `5s`, overall deadline is `10.5s` (inside the 12s frontend
-/// `fetch` timeout) so a Singapore IP-block (NTES 5s timeout) still lets a
-/// worldwide Railyatri/Corover delegate win in <1s, and a static `local`
-/// delegate (150ms delayed) guarantees the UI never sees a 30s hang.
+/// Patterns:
+/// - **Request Hedging (availability)** — fan-out N×2 race N different hosts
+///   (NTES vs Railyatri vs Paytm…), cancel losers; first success wins.
+///   Patent-safe vs Google US9703890B2 replica hedging (heterogeneous hosts).
+/// - **Timeout Budget** — per-source 5s, overall 10.5s (<12s frontend fetch).
+/// - **Retry with Jitter** — deterministic 200ms + 0..100ms hash jitter.
+/// - **Bounded Hedging** — global semaphore (`RAILWAY_FANOUT_CONCURRENCY`,
+///   default 48) caps N×2×2 amplification; no unbounded upstream.
+/// - **Circuit Breaker** — `Failover::should_skip` skips open sources with no
+///   timeout paid; NotFound never trips breaker.
+/// - **Single logical failure** — 2 attempts per candidate, one breaker bump.
 ///
-/// Honest errors: `NotFound` never trips the breaker and is treated as a
-/// valid "train doesn't exist" answer. Only `SourceUnavailable`/`Internal`
-/// increments the breaker. The winning source is reported honestly in
-/// `data_source` by the caller.
-
+/// Total attempts for N logical sources:
+/// `N×2 delegates × 2 retries = N×4` raced, first success wins. Overall
+/// deadline 10.5s ensures Singapore IP-block (NTES 5s) still lets a
+/// worldwide delegate win in <1s. Metrics track every win/failure/latency
+/// for state-of-art observability.
+///
+/// KISS: one function `fanout_n2`, one struct `Candidate`, one builder
+/// `FanoutBuilder`. DRY: slices build candidates via builder, not 20-line
+/// clone boilerplate each time.
 const PER_SOURCE_TIMEOUT: Duration = Duration::from_secs(5);
 const OVERALL_TIMEOUT: Duration = Duration::from_millis(10_500);
 const RETRY_DELAY: Duration = Duration::from_millis(200);
+const RETRY_JITTER_MAX_MS: u64 = 100;
 
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::Arc;
+/// Deterministic jitter per query+metric — no SystemTime, test-stable, KISS.
+fn jitter_delay(query: &str, metric: &str) -> Duration {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut h = DefaultHasher::new();
+    query.hash(&mut h);
+    metric.hash(&mut h);
+    let jitter = h.finish() % RETRY_JITTER_MAX_MS;
+    RETRY_DELAY + Duration::from_millis(jitter)
+}
 
 type BoxFut = Pin<Box<dyn Future<Output = Result<Value, AppError>> + Send + 'static>>;
 type Factory = Arc<dyn Fn() -> BoxFut + Send + Sync>;
@@ -55,7 +69,74 @@ impl Candidate {
     }
 }
 
+/// DRY builder — eliminates the 10-line per-candidate clone boilerplate
+/// that was duplicated in 6 slices. KISS: one method `add`, then `run`.
+///
+/// ```ignore
+/// let (metric, data) = FanoutBuilder::new(state, "live_status:12951")
+///     .add("ntes", |s| s.ntes_web.train_status("12951"))
+///     .add("railyatri", |s| async { railyatri_norm(s, "12951").await })
+///     .run().await?;
+/// ```
+pub struct FanoutBuilder<'a> {
+    state: &'a AppState,
+    query: String,
+    candidates: Vec<Candidate>,
+}
+
+impl<'a> FanoutBuilder<'a> {
+    pub fn new(state: &'a AppState, query: impl Into<String>) -> Self {
+        Self {
+            state,
+            query: query.into(),
+            candidates: Vec::new(),
+        }
+    }
+
+    /// Add a hedged candidate. `f` is `Fn(&AppState) -> Future<Result<Value,AppError>>`.
+    /// DRY: clones state internally, caller just writes the fetch.
+    pub fn add<F, Fut>(mut self, metric: &'static str, f: F) -> Self
+    where
+        F: Fn(AppState) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<Value, AppError>> + Send + 'static,
+    {
+        let state = self.state.clone();
+        self.candidates.push(Candidate::new(metric, move || {
+            let s = state.clone();
+            f(s)
+        }));
+        self
+    }
+
+    /// Add a pre-built Candidate (escape hatch for custom closures needing captures).
+    pub fn add_candidate(mut self, c: Candidate) -> Self {
+        self.candidates.push(c);
+        self
+    }
+
+    pub async fn run(self) -> Result<(String, Value), AppError> {
+        fanout_n2(self.state, self.candidates, &self.query).await
+    }
+}
+
+/// DRY free helper — alias for `fanout_n2` with clearer hedging name.
+pub async fn hedge(
+    state: &AppState,
+    query: &str,
+    candidates: Vec<Candidate>,
+) -> Result<(String, Value), AppError> {
+    fanout_n2(state, candidates, query).await
+}
+
 /// Race `candidates` concurrently. Returns `(winning_metric, payload)`.
+///
+/// State-of-art guarantees:
+/// - Healthy-first ordering via `Failover::ordered` (no timeout paid for open circuits)
+/// - Bounded concurrency via `state.fanout_limiter` (default 48)
+/// - Per-source 5s, overall 10.5s budgets
+/// - 2-deep retry with jitter, single logical breaker bump
+/// - Honest error taxonomy: NotFound never trips breaker, Captcha surfaced as 428
+/// - Full observability: fanout_total, win, failure, latency, overall timeout
 pub async fn fanout_n2(
     state: &AppState,
     candidates: Vec<Candidate>,
@@ -65,20 +146,14 @@ pub async fn fanout_n2(
         return Err(AppError::internal("fanout: no candidates"));
     }
 
-    // Order by failover health (healthy first) to prefer healthy sources when
-    // latencies tie, but still run all concurrently.
+    // Healthy-first ordering (stable sort, preserves caller's preference among healthy).
     let ordered_labels: Vec<&str> = state
         .failover
         .ordered(&candidates.iter().map(|c| c.metric).collect::<Vec<_>>())
         .into_iter()
         .collect();
 
-    // Sort indices by failover order.
-    let mut sorted: Vec<(usize, &Candidate)> = candidates
-        .iter()
-        .enumerate()
-        .map(|(i, c)| (i, c))
-        .collect();
+    let mut sorted: Vec<(usize, &Candidate)> = candidates.iter().enumerate().collect();
     sorted.sort_by_key(|(_, c)| {
         ordered_labels
             .iter()
@@ -87,7 +162,8 @@ pub async fn fanout_n2(
     });
     let sorted_indices: Vec<usize> = sorted.into_iter().map(|(i, _)| i).collect();
 
-    // Build futures for non-skipped candidates.
+    state.metrics.record_fanout();
+
     let mut futures = Vec::new();
     let mut skipped: Vec<String> = Vec::new();
     for idx in sorted_indices {
@@ -102,12 +178,14 @@ pub async fn fanout_n2(
         let state_clone = state.clone();
         let query_owned = query.to_string();
         let fut = async move {
-            // Deep delegation: 2 attempts per source.
-            let mut last_err: Option<AppError> = None;
+            let mut first_err: Option<AppError> = None;
             for attempt in 0..2 {
+                // Bounded hedging: acquire global fanout permit for this attempt.
+                // Holds for the duration of the upstream call + timeout; queued
+                // waiters naturally respect overall deadline via outer timeout.
+                let _permit = state_clone.fanout_limiter.acquire().await.unwrap();
                 let started = std::time::Instant::now();
                 let inner = (factory)();
-                // Per-source timeout.
                 let res = tokio::time::timeout(PER_SOURCE_TIMEOUT, inner).await;
                 let res = match res {
                     Ok(r) => r,
@@ -122,6 +200,7 @@ pub async fn fanout_n2(
                             .metrics
                             .record_source_latency(metric, started.elapsed());
                         state_clone.failover.record_success(metric);
+                        state_clone.metrics.record_fanout_win(metric);
                         tracing::info!(source = metric, query = %query_owned, attempt, "fanout: source won");
                         return Ok::<(String, Value), AppError>((metric.to_string(), v));
                     }
@@ -132,17 +211,19 @@ pub async fn fanout_n2(
                         );
                         let is_not_found = matches!(e, AppError::NotFound(_));
                         if is_live_failure {
-                            state_clone.failover.record_failure(metric);
-                            // Retry once with jitter.
                             if attempt == 0 {
-                                tokio::time::sleep(RETRY_DELAY).await;
-                                last_err = Some(e);
+                                // Drop permit before jitter sleep so we don't hold concurrency
+                                drop(_permit);
+                                let d = jitter_delay(&query_owned, metric);
+                                tokio::time::sleep(d).await;
+                                first_err = Some(e);
                                 continue;
                             }
+                            state_clone.failover.record_failure(metric);
+                            state_clone.metrics.record_source_failure(metric);
                             return Err(e);
                         }
                         if is_not_found {
-                            // NotFound is not a breaker trip; propagate as-is.
                             return Err(e);
                         }
                         // BadRequest, Captcha, etc. — don't retry, don't trip.
@@ -150,7 +231,12 @@ pub async fn fanout_n2(
                     }
                 }
             }
-            Err(last_err.unwrap_or_else(|| AppError::internal("fanout: retry exhausted")))
+            if let Some(e) = first_err {
+                state_clone.failover.record_failure(metric);
+                state_clone.metrics.record_source_failure(metric);
+                return Err(e);
+            }
+            Err(AppError::internal("fanout: retry exhausted"))
         };
         futures.push(Box::pin(fut));
     }
@@ -164,7 +250,6 @@ pub async fn fanout_n2(
         return Err(AppError::source_unavailable("all-sources", msg));
     }
 
-    // Overall deadline race.
     let overall = async {
         let mut failures: Vec<String> = skipped;
         let mut not_founds: Vec<String> = Vec::new();
@@ -183,14 +268,13 @@ pub async fn fanout_n2(
                     captcha = Some(AppError::CaptchaRequired(e));
                 }
                 Err(e) => {
-                    failures.push(format!("{}: {}", "source", e.message()));
-                    // Keep the original error shape for final aggregation.
-                    // We store message only; final error will be SourceUnavailable.
-                    // Preserve last error type via failures vec.
-                    // To keep NotFound vs SourceUnavailable distinction, we track both.
-                    // If all are NotFound we will return NotFound below.
-                    // Otherwise we return SourceUnavailable.
-                    // Keep e's details in push above.
+                    let label = match &e {
+                        crate::core::error::AppError::SourceUnavailable { source, .. } => {
+                            source.clone()
+                        }
+                        _ => "source".to_string(),
+                    };
+                    failures.push(format!("{}: {}", label, e.message()));
                     let _ = e;
                 }
             }
@@ -200,7 +284,6 @@ pub async fn fanout_n2(
             return Err(c);
         }
         if !not_founds.is_empty() && failures.is_empty() {
-            // All candidates said NotFound → honest NotFound.
             return Err(AppError::not_found(not_founds.join(" | ")));
         }
         if !not_founds.is_empty() {
@@ -219,14 +302,17 @@ pub async fn fanout_n2(
 
     match tokio::time::timeout(OVERALL_TIMEOUT, overall).await {
         Ok(r) => r,
-        Err(_) => Err(AppError::source_unavailable(
-            "all-sources",
-            format!(
-                "fanout overall timeout after {}ms for '{}'",
-                OVERALL_TIMEOUT.as_millis(),
-                query
-            ),
-        )),
+        Err(_) => {
+            state.metrics.record_fanout_overall_timeout();
+            Err(AppError::source_unavailable(
+                "all-sources",
+                format!(
+                    "fanout overall timeout after {}ms for '{}'",
+                    OVERALL_TIMEOUT.as_millis(),
+                    query
+                ),
+            ))
+        }
     }
 }
 
@@ -262,7 +348,6 @@ mod tests {
     #[tokio::test]
     async fn fanout_skips_open_circuit() {
         let state = test_state();
-        // Trip ntes circuit
         for _ in 0..3 {
             state.failover.record_failure("ntes");
         }
@@ -316,5 +401,53 @@ mod tests {
         let (m, v) = fanout_n2(&state, vec![c1, c2], "q").await.unwrap();
         assert_eq!(m, "railyatri");
         assert_eq!(v["found"], true);
+    }
+
+    #[tokio::test]
+    async fn fanout_retries_once_records_single_logical_failure() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let state = test_state();
+        let calls = std::sync::Arc::new(AtomicUsize::new(0));
+        let calls_for_closure = calls.clone();
+        let c = Candidate::new("ntes", move || {
+            let c = calls_for_closure.clone();
+            async move {
+                c.fetch_add(1, Ordering::SeqCst);
+                Err::<Value, AppError>(AppError::source_unavailable("ntes", "down"))
+            }
+        });
+        let err = fanout_n2(&state, vec![c], "q").await.unwrap_err();
+        assert!(matches!(err, AppError::SourceUnavailable { .. }));
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            2,
+            "deep delegation retries each candidate exactly once"
+        );
+        let snap = state.failover.snapshot();
+        let ntes = snap
+            .iter()
+            .find(|s| s.source == "ntes")
+            .expect("ntes tracked");
+        assert_eq!(
+            ntes.consecutive_failures, 1,
+            "two attempts on the same source = one logical breaker failure"
+        );
+    }
+
+    #[tokio::test]
+    async fn builder_is_dry_equivalent() {
+        let state = test_state();
+        let (m, v) = FanoutBuilder::new(&state, "q")
+            .add("ntes", |_| async {
+                Err::<Value, AppError>(AppError::source_unavailable("ntes", "down"))
+            })
+            .add("railyatri", |_| async {
+                Ok::<Value, AppError>(json!({"ok": 2}))
+            })
+            .run()
+            .await
+            .unwrap();
+        assert_eq!(m, "railyatri");
+        assert_eq!(v["ok"], 2);
     }
 }

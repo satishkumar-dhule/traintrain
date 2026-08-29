@@ -4,7 +4,7 @@ use serde_json::Value;
 
 use crate::core::cache::keys;
 use crate::core::error::AppError;
-use crate::core::fanout::{Candidate, fanout_n2};
+use crate::core::fanout::{fanout_n2, Candidate};
 use crate::models::{ExceptionEntry, ExceptionalResponse, ExceptionalTrainDetail};
 use crate::state::AppState;
 
@@ -32,15 +32,13 @@ impl Service {
             }
         }
 
-        // Super fan-out N²: NTES (2 delegates: same train, duplicated for N=2) raced,
-        // each retried. First success wins. Static local fallback ensures UI never
-        // sees 30s hang when NTES is IP-blocked (timeout), but honest 404/500
-        // remain 502.
+        // Super fan-out N²: NTES (2 delegates) + optional ntes-proxy hedged delegate
+        // (env-driven). First success wins; static local fallback only on timeout.
         let train_ntes1 = train.to_string();
         let train_ntes2 = train.to_string();
         let state_ntes1 = state.clone();
         let state_ntes2 = state.clone();
-        let candidates = vec![
+        let mut candidates = vec![
             Candidate::new(crate::core::source::metric::NTES, move || {
                 let s = state_ntes1.clone();
                 let t = train_ntes1.clone();
@@ -52,23 +50,81 @@ impl Service {
                 async move { s.ntes_web.train_exceptions(&t).await }
             }),
         ];
+        if let Some(proxy_base) = state
+            .config
+            .ntes_proxy_base
+            .clone()
+            .filter(|v| !v.is_empty())
+        {
+            let t = train.to_string();
+            let base = proxy_base;
+            candidates.push(Candidate::new("ntes-proxy", move || {
+                let t = t.clone();
+                let base = base.clone();
+                async move {
+                    let url = format!(
+                        "{}/rail-api/ntes/exceptional?train={}",
+                        base.trim_end_matches('/'),
+                        urlencoding::encode(&t)
+                    );
+                    let client = reqwest::Client::builder()
+                        .timeout(std::time::Duration::from_secs(4))
+                        .build()
+                        .map_err(|e| {
+                            AppError::source_unavailable("ntes-proxy", format!("client build: {e}"))
+                        })?;
+                    let res = client.get(&url).send().await.map_err(|e| {
+                        AppError::source_unavailable("ntes-proxy", format!("GET {url}: {e}"))
+                    })?;
+                    if !res.status().is_success() {
+                        return Err(AppError::source_unavailable(
+                            "ntes-proxy",
+                            format!("GET {url} returned {}", res.status()),
+                        ));
+                    }
+                    let data: Value = res.json().await.map_err(|e| {
+                        AppError::source_unavailable(
+                            "ntes-proxy",
+                            format!("invalid JSON from {url}: {e}"),
+                        )
+                    })?;
+                    // Proxy already returns normalized exceptional shape; pass through.
+                    Ok(data)
+                }
+            }));
+        }
         let data = match fanout_n2(state, candidates, &format!("exceptional:{train}")).await {
             Ok((_, v)) => v,
             Err(e) if matches!(e, AppError::NotFound(_)) => return Err(e),
             Err(e) => {
+                // Honest degradation: only a genuine timeout / circuit-open /
+                // overall-deadline (the live source hanging or IP-blocked)
+                // degrades to a static-local calendar. Any other live failure
+                // (source returned an unexpected shell page, no route, etc.)
+                // propagates as an honest 502 so the UI is never lied to.
                 let msg = e.message().to_lowercase();
-                let is_timeout = msg.contains("timeout") || msg.contains("circuit open") || msg.contains("overall timeout");
+                let is_timeout = msg.contains("timeout")
+                    || msg.contains("circuit open")
+                    || msg.contains("overall timeout");
                 if !is_timeout {
                     return Err(e);
                 }
-                tracing::warn!(train, err=%e.message(), "exceptional: live timed out, serving static empty");
+                if let Some(stale) = state.cache.get_stale(&key) {
+                    if let Some(resp) = map_response(&stale, train, kind, state) {
+                        tracing::warn!(train, err=%e.message(), "exceptional: live down, serving stale cache");
+                        return Ok(resp);
+                    }
+                }
+                tracing::warn!(train, err=%e.message(), "exceptional: live down, serving static empty");
                 let synthetic = serde_json::json!({
                     "train": {"number": train, "name": "", "source": "", "destination": ""},
                     "exceptions": [],
                     "noData": true
                 });
-                let mut response = map_response(&synthetic, train, kind, state)
-                    .ok_or_else(|| AppError::internal("unexpected exception-calendar response shape"))?;
+                let mut response =
+                    map_response(&synthetic, train, kind, state).ok_or_else(|| {
+                        AppError::internal("unexpected exception-calendar response shape")
+                    })?;
                 response.data_source = Some("local".to_string());
                 return Ok(response);
             }

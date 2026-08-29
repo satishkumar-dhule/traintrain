@@ -4,7 +4,7 @@ use serde_json::Value;
 
 use crate::core::cache::keys;
 use crate::core::error::AppError;
-use crate::core::fanout::{Candidate, fanout_n2};
+use crate::core::fanout::{fanout_n2, Candidate};
 use crate::models::LiveStatusResponse;
 use crate::slices::live_status::mapping::{map_response, str_at};
 use crate::state::AppState;
@@ -37,17 +37,15 @@ impl Service {
             }
         }
 
-        // Super fan-out N² deep: NTES + Railyatri (worldwide) + Replit proxy
-        // (high-availability deep delegate when both are IP-blocked in Singapore).
-        // Each retried, first success wins; static local fallback ensures the UI
-        // never sees a 30s hang.
+        // Super fan-out N² deep: NTES + Railyatri (worldwide) + optional
+        // India proxy hedged delegate (when RAILWAY_NTES_PROXY_BASE is set).
+        // Each candidate is 2-deep retried (200ms hedge), first success wins;
+        // static local fallback via ensure_instances guarantees UI never hangs.
         let train_ntes = train.to_string();
         let train_ry = train.to_string();
-        let train_proxy = train.to_string();
         let state_ntes = state.clone();
         let state_ry = state.clone();
-        let state_proxy = state.clone();
-        let candidates = vec![
+        let mut candidates = vec![
             Candidate::new(crate::core::source::metric::NTES, move || {
                 let s = state_ntes.clone();
                 let t = train_ntes.clone();
@@ -58,34 +56,46 @@ impl Service {
                 let t = train_ry.clone();
                 async move { railyatri_norm(&s, &t).await }
             }),
-            Candidate::new("replit-proxy", move || {
-                let t = train_proxy.clone();
+        ];
+        // Optional hedged India proxy — env-driven, no hard-coded dev URL.
+        // When RAILWAY_NTES_PROXY_BASE is set (e.g. Fly bom proxy), race it
+        // with 4s timeout so Singapore IP-block is hedged without code change.
+        if let Some(proxy_base) = state
+            .config
+            .ntes_proxy_base
+            .clone()
+            .filter(|v| !v.is_empty())
+        {
+            let t = train.to_string();
+            let base = proxy_base;
+            candidates.push(Candidate::new("ntes-proxy", move || {
+                let t = t.clone();
+                let base = base.clone();
                 async move {
                     let url = format!(
-                        "https://0e9c30bf-6501-4ddd-a725-0281891f9d2d-00-1172yhblxl1si.pike.replit.dev:3000/rail-api/live-status?train={}",
+                        "{}/rail-api/live-status?train={}",
+                        base.trim_end_matches('/'),
                         urlencoding::encode(&t)
                     );
                     let client = reqwest::Client::builder()
                         .timeout(std::time::Duration::from_secs(4))
                         .build()
-                        .map_err(|e| AppError::source_unavailable("replit-proxy", format!("client build: {e}")))?;
+                        .map_err(|e| AppError::source_unavailable("ntes-proxy", format!("client build: {e}")))?;
                     let res = client
                         .get(&url)
                         .send()
                         .await
-                        .map_err(|e| AppError::source_unavailable("replit-proxy", format!("GET {url}: {e}")))?;
+                        .map_err(|e| AppError::source_unavailable("ntes-proxy", format!("GET {url}: {e}")))?;
                     if !res.status().is_success() {
                         return Err(AppError::source_unavailable(
-                            "replit-proxy",
+                            "ntes-proxy",
                             format!("GET {url} returned {}", res.status()),
                         ));
                     }
                     let data: Value = res
                         .json()
                         .await
-                        .map_err(|e| AppError::source_unavailable("replit-proxy", format!("invalid JSON from {url}: {e}")))?;
-                    // Replit's live-status already has the correct shape (train_number, instances, etc.)
-                    // Convert it back to the normalized Value shape expected by map_response
+                        .map_err(|e| AppError::source_unavailable("ntes-proxy", format!("invalid JSON from {url}: {e}")))?;
                     Ok(serde_json::json!({
                         "train_number": data.get("train_number").and_then(Value::as_str).unwrap_or(&t),
                         "train_name": data.get("train_name").and_then(Value::as_str).unwrap_or(""),
@@ -99,9 +109,10 @@ impl Service {
                         "data_source": data.get("data_source").and_then(Value::as_str).unwrap_or("Railyatri")
                     }))
                 }
-            }),
-        ];
-        let (_winning_metric, mut norm) = fanout_n2(state, candidates, &format!("live_status:{train}")).await?;
+            }));
+        }
+        let (_winning_metric, mut norm) =
+            fanout_n2(state, candidates, &format!("live_status:{train}")).await?;
         // Ensure every live payload has 5 synthetic run dates so date switching
         // works even when the winning source is Erail/Etrain/IndiaRailInfo which
         // don't natively provide vInstanceList. This makes every option honest
@@ -176,7 +187,10 @@ fn ensure_instances(mut norm: Value) -> Value {
     if has_instances {
         return norm;
     }
-    let stops = norm.get("stops").cloned().unwrap_or(Value::Array(Vec::new()));
+    let stops = norm
+        .get("stops")
+        .cloned()
+        .unwrap_or(Value::Array(Vec::new()));
     // Always center on today IST so Today±2 are always valid, regardless of
     // the winning source's train_start_date (e.g. Railyatri 12951's 13-Aug).
     let base = {
@@ -207,7 +221,12 @@ fn ensure_instances(mut norm: Value) -> Value {
     }
     norm["instances"] = Value::Array(instances);
     // Also ensure train_start_date is set for the active run
-    if norm.get("train_start_date").and_then(Value::as_str).unwrap_or("").is_empty() {
+    if norm
+        .get("train_start_date")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .is_empty()
+    {
         let today = base.format("%d-%b-%Y").to_string();
         norm["train_start_date"] = Value::String(today);
     }

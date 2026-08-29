@@ -178,13 +178,17 @@ async fn readyz(State(state): State<AppState>) -> Response {
 
     // Circuit snapshot for per-source state
     let failover_snap = state.failover.snapshot();
-    let circuit_map: std::collections::HashMap<String, (String, bool, u32, Option<u64>)> = failover_snap
-        .into_iter()
-        .map(|s| {
-            let state_str = format!("{:?}", s.state).to_ascii_lowercase();
-            (s.source.clone(), (state_str, s.available, s.consecutive_failures, s.open_secs))
-        })
-        .collect();
+    let circuit_map: std::collections::HashMap<String, (String, bool, u32, Option<u64>)> =
+        failover_snap
+            .into_iter()
+            .map(|s| {
+                let state_str = format!("{:?}", s.state).to_ascii_lowercase();
+                (
+                    s.source.clone(),
+                    (state_str, s.available, s.consecutive_failures, s.open_secs),
+                )
+            })
+            .collect();
 
     let mut upstream_checks: Vec<Value> = Vec::new();
     let mut reachable_count = 0usize;
@@ -207,8 +211,10 @@ async fn readyz(State(state): State<AppState>) -> Response {
             reachable_count += 1;
         }
         let key = name.to_ascii_lowercase();
-        let (circuit_state, available, consecutive_failures, open_secs) =
-            circuit_map.get(&key).cloned().unwrap_or_else(|| ("closed".to_string(), true, 0, None));
+        let (circuit_state, available, consecutive_failures, open_secs) = circuit_map
+            .get(&key)
+            .cloned()
+            .unwrap_or_else(|| ("closed".to_string(), true, 0, None));
         // Determine per-source latency to report: only when reachable, else None
         let latency_opt = if reachable { Some(latency_ms) } else { None };
         upstream_checks.push(json!({
@@ -285,7 +291,11 @@ async fn readyz(State(state): State<AppState>) -> Response {
         "patterns": ["Health Checks", "Graceful Degradation", "Capacity Planning"]
     });
 
-    let status_code = if ready { StatusCode::OK } else { StatusCode::SERVICE_UNAVAILABLE };
+    let status_code = if ready {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    };
     (status_code, Json(body)).into_response()
 }
 
@@ -309,7 +319,10 @@ async fn capacity(State(state): State<AppState>) -> Json<Value> {
     let inflight_sat = (in_flight as f64) > inflight_thr;
     let rps_sat = rps > rps_thr;
 
-    let saturated_count = [cpu_sat, mem_sat, inflight_sat, rps_sat].iter().filter(|&&x| x).count();
+    let saturated_count = [cpu_sat, mem_sat, inflight_sat, rps_sat]
+        .iter()
+        .filter(|&&x| x)
+        .count();
 
     // Recommendation logic — scale up when any critical saturation breached (especially cpu/in_flight), scale down when well below thresholds
     let recommendation = if saturated_count >= 2 || cpu_sat || inflight_sat || rps_sat {
@@ -327,9 +340,17 @@ async fn capacity(State(state): State<AppState>) -> Json<Value> {
 
     // Update Prometheus gauges
     state.telemetry.set_capacity_recommendation(recommendation);
-    state.telemetry.set_capacity_saturated(saturated_count as f64);
+    state
+        .telemetry
+        .set_capacity_saturated(saturated_count as f64);
     // Also update saturation gauges via telemetry.sample for consistency
-    state.telemetry.sample(&snap, cpu, mem_bytes, state.uptime_secs(), state.cache.len());
+    state.telemetry.sample(
+        &snap,
+        cpu,
+        mem_bytes,
+        state.uptime_secs(),
+        state.cache.len(),
+    );
 
     // USE signals
     let use_signals = crate::core::sre::UseSignals::from_snapshot(&snap, cpu, mem_mb);
@@ -468,13 +489,17 @@ async fn source_status(State(state): State<AppState>) -> Json<Value> {
 
     // Snapshot of circuit breaker state
     let failover_snap = state.failover.snapshot();
-    let circuit_map: std::collections::HashMap<String, (String, bool, u32, Option<u64>)> = failover_snap
-        .iter()
-        .map(|s| {
-            let state_str = format!("{:?}", s.state).to_ascii_lowercase();
-            (s.source.clone(), (state_str, s.available, s.consecutive_failures, s.open_secs))
-        })
-        .collect();
+    let circuit_map: std::collections::HashMap<String, (String, bool, u32, Option<u64>)> =
+        failover_snap
+            .iter()
+            .map(|s| {
+                let state_str = format!("{:?}", s.state).to_ascii_lowercase();
+                (
+                    s.source.clone(),
+                    (state_str, s.available, s.consecutive_failures, s.open_secs),
+                )
+            })
+            .collect();
 
     // Also pull live metrics for per-source latency samples
     let snap = state.metrics.snapshot();
@@ -490,8 +515,10 @@ async fn source_status(State(state): State<AppState>) -> Json<Value> {
         let probe_latency_ms = start.elapsed().as_millis() as u64;
 
         let key = name.to_ascii_lowercase();
-        let (circuit_state, available, consecutive_failures, open_secs) =
-            circuit_map.get(&key).cloned().unwrap_or_else(|| ("closed".to_string(), true, 0, None));
+        let (circuit_state, available, consecutive_failures, open_secs) = circuit_map
+            .get(&key)
+            .cloned()
+            .unwrap_or_else(|| ("closed".to_string(), true, 0, None));
 
         // recorded latency from metrics (average) vs probe latency
         let (avg_latency_ms, samples) = latency_map.get(&key).cloned().unwrap_or((0.0, 0));
@@ -519,7 +546,9 @@ async fn source_status(State(state): State<AppState>) -> Json<Value> {
     }
 
     // Ensure telemetry failover gauges are fresh
-    state.telemetry.set_failover_snapshot(&state.failover.snapshot());
+    state
+        .telemetry
+        .set_failover_snapshot(&state.failover.snapshot());
 
     let primary = "NTES (enquiry.indianrail.gov.in)";
     let verification_links = vec![
@@ -624,7 +653,9 @@ mod tests {
         let resp = readyz(axum::extract::State(state)).await;
         // Since dataset and cache are ok, status should be 200 even if upstreams unreachable (degraded)
         assert_eq!(resp.status(), 200);
-        let body_bytes = axum::body::to_bytes(resp.into_body(), 1024*1024).await.unwrap();
+        let body_bytes = axum::body::to_bytes(resp.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
         let v: Value = serde_json::from_slice(&body_bytes).unwrap();
         assert!(v["ready"].as_bool().unwrap());
         assert!(v["checks"]["dataset"]["ok"].as_bool().unwrap());
@@ -643,7 +674,7 @@ mod tests {
         assert!(v["saturation"].is_object());
         assert!(v["recommendation"].is_string());
         let rec = v["recommendation"].as_str().unwrap();
-        assert!(["ok","scale_up","scale_down"].contains(&rec));
+        assert!(["ok", "scale_up", "scale_down"].contains(&rec));
         assert!(v["thresholds"]["cpu"].as_f64().unwrap() > 0.0);
         assert!(v["fine_print"].is_array());
     }
@@ -660,9 +691,15 @@ mod tests {
         assert!(first["circuit_state"].is_string());
         assert!(val["fine_print"].is_array());
         let fp = val["fine_print"].as_array().unwrap();
-        assert!(fp.iter().any(|s| s.as_str().unwrap().contains("Health Checks")));
-        assert!(fp.iter().any(|s| s.as_str().unwrap().contains("Graceful Degradation")));
-        assert!(fp.iter().any(|s| s.as_str().unwrap().contains("Capacity Planning")));
+        assert!(fp
+            .iter()
+            .any(|s| s.as_str().unwrap().contains("Health Checks")));
+        assert!(fp
+            .iter()
+            .any(|s| s.as_str().unwrap().contains("Graceful Degradation")));
+        assert!(fp
+            .iter()
+            .any(|s| s.as_str().unwrap().contains("Capacity Planning")));
     }
 
     #[test]

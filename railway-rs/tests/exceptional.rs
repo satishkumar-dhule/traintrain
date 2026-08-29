@@ -159,7 +159,11 @@ async fn per_train_calendar_is_cached_for_two_hours() {
     let (status, body) = app.get("/rail-api/ntes/exceptional?train=04138").await;
     assert_eq!(status, 200);
     assert_eq!(body["cache_ttl"], 7200);
-    assert_eq!(q_calls(&app), 2, "first request hits upstream twice (N² fan-out)");
+    assert_eq!(
+        q_calls(&app),
+        2,
+        "first request hits upstream twice (N² fan-out)"
+    );
 
     let (status, body) = app.get("/rail-api/ntes/exceptional?train=04138").await;
     assert_eq!(status, 200);

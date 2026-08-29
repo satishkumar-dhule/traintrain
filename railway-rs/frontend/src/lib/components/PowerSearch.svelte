@@ -21,6 +21,7 @@
     { label: 'Station Board', to: '/station' },
     { label: 'Journeys', to: '/journeys' },
     { label: 'Availability', to: '/availability' },
+    { label: 'Chart Vacancy', to: '/chart' },
     { label: 'PNR', to: '/pnr' },
     { label: 'System', to: '/system' }
   ]

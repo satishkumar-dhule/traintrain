@@ -102,7 +102,10 @@ impl IxigoClient {
                     }]
                 }))
             } else {
-                Err(AppError::source_unavailable(SOURCE, "no train table in Ixigo response"))
+                Err(AppError::source_unavailable(
+                    SOURCE,
+                    "no train table in Ixigo response",
+                ))
             }
         } else {
             // Synthetic fallback for high availability (same as ConfirmTkt) — only HYB→AK
@@ -130,7 +133,10 @@ impl IxigoClient {
                     }]
                 }))
             } else {
-                Err(AppError::source_unavailable(SOURCE, "no train table in Ixigo response"))
+                Err(AppError::source_unavailable(
+                    SOURCE,
+                    "no train table in Ixigo response",
+                ))
             }
         }
     }
