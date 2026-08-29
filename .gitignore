@@ -7,3 +7,13 @@ coverage/
 *.log
 .env*
 !.env.example
+# kaizen/space-janitor runtime — never commit secrets or pid/lock
+.kaizen/config.env
+.kaizen/pid
+.kaizen/lock
+.kaizen/HEARTBEAT
+.kaizen/status.json
+.kaizen/logs/
+# local auth tokens (protect even if system gitignore is absent)
+.config/
+.local/

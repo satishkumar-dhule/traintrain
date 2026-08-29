@@ -180,10 +180,26 @@ pub async fn fanout_n2(
         let fut = async move {
             let mut first_err: Option<AppError> = None;
             for attempt in 0..2 {
-                // Bounded hedging: acquire global fanout permit for this attempt.
-                // Holds for the duration of the upstream call + timeout; queued
-                // waiters naturally respect overall deadline via outer timeout.
-                let _permit = state_clone.fanout_limiter.acquire().await.unwrap();
+                // Bounded hedging: acquire global fanout permit for this attempt,
+                // but never burn the whole 10.5s deadline queueing. A short
+                // 800ms acquire budget degrades to a fast per-candidate fail
+                // that lets the other hedged candidates win (fleet finding).
+                let _permit = match tokio::time::timeout(
+                    Duration::from_millis(800),
+                    state_clone.fanout_limiter.acquire(),
+                )
+                .await
+                {
+                    Ok(p) => p.unwrap(),
+                    Err(_) => {
+                        tracing::warn!(source = metric, query = %query_owned, attempt, "fanout: semaphore acquire timed out");
+                        // do not trip the circuit breaker — this is back-pressure, not a health signal
+                        return Err(AppError::source_unavailable(
+                            metric,
+                            "semaphore acquire timeout (fanout back-pressure)",
+                        ));
+                    }
+                };
                 let started = std::time::Instant::now();
                 let inner = (factory)();
                 let res = tokio::time::timeout(PER_SOURCE_TIMEOUT, inner).await;

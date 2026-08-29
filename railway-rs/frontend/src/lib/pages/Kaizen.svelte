@@ -52,7 +52,7 @@
   }
 
   const MICRO_LABEL = 'text-xs font-semibold uppercase tracking-wider text-muted-foreground'
-  const TILE_TITLE = 'text-[10px] font-medium uppercase tracking-wide text-muted-foreground lg:text-xs'
+  const TILE_TITLE = 'text-xs font-medium uppercase tracking-wide text-muted-foreground'
   const TILE_VALUE = 'data-num text-lg font-semibold tabular-nums lg:text-2xl'
   const TILE_CARD = 'gap-1 py-2 lg:gap-2 lg:py-4'
 
@@ -115,6 +115,16 @@
 
   const committedRuns = $derived(runsNewest.filter((r) => r.commit))
 
+  const daemonStale = $derived.by(() => {
+    if (daemon.phase !== 'ok' || data.phase !== 'ok') return null
+    const dTs = Date.parse(daemon.data?.ts || '')
+    const kTs = Date.parse(data.data?.updated_ts || runsNewest[0]?.ts || '')
+    if (!Number.isFinite(dTs) || !Number.isFinite(kTs)) return null
+    const diffMin = Math.round((dTs - kTs) / 60000)
+    if (Math.abs(diffMin) > 5) return `${Math.abs(diffMin)} min ${diffMin > 0 ? 'ahead of' : 'behind'} data`
+    return null
+  })
+
   const heroTiles = $derived.by(() => {
     const latest = runsNewest[0]
     return [
@@ -153,15 +163,14 @@
     ]
   })
 
-  /* 0-byte rows or a large "before" with the same units still carry a real
-     before→after fact; only render it when it shows a change. */
   function afterText(r) {
-    if (r.after?.assets !== undefined && num(r.after.assets) !== null && num(r.before?.assets) !== null) {
-      return `${r.before.assets} → ${r.after.assets} bundles`
-    }
-    if (num(r.before?.bytes) !== null && num(r.after?.bytes) !== null) {
-      return `${humanBytes(r.before.bytes)} → ${humanBytes(r.after.bytes)}`
-    }
+    const bA = num(r.before?.assets), aA = num(r.after?.assets)
+    if (bA !== null && aA !== null && bA !== aA) return `${r.before.assets} → ${r.after.assets} bundles`
+    const bB = num(r.before?.bytes), aB = num(r.after?.bytes)
+    if (bB !== null && aB !== null && bB !== aB) return `${humanBytes(r.before.bytes)} → ${humanBytes(r.after.bytes)}`
+    // no change in the primary metric — show the one that has data
+    if (bA !== null && aA !== null) return `${aA} bundles`
+    if (bB !== null && aB !== null) return humanBytes(aB)
     return '—'
   }
 
@@ -180,16 +189,33 @@
     const pct = Math.abs(d).toFixed(1)
     if (bundle && d < 0) return `−${pct}%`
     if (!bundle && d > 0) return `+${pct}%`
-    return `${d > 0 ? '+' : ''}${pct}%`
+    return `${d > 0 ? '+' : d < 0 ? '−' : ''}${pct}%`
   }
 
+  function sourceLabel(r) {
+    const s = String(r.source || '')
+    if (s === 'llm') return 'LLM'
+    if (s === 'deterministic') return 'deterministic'
+    if (s === 'scan') return 'scan'
+    return s || '—'
+  }
+  function gatesText(r) {
+    const g = r.gates
+    if (!g || typeof g !== 'object') return '—'
+    const parts = []
+    if (g.fmt) parts.push(`fmt:${g.fmt}`)
+    if (g.clippy) parts.push(`clippy:${g.clippy}`)
+    if (g.imports) parts.push(`imports:${g.imports}`)
+    return parts.join(' · ') || '—'
+  }
   const runCols = [
     { key: 'run', label: 'Run', class: 'w-14', cellClass: 'data-num text-xs', value: (r) => `#${r.run}`, sortValue: (r) => num(r.run) ?? 0 },
     { key: 'pick', label: 'What improved', cellClass: 'font-medium', value: (r) => pickLabel(r.pick), sortValue: (r) => String(r.pick) },
     { key: 'dimension', label: 'Dimension', class: 'w-32', value: (r) => dimLabel(r.dimension), sortValue: (r) => String(r.dimension) },
-    { key: 'delta', label: 'Δ', class: 'w-20', cellClass: 'data-num text-xs', value: (r) => '', sortValue: (r) => Math.abs(num(r.delta_pct) ?? 0) },
+    { key: 'delta', label: 'Δ', class: 'w-20', cellClass: 'data-num text-xs', value: (r) => '', sortValue: (r) => num(r.delta_pct) ?? 0 },
     { key: 'after', label: 'Before → after', cellClass: 'data-num text-xs', value: afterText, sortValue: () => 0 },
-    { key: 'source', label: 'Found by', class: 'w-20', value: (r) => (r.source === 'llm' ? 'llm' : 'scan'), sortValue: (r) => (r.source === 'llm' ? 1 : 0) },
+    { key: 'source', label: 'Found by', class: 'w-20', value: sourceLabel, sortValue: (r) => (r.source === 'llm' ? 2 : r.source === 'deterministic' ? 1 : 0) },
+    { key: 'gates', label: 'Gates', class: 'w-28', cellClass: 'text-xs', value: gatesText, sortValue: () => 0 },
     { key: 'date', label: 'Date', class: 'w-24', cellClass: 'data-num text-xs', value: (r) => String(r.ts || '').slice(0, 10) },
     { key: 'commit', label: 'Commit', class: 'w-20', cellClass: 'data-num font-mono text-xs', value: (r) => String(r.commit || '').slice(0, 7), sortValue: (r) => String(r.commit || '') }
   ]
@@ -209,8 +235,10 @@
     <StatusBadge tone="info" dot>
       <span class="inline-flex items-center gap-1"><Sparkles class="size-3" />LLM</span>
     </StatusBadge>
+  {:else if r.source === 'deterministic'}
+    <StatusBadge tone="neutral">deterministic</StatusBadge>
   {:else}
-    <StatusBadge tone="neutral">scan</StatusBadge>
+    <StatusBadge tone="neutral">{sourceLabel(r)}</StatusBadge>
   {/if}
 {/snippet}
 
@@ -232,17 +260,27 @@
   <TrackRule />
 
   {#if daemon.phase === 'ok' && daemon.data}
+    {@const rc = daemon.data.last_rc}
+    {@const rcTone = rc === 0 ? 'bg-signal-go animate-pulse' : rc === 2 ? 'bg-signal-hold' : 'bg-destructive'}
+    {@const rcText = rc === 0 ? 'committed' : rc === 2 ? 'no auto-fix' : `rc=${rc ?? '?'}`}
     <div class="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
       <span class="inline-flex items-center gap-1.5">
-        <span class="size-2 rounded-full bg-signal-go {daemon.data.last_rc === 0 ? 'animate-pulse' : ''}"></span>
-        autonomous daemon — cycle {daemon.data.cycle}
+        <span class="size-2 rounded-full {rcTone}"></span>
+        autonomous daemon — cycle {daemon.data.cycle ?? '—'} · {rcText}
       </span>
       <span class="hidden sm:inline">·</span>
       <span>last: {daemon.data.last_pick || '—'} {daemon.data.last_delta_pct ? `Δ ${daemon.data.last_delta_pct}%` : ''}</span>
       <span class="hidden sm:inline">·</span>
       <span>next in ~{Math.max(0, Math.round((daemon.data.next_cycle_secs || 3600) / 60))} min</span>
       <span class="hidden sm:inline">·</span>
-      <span class="data-num">{daemon.data.runs_total} runs · {daemon.data.innovations_unique} unique innovations</span>
+      <span class="data-num">{daemon.data.runs_total ?? '—'} runs · {daemon.data.innovations_unique ?? '—'} unique</span>
+      {#if daemon.data.ts}
+        <span class="hidden sm:inline">·</span>
+        <span class="data-num" title={daemon.data.ts}>{String(daemon.data.ts).slice(0,16).replace('T',' ')}</span>
+      {/if}
+      {#if daemonStale}
+        <span class="inline-flex items-center gap-1 rounded bg-signal-hold/15 px-1.5 py-0.5 text-[11px] font-medium text-signal-hold-ink">⚠ data {daemonStale}</span>
+      {/if}
     </div>
   {/if}
 
@@ -278,7 +316,7 @@
               </span>
             </Card.Content>
             <Card.Content class="px-3 lg:px-4">
-              <p class="text-[10px] leading-tight text-muted-foreground lg:text-[11px]">{t.sub}</p>
+              <p class="text-xs leading-tight text-muted-foreground">{t.sub}</p>
             </Card.Content>
           </Card.Root>
         {/each}

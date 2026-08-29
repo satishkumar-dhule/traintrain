@@ -118,9 +118,15 @@ run_cycle() {
     bash "$KAIZEN_RUN" --research >"$out_file" 2>&1
     rc=$?
     set -e
-    # scrape pick/delta for status
+    # scrape pick/delta for status — for rc=0 prefer the real committed delta
     pick=$(grep -m1 "^pick:" "$out_file" 2>/dev/null | sed -E 's/^pick: ([^ ]+).*/\1/' || echo "")
     delta=$(grep -m1 "^pick:" "$out_file" 2>/dev/null | sed -E 's/.*Δ ([^%]+)%.*/\1/' || echo "")
+    if [ "$rc" -eq 0 ]; then
+      c_pick=$(grep -m1 "^committed:" "$out_file" 2>/dev/null | awk '{print $4}' || echo "")
+      c_delta=$(grep -m1 "^committed:" "$out_file" 2>/dev/null | awk '{print $5}' | tr -d '%' || echo "")
+      if [ -n "$c_pick" ]; then pick="$c_pick"; fi
+      if [ -n "$c_delta" ]; then delta="$c_delta"; fi
+    fi
     # keep last 80 lines in log
     tail -n 80 "$out_file" >>"$LOG_FILE" 2>/dev/null || true
     # heartbeat line

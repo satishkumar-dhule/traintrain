@@ -28,6 +28,90 @@ function sh(cmd, opts = {}) {
   try { return { ok: true, out: execSync(cmd, { encoding: 'utf8', cwd: ROOT, timeout: 12000, stdio: ['pipe','pipe','pipe'], ...opts }).trim() } }
   catch (e) { return { ok: false, out: (e.stdout||'') + '\n' + (e.stderr||''), err: e } }
 }
+
+// ---------------------------------------------------------------------------
+// Proof-command sandbox. LLM-supplied `proof_command` runs with full user
+// privileges, so it is gated to a read-only allowlist BEFORE execution:
+//   - only known read-only tools per pipe segment
+//   - no destructive git/subprocess/build tools, no `-e`/`-c` code exec
+//   - no file redirection except `>/dev/null`, no brace/command-subst chains
+// ---------------------------------------------------------------------------
+const SAFE_PROGRAMS = new Set([
+  'grep','rg','egrep','fgrep','wc','ls','du','cat','head','tail','cut','sort','uniq','tr',
+  'sed','awk','nl','expr','bc','printf','echo','env','date','stat','file','basename','dirname',
+  'seq','true','false','git','find','node','curl','jq','sha1sum','md5sum','readlink','realpath',
+])
+const GIT_READONLY = new Set(['log','status','diff','rev-parse','show','ls-files','shortlog','grep','remote'])
+const CMD_WORDS = /^\s*([A-Za-z_][A-Za-z0-9_]*)/
+
+function stripQuotes(s) {
+  s = s.trim()
+  if (s.length >= 2) {
+    const q = s[0]
+    if ((q === '"' || q === "'") && s.endsWith(q)) return s.slice(1,-1)
+  }
+  return s
+}
+
+function denyProof(cmd, why) {
+  return { allowed:false, why }
+}
+
+function proofAllowed(cmd) {
+  const c = String(cmd||'').trim()
+  if (!c) return denyProof(c, 'empty')
+  if (c.length > 400) return denyProof(c, 'too-long')
+
+  // 1) destructive / privilege / build tools — never permitted. Standalone
+  //    tokens only (lookbehind: a flag like `-sh` or path `pwd.go` is NOT a tool).
+  const banned = /(?<![\w-])(rm|mv|cp|dd|touch|truncate|tee|shred|mkfs[\w.]*|chmod|chown|chgrp|ln|mount|umount|fdisk|tar|gzip|bzip2|xz|zip|unzip|7z|rar|scp|rsync|rclone|install|sudo|su|kill|pkill|killall|pwd|whoami|useradd|usermod|passwd|make|cargo|npm|npx|pnpm|yarn|deno|bun|python|python3|perl|ruby|bash|zsh|sh)\b/.test(c)
+  if (banned) return denyProof(c, 'banned-tool')
+
+  // 2) git only in read-only forms.
+  if (/\bgit\s+[a-z@]/.test(c)) {
+    const gm = c.match(/\bgit\s+([a-z@-]+)/)
+    if (!gm || !GIT_READONLY.has(gm[1])) return denyProof(c, 'git-non-readonly')
+  }
+
+  // 3) shell metacharacter / substitution / mutation-flag injection.
+  if (/[`;]/.test(c) || /\$\(/.test(c) || /\$\{/.test(c)) return denyProof(c, 'code-injection')
+  if (/[\s;|&](-delete|-exec|-ok)\b/.test(c)) return denyProof(c, 'mutate-flag')
+  if (/\b(node|curl|find|awk|sed)\s+(-e|-c|--execute)\b/.test(c)) return denyProof(c, 'inline-exec')
+  if (/\bcurl\b[^|]*\s(-o|-O|--output|--output-dir|--create-dirs|--proxy)\b/.test(c)) return denyProof(c, 'curl-write')
+  if (/\bsed\s+-i\b/.test(c)) return denyProof(c, 'sed-inplace')
+  if (/\b(node|curl|git)\b[\s]*[|><]\s*(>|\|)\s*\S+/.test(c)) return denyProof(c, 'pipe-to-write')
+
+  // 4) file redirection: only `N>/dev/null`, `N>&M`, `N>&-` forms allowed.
+  const stripped = c
+    .replace(/[0-9]?[<>]\/dev\/null/g, '')   // 2>/dev/null, >/dev/null
+    .replace(/[0-9]?[<>]&[0-9]?/g, '')       // 2>&1, 1>&2, 2>&-, >&1
+  if (/[<>]/.test(stripped)) return denyProof(c, 'file-redirect')
+  // 5) `|` pipe is fine (allows grep | wc), but a bare `|` joining to a
+  //    non-pipe segment is rejected by per-segment tool checks below.
+
+  // 6) per-pipe-segment allowlist: first token of each segment is the binary.
+  const segments = c.split(/\s*\|\s*/)
+  for (const seg of segments) {
+    let s = seg.trim()
+    // strip leading env assignments (FOO=bar tool ...) — harmless for read-only tools
+    while (/^[A-Za-z_][A-Za-z0-9_]*=(\S+)?\s/.test(s)) s = s.replace(/^[A-Za-z_][A-Za-z0-9_]*=(\S+)?\s/, '')
+    const m = CMD_WORDS.exec(s)
+    const prog = stripQuotes(m ? m[1] : '')
+    if (!SAFE_PROGRAMS.has(prog)) return denyProof(c, `unsafe-tool:${prog||'?'}`)
+    if (prog === 'node') {
+      // node must run a repo script, never `-e`/`-p` code or stdin
+      const body = s.slice(m[0].length).trim()
+      if (/-e\b|-p\b|--eval/.test(body)) return denyProof(c, 'node-eval')
+      if (!/\.(mjs|js|cjs)$/.test(stripQuotes(body.split(/\s+/)[0]||''))) return denyProof(c, 'node-not-script')
+    }
+    if (prog === 'curl') {
+      const body = s.slice(m[0].length)
+      if (!/\blocalhost(:|\s|\/)|127\.0\.0\.1/.test(body)) return denyProof(c, 'curl-nonlocal')
+    }
+  }
+
+  return { allowed:true }
+}
 function exists(p) { try { statSync(p); return true } catch { return false } }
 function readJson(p, fb) { try { return JSON.parse(readFileSync(p,'utf8')) } catch { return fb } }
 function writeJson(p, o) { writeFileSync(p, JSON.stringify(o, null, 2) + '\n') }
@@ -154,7 +238,7 @@ function buildProviders() {
 // Idea bank (dedup across runs)
 // ---------------------------------------------------------------------------
 const bank = readJson(BANK, { version:1, ideas: [] })
-const bankFps = new Set((bank.ideas||[]).slice(-8).map(i=>i.fp))
+const bankFps = new Set((bank.ideas||[]).map(i=>i.fp))
 
 function fpOf(id, proof) { return crypto.createHash('sha1').update(`${id}::${proof}`).digest('hex').slice(0,16) }
 
@@ -178,6 +262,9 @@ function validateIdea(raw, recentPicks) {
   const fp = fpOf(id, proof)
   if (bankFps.has(fp)) return { skip:'bank' }
   if ((recentPicks||[]).includes(id)) return { skip:'recent' }
+
+  const safe = proofAllowed(proof)
+  if (!safe.allowed) return { skip:'unsafe-proof', why: safe.why }
 
   const r = sh(proof)
   if (!r.ok) return { skip:'proof-failed', stderr: r.out.slice(0,160) }

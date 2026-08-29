@@ -340,6 +340,12 @@ if (doFix) {
   }
   console.log(`\n--fix: auto-fixing ${top.id} ...`)
   if (top.id === 'fmt-drift') {
+    const beforeDirty = sh('git status --porcelain | grep "\\.rs$" | cut -c4- | head -20')
+    if (beforeDirty.trim()) {
+      console.log(`fmt-drift auto-fix skipped — ${beforeDirty.split('\n').filter(Boolean).length} dirty .rs file(s) in working tree (would churn user work)`)
+      console.log('manual: run `cargo fmt --all` when your tree is clean, or fmt the specific file you touched')
+      process.exit(0)
+    }
     execSync(`bash -c 'export PATH="$HOME/.cargo/bin:$PATH"; export CARGO_HOME="$HOME/.cargo"; cargo fmt --manifest-path railway-rs/Cargo.toml --all'`, { stdio: 'inherit', cwd: ROOT })
     console.log('fmt applied')
   } else if (top.id === 'stale-assets-prune') {
