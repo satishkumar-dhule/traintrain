@@ -1,11 +1,14 @@
 {
   "version": 1,
+  "updated_ts": "2026-08-29T03:20:03.570Z",
   "runs": [
     {
-      "ts": "2026-08-29T02:44:37Z",
       "run": 1,
+      "ts": "2026-08-29T02:44:37Z",
       "pick": "stale-assets-prune",
       "dimension": "bundle/disk",
+      "source": "deterministic",
+      "delta_pct": -47.3,
       "before": {
         "bytes": 3667324,
         "gzip": 751121,
@@ -16,20 +19,20 @@
         "gzip": 250630,
         "assets": 1
       },
-      "delta_pct": -47.3,
       "gates": {
         "fmt": "pass",
         "clippy": "pass",
         "imports": "pass"
       },
-      "commit": "8e04b4b",
-      "source": "deterministic"
+      "commit": "8e04b4b"
     },
     {
-      "ts": "2026-08-29T03:04:42Z",
       "run": 2,
+      "ts": "2026-08-29T03:04:42Z",
       "pick": "fmt-drift",
       "dimension": "quality/code-health",
+      "source": "deterministic",
+      "delta_pct": 100,
       "before": {
         "bytes": 1927975,
         "gzip": 250630,
@@ -40,21 +43,20 @@
         "gzip": 250630,
         "assets": 1
       },
-      "delta_pct": 100,
       "gates": {
         "fmt": "pass",
         "clippy": "pass",
         "imports": "pass"
       },
-      "commit": "49fd67d",
-      "source": "deterministic"
+      "commit": "49fd67d"
     },
     {
-      "ts": "2026-08-29T03:20:03Z",
       "run": 3,
+      "ts": "2026-08-29T03:20:03Z",
       "pick": "stale-embed-prune",
       "dimension": "bundle/disk",
       "source": "deterministic",
+      "delta_pct": -0.1,
       "before": {
         "bytes": 2815517,
         "gzip": 505347,
@@ -65,7 +67,6 @@
         "gzip": 505347,
         "assets": 2
       },
-      "delta_pct": -0.1,
       "gates": {
         "fmt": "pass",
         "clippy": "pass",
